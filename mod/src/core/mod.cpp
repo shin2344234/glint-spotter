@@ -576,6 +576,38 @@ namespace
         // Early passes hunt for something that may not exist yet, so they come
         // quickly. Once everything is in hand a tick is one pointer read each and
         // the address space is left alone.
+        // The essential object first, on its own. One needle over resident
+        // memory is a few seconds, and the player, the flash flag and the
+        // detect component all hang off it. Session fifteen's presses came
+        // before the general sweep reached it.
+        for (size_t i = 0; i < g_count; ++i)
+        {
+            Target& t = g_targets[i];
+            if (!strstr(t.info.name, "ClientSpecialModeActorComponent") || t.object) continue;
+            const uintptr_t needle = t.info.vtableVa;
+            const size_t bytes = t.objectBytes;
+            gs::scan::Options opt;
+            opt.needleBytes = &bytes;
+            opt.timeBudgetMs = 20000;
+            opt.maxRegionBytes = 1024ull * 1024 * 1024;
+            std::vector<gs::scan::Hit> hits;
+            const gs::scan::Report rep = gs::scan::FindPointers(&needle, 1, hits, opt);
+            GS_LOG("fast pass for the special mode component: %zu hit(s) in %llu ms",
+                   hits.size(), static_cast<unsigned long long>(rep.microseconds / 1000));
+            DropPointerTables(hits);
+            for (const gs::scan::Hit& h : hits)
+            {
+                if (!h.object) continue;
+                t.object = h.object;
+                if (!Describe(t)) { t.object = nullptr; continue; }
+                gs::tick::AddProbe("special", t.object, 0x400);
+                gs::player::SetSpecialComponent(t.object);
+                GS_LOG_OK("special mode component ready at 0x%p; the trigger works from here", t.object);
+                break;
+            }
+            break;
+        }
+
         int pass = 0;
         int idle = 0;
         while (!g_stop.load())

@@ -185,6 +185,14 @@ extern "C" void gs_OnMinimapTick(void* self)
     if (g_markPending.exchange(false))
     {
         const gs::player::Pos pp = gs::player::Read();
+        if (!pp.valid)
+        {
+            // Session fifteen: four presses in the first half minute, all
+            // before the scan had found the player, all read as failures.
+            GS_LOG_ERR("[mark] NOT READY: the player's special mode component has not been located yet. "
+                       "Wait for '[player] position' in this log, then press again.");
+            return;
+        }
         const bool flash = gs::aim::FlashActive();
         GS_LOG("[mark] requested. player at (%.3f, %.3f, %.3f), flash %s",
                pp.x, pp.y, pp.z, flash ? "on" : "off");
