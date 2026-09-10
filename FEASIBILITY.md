@@ -584,3 +584,65 @@ capstone; it uses the installed one, and prefers a local `vendor` folder if one
 is ever added. `qref.py` gained the usage docstring it never had. Each carries a
 line saying where it came from and when, so a future divergence from Master
 Looter's copies is visible rather than silent.
+
+## Confirmed at runtime: the controller pointer, read-only
+
+Session six, 10 September 2026, probe 0.1.0. No hooks, nothing called.
+
+Both root controls were found by scanning resident private memory for their
+vtable pointers, and both held for the whole session, six passes and a map open:
+
+```
+UIGamePlayControlRootWorldMap   0x0000034E7D82EE00   region 0x34E7A000000 +0x43B0000
+   slot 170 create icon         0x0000000140D2F620
+   +00 000000014555CC70  +08 0000034F5F0B5500  +10 0000000000000000
+
+UIGamePlayControlRootMiniMap    0x0000034F5F567E00   region 0x34F5DC20000 +0x71A0000
+   slot 170 create icon         0x0000000140D801E0
+   +00 000000014555DF70  +08 0000034F69613C00  +10 0000000000000000
+```
+
+Slot 170 on each is the dispatcher static analysis named, to the byte. The
+world map root existed in pass one, eighteen seconds after launch and before the
+map was opened, so the controls are built at UI startup and kept. That is what
+makes a cached pointer safe.
+
+Slot 35 on both reads `0x7FF854...`, outside the game module: Crimson Route's
+detour, visible in the vtable from the outside. Route's own logs said it owned
+that slot and this is the first independent confirmation.
+
+Exactly one of each. There is no ambiguity about which instance is live.
+
+### What it cost to get here
+
+Six sessions, three of them mine to answer for.
+
+- Session one: the log opened in the CRT's Unicode mode and the first narrow
+  write took the game down at startup. Fixed, plus an invalid parameter handler.
+- Session two: every one of 112 hits was an entry in a table pairing vtables with
+  their RTTI names. A hit whose `+08` is itself a vtable, or a region answering to
+  many classes at once, is now discarded.
+- Sessions three and four: scans timed out having read a fraction of memory.
+  Touching a committed page that is not resident costs a soft fault per page,
+  about a fortieth of the throughput; the probe now asks Windows which pages are
+  in the working set and reads only those.
+- Session five: crash to desktop. Map icons are freed each time the map closes,
+  and my reads of a candidate had a pre-check but no exception guard. Every read
+  of game memory is inside a handler now, with a last one on the thread entry.
+- Session six: both pointers, stable.
+
+The self test, which builds an object of its own and hunts for it before each
+session, is what turned "no result" from a mystery into a measurement.
+
+### Next
+
+The next step is the first write-class action: calling slot 170 on the cached
+world map controller with a real position. It needs the fourteen arguments from
+the section above filled in, and the first attempt should be made with the map
+open and the game saved, because a wrong argument is a crash. That call is the
+point of the whole exercise and it does not get made without a decision.
+
+Two smaller things for the next build. Regions over 256 MB are still skipped and
+pass four skipped one of 275 MB; with residency filtering the size cap costs
+little and should rise. And the slot counter walks past the end of short vtables,
+so the slot count it logs is only meaningful for the two root controls.
