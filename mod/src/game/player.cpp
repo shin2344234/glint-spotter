@@ -20,10 +20,17 @@ namespace
     constexpr uintptr_t kOff_Tf_Pos        = 0xB4;
     constexpr uintptr_t kOff_Tf_ParentEid  = 0xC8;
     constexpr uintptr_t kOff_Tf_ParentPos  = 0xEC;
+    // Session seventeen: the transform also carries the world position, the
+    // one the map draws, at +0x29C, with copies at +0x324, +0x3D0 and +0x51C.
+    // +0xB4 is local to the sub-level; the two differed by (-9000, 0, -4000)
+    // where the player stood, and a pin placed from the local one landed 9 km
+    // from the player on the map.
+    constexpr uintptr_t kOff_Tf_WorldPos   = 0x29C;
 
     std::atomic<void*> g_comp{nullptr};
     std::atomic<uintptr_t> g_actor{0};
     std::atomic<uintptr_t> g_detect{0};
+    std::atomic<uintptr_t> g_charctl{0};
     std::mutex g_mutex;
     gs::player::Pos g_last;
     int g_describeLeft = 3;   // first few reads log the whole walk
@@ -42,7 +49,7 @@ namespace
     }
 
     // The whole walk in one guarded leaf, plain data out.
-    bool Walk(uintptr_t comp, float* out, uintptr_t* actorOut, uintptr_t* tfOut, uint32_t* parentOut)
+    bool Walk(uintptr_t comp, float* out, float* world, uintptr_t* actorOut, uintptr_t* tfOut, uint32_t* parentOut)
     {
         __try
         {
@@ -52,7 +59,8 @@ namespace
             if (!comps) return false;
             const uintptr_t tf = Deref(comps + kOff_Comps_Transform);
             if (!tf) return false;
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(tf), kOff_Tf_ParentPos + 12)) return false;
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(tf), kOff_Tf_WorldPos + 12)) return false;
+            memcpy(world, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
 
             float v[3], pw[3];
             memcpy(v, reinterpret_cast<const void*>(tf + kOff_Tf_Pos), sizeof(v));
@@ -104,10 +112,10 @@ namespace gs::player
         const auto comp = reinterpret_cast<uintptr_t>(g_comp.load());
         if (!comp) return p;
 
-        float v[3]{};
+        float v[3]{}, w[3]{};
         uintptr_t actor = 0, tf = 0;
         uint32_t parent = 0;
-        if (!Walk(comp, v, &actor, &tf, &parent))
+        if (!Walk(comp, v, w, &actor, &tf, &parent))
         {
             if (g_describeLeft > 0)
             {
@@ -138,11 +146,17 @@ namespace gs::player
         {
             --g_describeLeft;
             Describe(comp, actor, tf);
-            GS_LOG_OK("[player] position (%.3f, %.3f, %.3f), parent id 0x%08X",
-                      v[0], v[1], v[2], parent);
+            GS_LOG_OK("[player] local (%.3f, %.3f, %.3f) world (%.3f, %.3f, %.3f) origin (%.1f, %.1f, %.1f), parent id 0x%08X",
+                      v[0], v[1], v[2], w[0], w[1], w[2], w[0] - v[0], w[1] - v[1], w[2] - v[2], parent);
         }
 
-        p.x = v[0]; p.y = v[1]; p.z = v[2]; p.valid = true;
+        const bool worldOk = std::isfinite(w[0]) && std::isfinite(w[1]) && std::isfinite(w[2]) &&
+                             std::fabs(w[0]) + std::fabs(w[1]) + std::fabs(w[2]) < 1.0e6f;
+        if (!worldOk) return p;
+        p.lx = v[0]; p.ly = v[1]; p.lz = v[2];
+        p.x = w[0]; p.y = w[1]; p.z = w[2];
+        p.ox = w[0] - v[0]; p.oy = w[1] - v[1]; p.oz = w[2] - v[2];
+        p.valid = true;
         if (g_actor.load() != actor)
         {
             g_actor.store(actor);
@@ -162,6 +176,12 @@ namespace gs::player
                     GS_LOG_OK("[player] detect component at block+0x%llX -> 0x%p",
                               static_cast<unsigned long long>(off), reinterpret_cast<void*>(c));
                 }
+                if (n && strstr(n, "ClientCharacterControlActorComponent"))
+                {
+                    g_charctl.store(c);
+                    GS_LOG_OK("[player] character control at block+0x%llX -> 0x%p",
+                              static_cast<unsigned long long>(off), reinterpret_cast<void*>(c));
+                }
             }
         }
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -177,4 +197,5 @@ namespace gs::player
 
     uintptr_t Actor() { return g_actor.load(); }
     uintptr_t DetectComponent() { return g_detect.load(); }
+    uintptr_t CharacterControlComponent() { return g_charctl.load(); }
 }

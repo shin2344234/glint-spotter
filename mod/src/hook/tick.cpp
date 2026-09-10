@@ -193,19 +193,39 @@ extern "C" void gs_OnMinimapTick(void* self)
             return;
         }
         const bool flash = gs::aim::FlashActive();
-        GS_LOG("[mark] requested. player at (%.3f, %.3f, %.3f), flash %s",
-               pp.x, pp.y, pp.z, flash ? "on" : "off");
+        GS_LOG("[mark] requested. player world (%.3f, %.3f, %.3f) local (%.3f, %.3f, %.3f), flash %s",
+               pp.x, pp.y, pp.z, pp.lx, pp.ly, pp.lz, flash ? "on" : "off");
 
-        // Pointer search first, cheap, in case the game does hold an actor.
-        gs::aim::Target t = gs::aim::Resolve();
-        float tx = t.x, ty = t.y, tz = t.z;
-        bool have = t.valid;
-        const char* how = "actor pointer";
+        // Everything read off the actor is in the sub-level's local space, and
+        // the map wants world space. The origin comes from the transform's own
+        // two positions, so it is right for whatever sub-level this is.
+        float tx = 0, ty = 0, tz = 0;
+        bool have = false;
+        const char* how = "";
 
-        // Then the snapshot and diff, which is what this session is for.
-        const gs::snapshot::Found f = gs::snapshot::PressAndDiff(
-            gs::player::Actor(), gs::aim::DetectTask(), pp.x, pp.y, pp.z);
-        if (!have && f.valid) { have = true; tx = f.x; ty = f.y; tz = f.z; how = f.how; }
+        // The aim point, which is the whole feature in one read.
+        float a[3];
+        if (gs::aim::AimPointLocal(gs::player::CharacterControlComponent(), pp.lx, pp.ly, pp.lz, a))
+        {
+            tx = a[0] + pp.ox; ty = a[1] + pp.oy; tz = a[2] + pp.oz;
+            have = true;
+            how = "aim point at character control +0x318";
+            GS_LOG("[mark] aim point local (%.2f, %.2f, %.2f) -> world (%.2f, %.2f, %.2f)",
+                   a[0], a[1], a[2], tx, ty, tz);
+        }
+
+        // Fallbacks: an actor pointer, then the snapshot diff. Both local.
+        if (!have)
+        {
+            gs::aim::Target t = gs::aim::Resolve();
+            if (t.valid) { have = true; tx = t.x + pp.ox; ty = t.y + pp.oy; tz = t.z + pp.oz; how = "actor pointer"; }
+        }
+        if (!have)
+        {
+            const gs::snapshot::Found f = gs::snapshot::PressAndDiff(
+                gs::player::Actor(), gs::aim::DetectTask(), pp.lx, pp.ly, pp.lz);
+            if (f.valid) { have = true; tx = f.x + pp.ox; ty = f.y + pp.oy; tz = f.z + pp.oz; how = f.how; }
+        }
 
         if (have)
         {

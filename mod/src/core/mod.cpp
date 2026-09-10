@@ -615,9 +615,9 @@ namespace
                 // than on the next probe sample, and say READY only when both
                 // are in hand, because the press needs both.
                 const gs::player::Pos pp = gs::player::Read();
-                if (pp.valid && gs::player::DetectComponent())
-                    GS_LOG_OK("READY: player at (%.1f, %.1f, %.1f), detect component found. "
-                              "Press once aimed at nothing, then once aimed at a glint.", pp.x, pp.y, pp.z);
+                if (pp.valid && gs::player::DetectComponent() && gs::player::CharacterControlComponent())
+                    GS_LOG_OK("READY: player world (%.1f, %.1f, %.1f), origin (%.0f, %.0f, %.0f). "
+                              "Aim the flash at a glint and press.", pp.x, pp.y, pp.z, pp.ox, pp.oy, pp.oz);
                 else
                     GS_LOG("special mode component found; player walk %s, detect component %s",
                            pp.valid ? "ok" : "pending", gs::player::DetectComponent() ? "ok" : "pending");

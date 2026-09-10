@@ -19,7 +19,9 @@ namespace gs::player
 {
     struct Pos
     {
-        float x = 0, y = 0, z = 0;
+        float x = 0, y = 0, z = 0;       // world, what the map draws
+        float lx = 0, ly = 0, lz = 0;    // local to the sub-level, what the transform's +0xB4 holds
+        float ox = 0, oy = 0, oz = 0;    // world minus local: the sub-level origin
         bool valid = false;
     };
 
@@ -39,4 +41,5 @@ namespace gs::player
     // zero until the first successful read.
     uintptr_t Actor();
     uintptr_t DetectComponent();
+    uintptr_t CharacterControlComponent();
 }

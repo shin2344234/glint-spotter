@@ -204,6 +204,29 @@ namespace gs::aim
         return t;
     }
 
+    bool AimPointLocal(uintptr_t charctl, float lx, float ly, float lz, float* out)
+    {
+        constexpr uintptr_t kOff_CharCtl_Aim = 0x318;
+        if (!charctl) return false;
+        const uintptr_t at = charctl + kOff_CharCtl_Aim;
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 12)) return false;
+        float f[3];
+        __try
+        {
+            memcpy(f, reinterpret_cast<const void*>(at), 12);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        if (!std::isfinite(f[0]) || !std::isfinite(f[1]) || !std::isfinite(f[2])) return false;
+        const float dx = f[0] - lx, dy = f[1] - ly, dz = f[2] - lz;
+        const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (d < 0.25f || d > 150.0f) return false;
+        out[0] = f[0]; out[1] = f[1]; out[2] = f[2];
+        return true;
+    }
+
     uintptr_t DetectTask()
     {
         const uintptr_t detect = g_detect.load();

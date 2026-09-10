@@ -784,3 +784,35 @@ things that do not glint, and it is parked until the detect component route has
 been tried, because that one needs no camera at all.
 
 Nothing in the camera family needs the player to turn in circles again.
+
+## Confirmed at runtime: the aim point, and why the first pin went 9 km away
+
+Session seventeen, probe 0.5.0. Two presses with the flash on, the first aimed
+at nothing, the second at a glint, every component in the played body's block
+copied at each and diffed on the game's thread.
+
+The pin was placed and returned 1, and it was nowhere near the player, because
+everything read off the actor so far was in the sub-level's local space and the
+map draws world space. The transform carries both:
+
+```
+transform +0x0B4  local   (-733.40, 560.54, -301.67)   what Master Looter reads
+transform +0x29C  world   (-9733.40, 560.54, -4301.67)  what the map draws
+                  origin  (-9000.00, 0.00, -4000.00)   world minus local
+```
+
+Copies of the world position sit at `+0x324`, `+0x3D0` and `+0x51C` of the
+transform, on the equip slot, character control, effect and frame event
+components, and on the detect component at `+0x548` and `+0x554`. It is the
+most repeated number in the block. The local one is at `+0xB4`, `+0x12C` and
+`+0x63C` of the transform and on the vehicle component at `+0x35C`.
+
+The aim point: `ClientCharacterControlActorComponent+0x318` holds a float3 in
+local space that moved when the flash was aimed at the glint and sat 10.7 units
+from the player, `(-728.52, 561.17, -292.18)`, world `(-9728.5, 561.2, -4292.2)`.
+That is the single read the feature needs, and it is also what any "mark where
+the crosshair points" feature would use for things that do not glint.
+
+The actor id route is still wired and untested: no dword in the diff took an
+id shape between the two presses, so the game does not appear to record the
+target as an id on these components.

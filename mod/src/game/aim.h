@@ -42,4 +42,10 @@ namespace gs::aim
 
     // The FindDetectTargetTask hanging off the detect component, or 0.
     uintptr_t DetectTask();
+
+    // The aim point the character control component keeps at +0x318, in the
+    // sub-level's local space. Session seventeen: it moved when the flash was
+    // aimed at a glint and sat 10.7 units from the player. Valid only when it
+    // is finite and within reach.
+    bool AimPointLocal(uintptr_t charctl, float lx, float ly, float lz, float* out);
 }
