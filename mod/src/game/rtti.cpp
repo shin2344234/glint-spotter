@@ -56,7 +56,11 @@ namespace gs::rtti
         return true;
     }
 
-    const char* VtableClassName(const void* vtable)
+    // The body below has no C++ objects, so it can sit inside __try. Readable
+    // is a pre-check and nothing more: the game frees memory on other threads,
+    // and session five died between a Readable that said yes and the read that
+    // followed it. Only a handler around the read itself closes that gap.
+    const char* VtableClassNameUnguarded(const void* vtable)
     {
         if (!Readable(vtable, sizeof(void*))) return nullptr;
 
@@ -87,13 +91,30 @@ namespace gs::rtti
         return s;
     }
 
+    const char* VtableClassName(const void* vtable)
+    {
+        __try
+        {
+            return VtableClassNameUnguarded(vtable);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+    }
+
     bool VtableIs(const void* vtable, const char* decorated)
     {
-        const char* name = VtableClassName(vtable);
-        if (!name || !decorated) return false;
-
-        // Bound the comparison so a missing terminator cannot run away.
-        constexpr size_t kMaxName = 512;
-        return strncmp(name, decorated, kMaxName) == 0;
+        __try
+        {
+            const char* name = VtableClassNameUnguarded(vtable);
+            if (!name || !decorated) return false;
+            // Bound the comparison so a missing terminator cannot run away.
+            return strncmp(name, decorated, 512) == 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
     }
 }

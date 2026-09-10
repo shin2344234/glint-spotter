@@ -81,7 +81,14 @@ namespace gs::scan
     {
         if (!object || !vtableAddress) return false;
         if (!gs::rtti::Readable(object, sizeof(void*))) return false;
-        return *static_cast<const uintptr_t*>(object) == vtableAddress;
+        __try
+        {
+            return *static_cast<const uintptr_t*>(object) == vtableAddress;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
     }
 
     Report FindPointers(const uintptr_t* needles, size_t needleCount,

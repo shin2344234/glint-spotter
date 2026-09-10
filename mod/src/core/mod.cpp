@@ -169,9 +169,53 @@ namespace
     // Read what the create path would need. False means the candidate does not
     // stand up and the caller must drop it: session one cached a rejected
     // pointer, the next tick confirmed its vtable, and no scan ever ran again.
+    // Every read of a candidate, in one leaf with no C++ objects so it can sit
+    // inside __try. Session five crashed to desktop here: map icons are built and
+    // freed each time the map opens, Readable said yes, and the read that
+    // followed landed on memory the game had just released. The pre-check stays
+    // because it is cheap, but only a handler around the read itself is a fix.
+    bool Snapshot(const void* obj, size_t objectBytes, bool wantSlots,
+                  uint64_t* hdr, void** slot35, void** slot170)
+    {
+        __try
+        {
+            if (!gs::rtti::Readable(obj, objectBytes)) return false;
+            const auto* q = static_cast<const uint64_t*>(obj);
+            hdr[0] = q[0];
+            hdr[1] = q[1];
+            hdr[2] = q[2];
+            *slot35 = nullptr;
+            *slot170 = nullptr;
+            if (wantSlots)
+            {
+                auto** vt = *reinterpret_cast<void***>(const_cast<void*>(obj));
+                const size_t want = static_cast<size_t>(gs::sig::kSlotCreateIcon + 1) * sizeof(void*);
+                if (gs::rtti::Readable(vt, want))
+                {
+                    *slot35 = vt[gs::sig::kSlotUpdate];
+                    *slot170 = vt[gs::sig::kSlotCreateIcon];
+                }
+            }
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     bool Describe(Target& t)
     {
-        if (!gs::rtti::Readable(t.object, t.objectBytes))
+        // Slot 170 only means "create icon" on the two root controls. Other
+        // classes have vtables of their own length, and the slot counter walks
+        // straight past the end into the next vtable, so printing it for them
+        // was noise.
+        const bool root = strstr(t.info.name, "UIGamePlayControlRoot") != nullptr;
+
+        uint64_t hdr[3]{};
+        void* s35 = nullptr;
+        void* s170 = nullptr;
+        if (!Snapshot(t.object, t.objectBytes, root, hdr, &s35, &s170))
         {
             GS_LOG("    not readable for a whole object, dropped");
             return false;
@@ -181,31 +225,22 @@ namespace
         // vtable, and in an object it is member data. Session two found 112
         // candidates and every one was a table entry, so this test is what
         // separates the two.
-        const auto* q = static_cast<const uintptr_t*>(t.object);
-        if (gs::rtti::VtableClassName(reinterpret_cast<const void*>(q[1])))
+        if (gs::rtti::VtableClassName(reinterpret_cast<const void*>(hdr[1])))
         {
             GS_LOG("    +08 is itself a vtable, so this is a pointer table, dropped");
             return false;
         }
 
-        auto** vt = *reinterpret_cast<void***>(t.object);
-        const int want = gs::sig::kSlotCreateIcon + 1;
-        if (t.info.slots >= want &&
-            gs::rtti::Readable(vt, static_cast<size_t>(want) * sizeof(void*)))
-        {
+        if (root && s35)
             GS_LOG("    slot %d update 0x%p, slot %d create icon 0x%p",
-                   gs::sig::kSlotUpdate, vt[gs::sig::kSlotUpdate],
-                   gs::sig::kSlotCreateIcon, vt[gs::sig::kSlotCreateIcon]);
-        }
+                   gs::sig::kSlotUpdate, s35, gs::sig::kSlotCreateIcon, s170);
 
         // First bytes of the object. Cheap, and it is what will later tell us
         // whether two candidates are one control seen twice or two controls.
-        const auto* b = static_cast<const uint8_t*>(t.object);
-        GS_LOG("    +00 %02X%02X%02X%02X%02X%02X%02X%02X  +08 %02X%02X%02X%02X%02X%02X%02X%02X"
-               "  +10 %02X%02X%02X%02X%02X%02X%02X%02X",
-               b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-               b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15],
-               b[16], b[17], b[18], b[19], b[20], b[21], b[22], b[23]);
+        GS_LOG("    +00 %016llX  +08 %016llX  +10 %016llX",
+               static_cast<unsigned long long>(hdr[0]),
+               static_cast<unsigned long long>(hdr[1]),
+               static_cast<unsigned long long>(hdr[2]));
         return true;
     }
 
@@ -230,7 +265,11 @@ namespace
     // hits are left standing.
     size_t DropPointerTables(std::vector<gs::scan::Hit>& hits)
     {
-        constexpr size_t kTableThreshold = 4;
+        // Session five threw out two regions for answering to five classes, and a
+        // heap arena with five kinds of object in it is exactly what a heap looks
+        // like. The registry answers to all 56 at once. Sixteen tells them apart,
+        // and the neighbour test in Describe catches anything smaller.
+        constexpr size_t kTableThreshold = 16;
         for (size_t a = 0; a < hits.size(); ++a)
         {
             if (!hits[a].object) continue;
@@ -383,7 +422,7 @@ namespace
                local.wSecond, fad.nFileSizeLow);
     }
 
-    DWORD WINAPI Worker(LPVOID)
+    DWORD WorkerBody()
     {
         GS_LOG("Glint Spotter %s probe", GS_VERSION_STRING);
         LogBuildStamp(g_self);
@@ -431,6 +470,23 @@ namespace
             for (int i = 0; i < ticks && !g_stop.load(); ++i) Sleep(500);
         }
         return 0;
+    }
+
+    // The thread entry holds no C++ objects, so it can carry the handler that
+    // WorkerBody cannot. Whatever the guards above miss ends the probe for the
+    // session and writes why, instead of taking the game with it.
+    DWORD WINAPI Worker(LPVOID)
+    {
+        __try
+        {
+            return WorkerBody();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            GS_LOG_ERR("unhandled exception 0x%08lX on the probe thread; probe stopped, game lives",
+                       static_cast<unsigned long>(GetExceptionCode()));
+            return 1;
+        }
     }
 }
 
