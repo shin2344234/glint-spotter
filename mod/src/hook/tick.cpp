@@ -37,7 +37,7 @@ namespace
     // Further targets, diffed the same way. Guarded by the tick's own thread
     // for reads; adds and drops come from the worker and are atomic swaps.
     constexpr size_t kExtraMax = 0x400;
-    constexpr int kExtraSlots = 4;
+    constexpr int kExtraSlots = 12;
     struct Extra
     {
         char label[32];

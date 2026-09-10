@@ -28,7 +28,7 @@ namespace
 
     // The keyword sweep finds 104 classes on build 2.01.00, so a cap of 48 was
     // silently dropping more than half of them.
-    constexpr size_t kMaxClasses = 160;
+    constexpr size_t kMaxClasses = 512;
     constexpr size_t kMaxNeedles = 64;
 
     // A class we are hunting, and the best pointer we have to a live one.
@@ -152,6 +152,18 @@ namespace
             // still logged, because the argument lists in their names are how the
             // map icon event signature was read in the first place.
             t.hunt = ShortName(found[i].name)[0] != '?';
+            // Of the camera family, only objects that are a camera. The events,
+            // parameter blocks, presets and descriptors that share the word are
+            // data, and session twelve filled every probe slot with them.
+            if (t.hunt && strstr(found[i].name, "Camera"))
+            {
+                static const char* const junk[] = {"FrameEvent", "Param", "Data", "Desc", "Info",
+                                                   "Preset", "Query", "Event", "Selector",
+                                                   "Shake", "Blend", "Effect", "Sequencer",
+                                                   "Volume", "hkx", "Lock", "Rotate", "Pulse"};
+                for (const char* j : junk)
+                    if (strstr(found[i].name, j)) { t.hunt = false; break; }
+            }
             GS_LOG("  %s +0x%08X %3d slots  %s", t.hunt ? "hunt" : "    ",
                    found[i].vtableRva, found[i].slots, ShortName(found[i].name));
             ++g_count;
@@ -167,11 +179,9 @@ namespace
         };
         for (const Expect& e : expected)
         {
-            bool agreed = false;
-            for (size_t i = 0; i < g_count; ++i)
-                if (g_targets[i].info.vtableRva == e.rva &&
-                    strcmp(g_targets[i].info.name, e.name) == 0)
-                    agreed = true;
+            // Read the vtable at the expected address and let RTTI name it,
+            // independent of what the keyword sweep happened to keep.
+            const bool agreed = gs::rtti::VtableIs(reinterpret_cast<const void*>(base + e.rva), e.name);
             if (agreed)
             {
                 GS_LOG_OK("signatures.h +0x%08llX still matches %s",
@@ -329,14 +339,29 @@ namespace
         size_t bytes[kMaxClasses]{};
         size_t slotOf[kMaxClasses]{};
         size_t n = 0;
-        for (size_t i = 0; i < g_count; ++i)
+        // Two passes: the classes the feature depends on first, then everything
+        // else that fits. Session twelve lost the map roots to the needle cap
+        // because a hundred camera classes sort ahead of them by address.
+        static const char* const essential[] = {
+            "UIGamePlayControlRootWorldMap", "UIGamePlayControlRootMiniMap",
+            "ClientSpecialModeActorComponent", "ClientMinimapActorComponent"};
+        for (int pass = 0; pass < 2; ++pass)
         {
-            if (!g_targets[i].hunt || g_targets[i].object) continue;
-            if (n >= kMaxNeedles) break;
-            needles[n] = g_targets[i].info.vtableVa;
-            bytes[n] = g_targets[i].objectBytes;
-            slotOf[n] = i;
-            ++n;
+            for (size_t i = 0; i < g_count; ++i)
+            {
+                if (!g_targets[i].hunt || g_targets[i].object) continue;
+                bool ess = false;
+                for (const char* e : essential) if (strstr(g_targets[i].info.name, e)) ess = true;
+                if ((pass == 0) != ess) continue;
+                bool already = false;
+                for (size_t k = 0; k < n; ++k) if (slotOf[k] == i) already = true;
+                if (already) continue;
+                if (n >= kMaxNeedles) break;
+                needles[n] = g_targets[i].info.vtableVa;
+                bytes[n] = g_targets[i].objectBytes;
+                slotOf[n] = i;
+                ++n;
+            }
         }
         if (n == 0) return;
 
@@ -401,10 +426,9 @@ namespace
                     gs::tick::AddProbe("special", t.object, 0x400);
                     gs::player::SetSpecialComponent(t.object);
                 }
-                else if (isCamera && shown <= 2)
+                else if (isCamera)
                 {
-                    // The first two camera objects of each class; a view
-                    // matrix will announce itself as sixteen floats moving.
+                    // A view matrix announces itself as sixteen floats moving.
                     gs::tick::AddProbe(ShortName(t.info.name), t.object, 0x400);
                 }
             }
