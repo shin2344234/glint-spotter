@@ -203,4 +203,14 @@ namespace gs::aim
         GS_LOG("[aim] no actor pointer in either component right now");
         return t;
     }
+
+    uintptr_t DetectTask()
+    {
+        const uintptr_t detect = g_detect.load();
+        if (!detect) return 0;
+        // Session sixteen: the task sits at +0x1D0. Verified by name before use.
+        const uintptr_t p = Deref(detect + 0x1D0);
+        const char* n = p ? NameOf(p) : nullptr;
+        return (n && strstr(n, "FindDetectTargetTask")) ? p : 0;
+    }
 }

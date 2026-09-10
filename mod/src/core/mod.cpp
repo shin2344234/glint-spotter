@@ -11,6 +11,7 @@
 #include "game/mapicon.h"
 #include "game/player.h"
 #include "game/aim.h"
+#include "game/actors.h"
 #include "hook/pad.h"
 #include "hook/tick.h"
 #include "game/rtti.h"
@@ -54,6 +55,7 @@ namespace
     const char* const kKeywords[] = {
         "MapIcon", "MiniMap", "Minimap", "WorldMap", "DetectMode", "SpecialMode",
         "ClientDetectActorComponent", "ClientTransformSyncActorComponent",
+        "ClientActorManager",
     };
 
     const char* ShortName(const char* decorated)
@@ -72,6 +74,7 @@ namespace
         if (strstr(decorated, "UIGamePlayControlRootWorldMap") ||
             strstr(decorated, "UIGamePlayControlRootMiniMap"))
             return gs::sig::kRootControlSize;
+        if (strstr(decorated, "ClientActorManager")) return 0x200;
         return 0x100;
     }
 
@@ -410,6 +413,7 @@ namespace
             const bool isSpecial = strstr(t.info.name, "ClientSpecialModeActorComponent") != nullptr;
             const bool isCamera = strstr(t.info.name, "Camera") != nullptr &&
                                   ShortName(t.info.name)[0] != '?';
+            const bool isManager = strcmp(t.info.name, ".?AVClientActorManager@pa@@") == 0;
 
             size_t shown = 0;
             for (const gs::scan::Hit& h : hits)
@@ -426,6 +430,11 @@ namespace
                 {
                     gs::tick::AddProbe("special", t.object, 0x400);
                     gs::player::SetSpecialComponent(t.object);
+                }
+                else if (isManager && !gs::actors::Ready())
+                {
+                    gs::actors::SetManager(t.object);
+                    GS_LOG_OK("actor manager at 0x%p; actor ids can be resolved", t.object);
                 }
                 else if (isCamera)
                 {
@@ -602,7 +611,16 @@ namespace
                 if (!Describe(t)) { t.object = nullptr; continue; }
                 gs::tick::AddProbe("special", t.object, 0x400);
                 gs::player::SetSpecialComponent(t.object);
-                GS_LOG_OK("special mode component ready at 0x%p; the trigger works from here", t.object);
+                // Walk to the player and the detect component right now rather
+                // than on the next probe sample, and say READY only when both
+                // are in hand, because the press needs both.
+                const gs::player::Pos pp = gs::player::Read();
+                if (pp.valid && gs::player::DetectComponent())
+                    GS_LOG_OK("READY: player at (%.1f, %.1f, %.1f), detect component found. "
+                              "Press once aimed at nothing, then once aimed at a glint.", pp.x, pp.y, pp.z);
+                else
+                    GS_LOG("special mode component found; player walk %s, detect component %s",
+                           pp.valid ? "ok" : "pending", gs::player::DetectComponent() ? "ok" : "pending");
                 break;
             }
             break;

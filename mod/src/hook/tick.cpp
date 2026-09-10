@@ -12,6 +12,7 @@
 #include "game/mapicon.h"
 #include "game/player.h"
 #include "game/aim.h"
+#include "game/snapshot.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
 extern "C" void* gs_minimapOriginal = nullptr;
@@ -185,25 +186,35 @@ extern "C" void gs_OnMinimapTick(void* self)
     if (g_markPending.exchange(false))
     {
         const gs::player::Pos pp = gs::player::Read();
-        if (!pp.valid)
+        if (!pp.valid || !gs::player::DetectComponent())
         {
-            // Session fifteen: four presses in the first half minute, all
-            // before the scan had found the player, all read as failures.
-            GS_LOG_ERR("[mark] NOT READY: the player's special mode component has not been located yet. "
-                       "Wait for '[player] position' in this log, then press again.");
+            GS_LOG_ERR("[mark] NOT READY: %s. Wait for 'READY' in this log, then press again.",
+                       !pp.valid ? "the player has not been located yet" : "the detect component has not been found yet");
             return;
         }
         const bool flash = gs::aim::FlashActive();
         GS_LOG("[mark] requested. player at (%.3f, %.3f, %.3f), flash %s",
                pp.x, pp.y, pp.z, flash ? "on" : "off");
-        const gs::aim::Target t = gs::aim::Resolve();
-        if (t.valid)
+
+        // Pointer search first, cheap, in case the game does hold an actor.
+        gs::aim::Target t = gs::aim::Resolve();
+        float tx = t.x, ty = t.y, tz = t.z;
+        bool have = t.valid;
+        const char* how = "actor pointer";
+
+        // Then the snapshot and diff, which is what this session is for.
+        const gs::snapshot::Found f = gs::snapshot::PressAndDiff(
+            gs::player::Actor(), gs::aim::DetectTask(), pp.x, pp.y, pp.z);
+        if (!have && f.valid) { have = true; tx = f.x; ty = f.y; tz = f.z; how = f.how; }
+
+        if (have)
         {
             void* root = g_worldRoot.load();
             if (!root) root = gs::mapicon::LastWorldRoot();
-            const float dx = t.x - pp.x, dz = t.z - pp.z;
-            GS_LOG("[mark] target %.1f units away; placing a Glint pin there", std::sqrt(dx * dx + dz * dz));
-            gs::mapicon::PlacePinNow(root, t.x, t.z, "Glint");
+            const float dx = tx - pp.x, dz = tz - pp.z;
+            GS_LOG("[mark] target %.1f units away via %s; placing a Glint pin there", std::sqrt(dx * dx + dz * dz), how);
+            gs::mapicon::PlacePinNow(root, tx, tz, "Glint");
+            (void)ty;
         }
         else
         {

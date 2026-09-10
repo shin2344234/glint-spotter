@@ -39,4 +39,7 @@ namespace gs::aim
     // read its position. Logs every candidate it considers on the first few
     // calls so the layout becomes known.
     Target Resolve();
+
+    // The FindDetectTargetTask hanging off the detect component, or 0.
+    uintptr_t DetectTask();
 }
