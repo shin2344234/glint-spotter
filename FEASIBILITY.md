@@ -140,16 +140,17 @@ fighting for the same render slots is a problem nobody needs.
    native call. It does not survive the map closing and it does not reach the
    compass or the quest tracker. Say that on the mod page rather than letting
    people find out.
-2. Hand the render problem to the navigation mod that already draws on both map
-   surfaces. It ships a local API switched off by default. This route needs a
-   conversation with its author before a line is written against it, and the
-   note to him is still unsent. Both are in `private/CRIMSON-ROUTE.md`.
-3. No pin at all. Show bearing and distance to the nearest glint candidate and
+2. No pin at all. Show bearing and distance to the nearest glint candidate and
    let the player place the vanilla pin by hand. This needs only piece one, which
    is the piece most likely to work.
-4. Find the native write. Correct long term, last here because nobody has, and
+3. Find the native write. Correct long term, last here because nobody has, and
    the way in is to instrument a manual pin placement and catch the write that
    feeds the `+0xAB5594` read.
+
+Driving another mod's local API was on this list and came off it on 10 September
+2026. Seth ruled out integrating with the navigation mod, so everything here
+stands on its own hooks. The only thing still owed to its author is a heads-up
+about the shared slots, drafted in `private/discord/`.
 
 ## Experiments, cheapest first
 
