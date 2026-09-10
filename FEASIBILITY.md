@@ -816,3 +816,49 @@ the crosshair points" feature would use for things that do not glint.
 The actor id route is still wired and untested: no dword in the diff took an
 id shape between the two presses, so the game does not appear to record the
 target as an id on these components.
+
+## The spec, as of 10 September 2026, and where each piece stands
+
+Seth's words: when the chord is pressed, triangulate the point on the ground
+being pointed at and put a marker there. When only the blinding flash is on,
+pointing directly at or near a glint places a marker automatically, once, and
+never a second one where one already is.
+
+### Chord: the ground point
+
+- The game computes this itself. `ClientCharacterControlActorComponent+0x318`
+  held a point 10.7 units ahead in local space while the flash was aimed in
+  session seventeen, and read zero at the same kind of press in session
+  eighteen. Whether it is populated only while the flash button is held is the
+  open question, and one press with the button held answers it.
+- If it is, that field is the whole feature. If not, the ground point comes
+  from the camera's pitch, found offline on `PlayerCameraTPSMode` at `+0xC0`
+  through `+0xD0`, held through a thunk on its slot 19 the same way the minimap
+  tick is, intersected with the ground at the player's feet.
+- Fallback in the build now: a ray from the player along the facing, the yaw
+  quaternion at transform `+0x28C`, against every entity in the actor manager's
+  list as small spheres in a beam that widens with distance. First hit wins.
+  It hits objects, not terrain.
+
+### Flash only: automatic, once, deduplicated
+
+- Once and deduplicated is in the build: every pin the mod places is
+  remembered and nothing is placed within eight units of one.
+- "Near the glint" is the ray with a wide spread, which is a cone, plus a
+  dwell of a second or two so a pin is not placed every frame.
+- Which object in the cone is glinting is the open piece. Candidates: the
+  detect component's scalars that moved between an unaimed and an aimed press
+  in session seventeen, `+0x580` from 12.6 to 3.0 among them, which looks like
+  a distance to the current target; the target's own effect component, since
+  `fx_detectmode_knowledge_gimmick` is played on it; or the gimmick's
+  knowledge state. The build logs the scalars beside the ray's candidates at
+  each press so the first of those can be settled from one session.
+
+### Solved and in the build
+
+Player position in world space, transform `+0x29C`. Sub-level origin, world
+minus local. Facing, transform `+0x28C`. Flash active, special component
+`+0x40`. The actor manager and its entity list. A native pin at any world
+position, on the game's thread. Ready within about twenty seconds of entering
+the world, with the player's own special mode component and not another
+character's.

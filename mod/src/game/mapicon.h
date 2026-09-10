@@ -79,6 +79,11 @@ namespace gs::mapicon
     // Returns what slot 170 returned.
     void* PlacePinNow(void* worldRoot, float x, float z, const char* label);
 
+    // True if the mod has already placed a pin within `radius` of (x, z).
+    // The spec: one marker per area, never a second one on top of it.
+    bool PinNear(float x, float z, float radius);
+    int PinCount();
+
     // The world map root the spy last saw a call on, or null. The tick uses
     // this when the scan has not located the object yet.
     void* LastWorldRoot();

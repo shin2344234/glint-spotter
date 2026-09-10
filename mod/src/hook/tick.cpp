@@ -260,7 +260,30 @@ extern "C" void gs_OnMinimapTick(void* self)
             if (f.valid) { have = true; tx = f.x + pp.ox; ty = f.y + pp.oy; tz = f.z + pp.oz; how = f.how; }
         }
 
-        if (have)
+        // The detect component's scalars that moved when the flash was aimed
+        // in session seventeen, next to the ray's candidates, so the one that
+        // is the distance to the glint can be picked out. +0x580 went from
+        // 12.6 to 3.0 between an unaimed and an aimed press.
+        {
+            const uintptr_t d = gs::player::DetectComponent();
+            if (d && gs::rtti::Readable(reinterpret_cast<const void*>(d), 0x650))
+            {
+                const auto* q = reinterpret_cast<const uint8_t*>(d);
+                float f3e8, f3ec, f580, f5e8, f640;
+                uint32_t u410, u42c;
+                memcpy(&f3e8, q + 0x3E8, 4); memcpy(&f3ec, q + 0x3EC, 4); memcpy(&f580, q + 0x580, 4);
+                memcpy(&f5e8, q + 0x5E8, 4); memcpy(&f640, q + 0x640, 4);
+                memcpy(&u410, q + 0x410, 4); memcpy(&u42c, q + 0x42C, 4);
+                GS_LOG("[mark] detect scalars: +3E8 %.3f +3EC %.3f +580 %.3f +5E8 %.3f +640 %.3f +410 0x%X +42C 0x%X",
+                       f3e8, f3ec, f580, f5e8, f640, u410, u42c);
+            }
+        }
+
+        if (have && gs::mapicon::PinNear(tx, tz, 8.0f))
+        {
+            GS_LOG("[mark] a pin already sits within 8 units of (%.1f, %.1f); not placing another", tx, tz);
+        }
+        else if (have)
         {
             void* root = g_worldRoot.load();
             if (!root) root = gs::mapicon::LastWorldRoot();

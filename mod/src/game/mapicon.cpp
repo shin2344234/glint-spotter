@@ -27,6 +27,12 @@ namespace
     std::atomic<bool> g_replayPending{false};
     std::atomic<uint64_t> g_replayCount{0};
 
+    // Every pin this mod placed this session, for the one-per-area rule.
+    constexpr int kMaxPins = 256;
+    struct Placed { float x, z; };
+    Placed g_placed[kMaxPins];
+    std::atomic<int> g_placedN{0};
+
     bool IsName(const gs::mapicon::Capture& c, const char* name)
     {
         return strcmp(c.name8, name) == 0;
@@ -363,8 +369,23 @@ namespace gs::mapicon
                             reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
                             nullptr, nullptr, nullptr);
         GS_LOG_OK("[pin #%llu] returned 0x%p", static_cast<unsigned long long>(n), r);
+        const int i = g_placedN.load();
+        if (i < kMaxPins) { g_placed[i] = {x, z}; g_placedN.store(i + 1); }
         return r;
     }
+
+    bool PinNear(float x, float z, float radius)
+    {
+        const int n = g_placedN.load();
+        for (int i = 0; i < n && i < kMaxPins; ++i)
+        {
+            const float dx = g_placed[i].x - x, dz = g_placed[i].z - z;
+            if (dx * dx + dz * dz <= radius * radius) return true;
+        }
+        return false;
+    }
+
+    int PinCount() { return g_placedN.load(); }
 
     void* LastWorldRoot() { return g_lastWorldRoot.load(); }
 
