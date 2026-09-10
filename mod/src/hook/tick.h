@@ -29,9 +29,11 @@ namespace gs::tick
     // worker turns it on for discovery sessions.
     void SetProbe(bool on);
 
-    // A second probe target found by the scan, such as the player's special
-    // mode component, diffed on the same cadence to find the flash flag.
-    void SetExtraProbe(const char* label, void* object, size_t bytes);
+    // More probe targets found by the scan: the player's special mode
+    // component for the flash flag and an aim target, and the camera for the
+    // view direction. Up to four, diffed on the same cadence.
+    void AddProbe(const char* label, void* object, size_t bytes);
+    void DropProbe(void* object);
 
     // Ask the tick to place a pin on its next run, on the game's thread.
     // Position is the best one known; the caller says where it came from.

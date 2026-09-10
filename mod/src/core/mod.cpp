@@ -9,6 +9,7 @@
 #include "core/log.h"
 #include "core/settings.h"
 #include "game/mapicon.h"
+#include "game/player.h"
 #include "hook/pad.h"
 #include "hook/tick.h"
 #include "game/rtti.h"
@@ -45,8 +46,13 @@ namespace
 
     // Anything in the map icon and detect mode families. Both spellings of
     // minimap appear in this binary, so both are listed.
+    // Camera is here for the aim. The pin has to land where the crosshair
+    // points, and that needs the view direction, which lives in whatever
+    // camera object the game drives. The diff probe finds it as a block of
+    // floats that all move when the player turns.
     const char* const kKeywords[] = {
         "MapIcon", "MiniMap", "Minimap", "WorldMap", "DetectMode", "SpecialMode",
+        "Camera",
     };
 
     const char* ShortName(const char* decorated)
@@ -376,7 +382,8 @@ namespace
             // and the player's special mode component to watch for the flash.
             const bool isWorldRoot = strstr(t.info.name, "UIGamePlayControlRootWorldMap") != nullptr;
             const bool isSpecial = strstr(t.info.name, "ClientSpecialModeActorComponent") != nullptr;
-            (void)isWorldRoot; (void)isSpecial;
+            const bool isCamera = strstr(t.info.name, "Camera") != nullptr &&
+                                  ShortName(t.info.name)[0] != '?';
 
             size_t shown = 0;
             for (const gs::scan::Hit& h : hits)
@@ -389,7 +396,17 @@ namespace
                 t.object = h.object;
                 if (!Describe(t)) t.object = nullptr;
                 else if (isWorldRoot) gs::tick::SetWorldRoot(t.object);
-                else if (isSpecial) gs::tick::SetExtraProbe("special", t.object, 0x400);
+                else if (isSpecial)
+                {
+                    gs::tick::AddProbe("special", t.object, 0x400);
+                    gs::player::SetSpecialComponent(t.object);
+                }
+                else if (isCamera && shown <= 2)
+                {
+                    // The first two camera objects of each class; a view
+                    // matrix will announce itself as sixteen floats moving.
+                    gs::tick::AddProbe(ShortName(t.info.name), t.object, 0x400);
+                }
             }
             if (found > shown) GS_LOG("  ... %zu more", found - shown);
         }
@@ -401,6 +418,8 @@ namespace
         if (gs::scan::StillValid(t.object, t.info.vtableVa)) return true;
         GS_LOG("%s: 0x%p stopped carrying its vtable, will look again",
                ShortName(t.info.name), t.object);
+        gs::tick::DropProbe(t.object);
+        if (strstr(t.info.name, "ClientSpecialModeActorComponent")) gs::player::SetSpecialComponent(nullptr);
         t.object = nullptr;
         return false;
     }
@@ -417,22 +436,12 @@ namespace
         GS_LOG("[trigger] %s. ticks so far %llu on thread %lu", how,
                static_cast<unsigned long long>(gs::tick::Count()), gs::tick::ThreadId());
 
-        gs::mapicon::Capture c;
-        const char* from = nullptr;
-        if (gs::mapicon::LastPin(c)) from = "last placed pin, offset";
-        else if (gs::mapicon::LastPlayer(c)) from = "player marker from first map open, offset";
-        if (!from)
-        {
-            GS_LOG("[trigger] no position known yet. Open the map once, or place a pin, then try again.");
-            return;
-        }
         if (gs::tick::Count() == 0)
         {
             GS_LOG("[trigger] the tick has never run, so there is no game thread to place from");
             return;
         }
-        GS_LOG("[trigger] mark requested at (%.1f, %.1f) from %s", c.pos[0] + 40.0f, c.pos[2] + 40.0f, from);
-        gs::tick::RequestMark(c.pos[0] + 40.0f, c.pos[2] + 40.0f, "GlintSpotter");
+        gs::tick::RequestMark(0.0f, 0.0f, "GlintSpotter");
     }
 
     // The CRT answers an invalid parameter by calling __fastfail, which kills the
@@ -536,7 +545,7 @@ namespace
         gs::pad::Init();
         g_key = cfg.key;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
-        GS_LOG("press %s (VK %02X) or RB+LB+A to drop a GlintSpotter pin", gs::Settings::KeyName(cfg.key), cfg.key);
+        GS_LOG("press %s (VK %02X) or RB+LB+A while aiming; this build logs the aim state and places nothing", gs::Settings::KeyName(cfg.key), cfg.key);
 
         // Early passes hunt for something that may not exist yet, so they come
         // quickly. Once everything is in hand a tick is one pointer read each and

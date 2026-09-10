@@ -46,6 +46,8 @@ namespace gs::mapicon
         char name8[64]{};
         uint8_t byte9 = 0;
         uint8_t struct10[36]{};
+        uint8_t pointee[64]{};   // what struct10+0x10 points at, if anything
+        bool pointeeOk = false;
         uint8_t byte11 = 0;
         bool str7Null = true;
         bool ok = false;          // every read succeeded

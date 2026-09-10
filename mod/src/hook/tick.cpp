@@ -10,6 +10,7 @@
 #include "game/signatures.h"
 #include "hook/vtable.h"
 #include "game/mapicon.h"
+#include "game/player.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
 extern "C" void* gs_minimapOriginal = nullptr;
@@ -33,13 +34,19 @@ namespace
     bool g_havePrev = false;
     uint64_t g_samples = 0;
 
-    // Second target, diffed the same way.
+    // Further targets, diffed the same way. Guarded by the tick's own thread
+    // for reads; adds and drops come from the worker and are atomic swaps.
     constexpr size_t kExtraMax = 0x400;
-    char g_extraLabel[32] = "extra";
-    std::atomic<void*> g_extra{nullptr};
-    size_t g_extraBytes = 0;
-    uint8_t g_extraPrev[kExtraMax];
-    bool g_extraHavePrev = false;
+    constexpr int kExtraSlots = 4;
+    struct Extra
+    {
+        char label[32];
+        std::atomic<void*> object{nullptr};
+        size_t bytes = 0;
+        uint8_t prev[kExtraMax];
+        bool havePrev = false;
+    };
+    Extra g_extras[kExtraSlots];
 
     // A mark asked for from another thread, placed here on the game's.
     std::atomic<bool> g_markPending{false};
@@ -94,13 +101,36 @@ namespace
             uint32_t ua, ub;
             memcpy(&ua, prev + off, 4);
             memcpy(&ub, cur + off, 4);
-            // Small integers flipping are flags and enums; pointers churn and
-            // are skipped by the range test.
-            if (ua < 0x10000 && ub < 0x10000)
+            // Small integers flipping are flags and enums. A value going from
+            // zero to anything, or back, is a key or a pointer being set or
+            // cleared, which is what a mode turning on or a target being
+            // acquired looks like. Session eleven filtered both as churn.
+            if ((ua < 0x10000 && ub < 0x10000) || ua == 0 || ub == 0)
             {
                 GS_LOG("[%s %llu] +0x%03zX  0x%08X -> 0x%08X", tag,
                        static_cast<unsigned long long>(g_samples), off, ua, ub);
                 ++lines;
+            }
+            // An 8-byte field that now holds a pointer to something with RTTI
+            // is worth naming: an aim target would be exactly that.
+            if ((off & 7) == 0 && off + 8 <= bytes)
+            {
+                uint64_t qa, qb;
+                memcpy(&qa, prev + off, 8);
+                memcpy(&qb, cur + off, 8);
+                if (qa != qb && qb > 0x10000 && (qb & 7) == 0 &&
+                    gs::rtti::Readable(reinterpret_cast<const void*>(qb), 8))
+                {
+                    const uint64_t vt = *reinterpret_cast<const uint64_t*>(qb);
+                    const char* n = gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt));
+                    if (n && lines < kMaxLines)
+                    {
+                        GS_LOG("[%s %llu] +0x%03zX  -> 0x%016llX is %s", tag,
+                               static_cast<unsigned long long>(g_samples), off,
+                               static_cast<unsigned long long>(qb), n);
+                        ++lines;
+                    }
+                }
             }
         }
         if (lines == kMaxLines) GS_LOG("[%s %llu]   ... more changed, capped", tag,
@@ -116,16 +146,21 @@ namespace
         memcpy(g_prev, cur, kBytes);
         g_havePrev = true;
 
-        void* extra = g_extra.load();
-        if (extra && g_extraBytes)
+        // The live position, the origin of any aim ray, read here where it
+        // is freshest.
+        const gs::player::Pos pp = gs::player::Read();
+        if (pp.valid) GS_LOG("[player %llu] (%.3f, %.3f, %.3f)",
+                             static_cast<unsigned long long>(g_samples), pp.x, pp.y, pp.z);
+
+        for (Extra& e : g_extras)
         {
+            void* obj = e.object.load();
+            if (!obj || !e.bytes) continue;
             uint8_t ecur[kExtraMax];
-            if (Snapshot(extra, ecur, g_extraBytes))
-            {
-                if (g_extraHavePrev) Diff(g_extraLabel, g_extraPrev, ecur, g_extraBytes);
-                memcpy(g_extraPrev, ecur, g_extraBytes);
-                g_extraHavePrev = true;
-            }
+            if (!Snapshot(obj, ecur, e.bytes)) continue;
+            if (e.havePrev) Diff(e.label, e.prev, ecur, e.bytes);
+            memcpy(e.prev, ecur, e.bytes);
+            e.havePrev = true;
         }
     }
 }
@@ -144,11 +179,15 @@ extern "C" void gs_OnMinimapTick(void* self)
     if (g_probe.load() && (n % kSampleTicks) == 0) Probe(self);
 
     // A mark asked for elsewhere lands here, on the thread that owns icons.
+    // The pin must land where the crosshair points, not where the player
+    // stands. Until the aim is known, a request is logged with everything
+    // this build does know, and nothing is placed.
     if (g_markPending.exchange(false))
     {
-        void* root = g_worldRoot.load();
-        if (!root) root = gs::mapicon::LastWorldRoot();
-        gs::mapicon::PlacePinNow(root, g_markX, g_markZ, g_markLabel);
+        const gs::player::Pos pp = gs::player::Read();
+        GS_LOG("[mark] requested. player at (%.3f, %.3f, %.3f)%s; aim not known yet, nothing placed",
+               pp.x, pp.y, pp.z, pp.valid ? "" : " (position walk not proven)");
+        (void)g_markX; (void)g_markZ; (void)g_markLabel;
     }
 }
 
@@ -181,12 +220,29 @@ namespace gs::tick
     uint32_t ThreadId() { return g_thread.load(); }
     void SetProbe(bool on) { g_probe.store(on); }
 
-    void SetExtraProbe(const char* label, void* object, size_t bytes)
+    void AddProbe(const char* label, void* object, size_t bytes)
     {
-        strncpy_s(g_extraLabel, sizeof(g_extraLabel), label ? label : "extra", _TRUNCATE);
-        g_extraBytes = bytes > kExtraMax ? kExtraMax : bytes;
-        g_extraHavePrev = false;
-        g_extra.store(object);
+        for (Extra& e : g_extras)
+        {
+            if (e.object.load() == object) return;
+        }
+        for (Extra& e : g_extras)
+        {
+            if (e.object.load()) continue;
+            strncpy_s(e.label, sizeof(e.label), label ? label : "extra", _TRUNCATE);
+            e.bytes = bytes > kExtraMax ? kExtraMax : bytes;
+            e.havePrev = false;
+            e.object.store(object);
+            GS_LOG("[probe] watching %s at 0x%p, %zu bytes", e.label, object, e.bytes);
+            return;
+        }
+        GS_LOG("[probe] no free slot for %s", label ? label : "extra");
+    }
+
+    void DropProbe(void* object)
+    {
+        for (Extra& e : g_extras)
+            if (e.object.load() == object) e.object.store(nullptr);
     }
 
     void RequestMark(float x, float z, const char* label)

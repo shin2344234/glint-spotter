@@ -91,7 +91,18 @@ namespace
 
             // Bytes by value ride in a full slot with whatever was above them.
             c->byte9 = static_cast<uint8_t>(reinterpret_cast<uintptr_t>(a[8]) & 0xFF);
-            if (a[9]) memcpy(c->struct10, a[9], sizeof(c->struct10));
+            if (a[9])
+            {
+                memcpy(c->struct10, a[9], sizeof(c->struct10));
+                // Five pins with different shapes and colours were identical in
+                // every argument, so the style is behind this pointer or set later.
+                const uint8_t* pt = *reinterpret_cast<uint8_t* const*>(c->struct10 + 0x10);
+                if (pt && gs::rtti::Readable(pt, sizeof(c->pointee)))
+                {
+                    memcpy(c->pointee, pt, sizeof(c->pointee));
+                    c->pointeeOk = true;
+                }
+            }
             c->byte11 = static_cast<uint8_t>(reinterpret_cast<uintptr_t>(a[10]) & 0xFF);
             c->ok = true;
             return true;
@@ -149,6 +160,18 @@ namespace
             GS_LOG("    raw: %p %p %p %p | %p %p %p %p %p %p %p",
                    c.raw[0], c.raw[1], c.raw[2], c.raw[3], c.raw[4], c.raw[5], c.raw[6],
                    c.raw[7], c.raw[8], c.raw[9], c.raw[10]);
+            if (pin && c.pointeeOk)
+            {
+                const uint8_t* q = c.pointee;
+                GS_LOG("    pointee +00 %02X%02X%02X%02X%02X%02X%02X%02X %02X%02X%02X%02X%02X%02X%02X%02X"
+                       "  +10 %02X%02X%02X%02X%02X%02X%02X%02X %02X%02X%02X%02X%02X%02X%02X%02X",
+                       q[0],q[1],q[2],q[3],q[4],q[5],q[6],q[7],q[8],q[9],q[10],q[11],q[12],q[13],q[14],q[15],
+                       q[16],q[17],q[18],q[19],q[20],q[21],q[22],q[23],q[24],q[25],q[26],q[27],q[28],q[29],q[30],q[31]);
+                GS_LOG("    pointee +20 %02X%02X%02X%02X%02X%02X%02X%02X %02X%02X%02X%02X%02X%02X%02X%02X"
+                       "  +30 %02X%02X%02X%02X%02X%02X%02X%02X %02X%02X%02X%02X%02X%02X%02X%02X",
+                       q[32],q[33],q[34],q[35],q[36],q[37],q[38],q[39],q[40],q[41],q[42],q[43],q[44],q[45],q[46],q[47],
+                       q[48],q[49],q[50],q[51],q[52],q[53],q[54],q[55],q[56],q[57],q[58],q[59],q[60],q[61],q[62],q[63]);
+            }
         }
         else if (n % kSummaryEvery == 0)
         {
