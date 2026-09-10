@@ -35,10 +35,17 @@ namespace gs::scan
         // A hit is only reported when this many bytes fit between it and the end
         // of its own region. The whole region is already known committed and
         // readable, so this is the fit test and the readable test at once.
-        size_t objectBytes = 0;
+        // Per needle, because a root control is 3144 bytes and an icon is not.
+        const size_t* needleBytes = nullptr;
+
+        // Widen past the heap. Off is private, committed, read-write, which is
+        // where a heap object lives and is fast. On also takes mapped regions,
+        // copy-on-write and executable-writable pages, for when the narrow pass
+        // came back empty and coverage matters more than the clock.
+        bool wideKinds = false;
 
         // Regions bigger than this are skipped. A UI control comes from the
-        // general allocator; the multi-hundred-megabyte regions are asset pools.
+        // general allocator; the multi-gigabyte regions are asset pools.
         // Report::bytesSkippedLarge says how much this threw away, so a miss can
         // be told apart from a bad threshold.
         size_t maxRegionBytes = 256ull * 1024 * 1024;
@@ -46,7 +53,7 @@ namespace gs::scan
         // Wall clock ceiling. Time is what the player notices, not bytes.
         uint64_t timeBudgetMs = 4000;
 
-        size_t maxHits = 64;
+        size_t maxHits = 256;
     };
 
     struct Report

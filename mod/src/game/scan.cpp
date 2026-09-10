@@ -6,7 +6,7 @@
 
 namespace
 {
-    constexpr size_t kMaxNeedles = 8;
+    constexpr size_t kMaxNeedles = 64;
 
     // One raw hit, flat so the guarded frame below holds no C++ objects.
     struct RawHit
@@ -25,7 +25,7 @@ namespace
     // no second probe, and one with less is noise that never leaves this loop.
     size_t ScanRegion(const uint8_t* base, size_t size,
                       const uintptr_t* needles, size_t needleCount,
-                      size_t objectBytes, RawHit* outBuf, size_t outCap,
+                      const size_t* needleBytes, RawHit* outBuf, size_t outCap,
                       size_t* rawMatches, size_t* rejectedNoRoom)
     {
         size_t found = 0;
@@ -45,7 +45,7 @@ namespace
                     if (v != needles[n]) continue;
                     ++*rawMatches;
                     const size_t off = i * sizeof(uintptr_t);
-                    if (off + objectBytes > size)
+                    if (off + needleBytes[n] > size)
                     {
                         ++*rejectedNoRoom;
                         break;
@@ -80,6 +80,13 @@ namespace gs::scan
     {
         Report rep{};
         if (!needles || needleCount == 0 || needleCount > kMaxNeedles) return rep;
+        if (!opt.needleBytes) return rep;
+
+        // The cheapest region reject: one too small to hold even the smallest
+        // thing we are looking for cannot hold any of them.
+        size_t smallest = static_cast<size_t>(-1);
+        for (size_t i = 0; i < needleCount; ++i)
+            if (opt.needleBytes[i] < smallest) smallest = opt.needleBytes[i];
 
         LARGE_INTEGER freq{}, start{}, now{};
         QueryPerformanceFrequency(&freq);
@@ -110,16 +117,21 @@ namespace gs::scan
             // MEM_IMAGE holds the vtable itself and every static pointer to it,
             // which are not objects, and executable pages are code.
             const DWORD prot = mbi.Protect & 0xFF;
-            const bool kindOk = mbi.State == MEM_COMMIT &&
-                                mbi.Type == MEM_PRIVATE &&
-                                prot == PAGE_READWRITE &&
+            const bool writable = prot == PAGE_READWRITE ||
+                                  (opt.wideKinds && (prot == PAGE_WRITECOPY ||
+                                                     prot == PAGE_EXECUTE_READWRITE ||
+                                                     prot == PAGE_EXECUTE_WRITECOPY ||
+                                                     prot == PAGE_READONLY));
+            const bool typeOk = mbi.Type == MEM_PRIVATE ||
+                                (opt.wideKinds && mbi.Type == MEM_MAPPED);
+            const bool kindOk = mbi.State == MEM_COMMIT && typeOk && writable &&
                                 (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0;
 
             if (!kindOk)
             {
                 rep.regionsSkippedKind++;
             }
-            else if (regionSize < opt.objectBytes)
+            else if (regionSize < smallest)
             {
                 rep.regionsSkippedSmall++;
             }
@@ -133,7 +145,7 @@ namespace gs::scan
                 const size_t room = opt.maxHits - out.size();
                 const size_t cap = room < 256 ? room : 256;
                 const size_t got = ScanRegion(regionBase, regionSize, needles, needleCount,
-                                              opt.objectBytes, buf, cap,
+                                              opt.needleBytes, buf, cap,
                                               &rep.rawMatches, &rep.rejectedNoRoom);
                 for (size_t i = 0; i < got; ++i)
                 {

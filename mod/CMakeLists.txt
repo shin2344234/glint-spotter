@@ -22,6 +22,7 @@ add_library(GlintSpotter SHARED
     src/core/mod.cpp
     src/game/rtti.cpp
     src/game/scan.cpp
+    src/game/typescan.cpp
 )
 
 target_include_directories(GlintSpotter PRIVATE src)
