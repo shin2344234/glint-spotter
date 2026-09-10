@@ -724,3 +724,44 @@ The pin's identity. Key ids from 1001 up are ours; the label is a free string.
 Whether the game persists these pins across a save, and whether it lets the
 player delete one placed with an id it did not issue, are two things a session
 will answer and static analysis will not.
+
+## Confirmed at runtime: the player's position and the flash flag
+
+Session thirteen, 10 September 2026, probe 0.4.2. Both read on the game's
+thread, no hooks beyond the two already in place.
+
+The way in is the player's `ClientSpecialModeActorComponent`, which the scan
+finds by RTTI. Its `+0x08` is the played body:
+
+```
+component +0x08  -> ClientChildOnlyInGameActor           the played body
+actor     +0x68  -> component block
+block     +0x1A0 -> ClientTransformSyncActorComponent    the transform
+transform +0xB4  float3 position, parent-relative
+transform +0xC8  u32 parent id, 0xFFFFFFFF for none
+transform +0xEC  float3 parent world position
+```
+
+Thirty samples over a minute of play moved as the player walked, and the
+elevation matched the map's own player marker to the centimetre. The offsets
+are Master Looter's; the walk from the special component is new.
+
+The component block, for the record, by slot: user login `+0x08`, child
+container `+0x18`, status `+0x20`, sub level `+0x28`, equip slot `+0x38`,
+character control `+0x40`, vehicle `+0x48`, **detect `+0x50`**, ai `+0x58`,
+effect `+0x60`, frame event `+0x68`, catch `+0x70`, remote catch `+0x78`.
+`ClientDetectActorComponent` at `+0x50` is the blinding flash's own per-actor
+state, and the next build reads the aim from it.
+
+The flash flag: the special component's `+0x40` holds the player actor id,
+`A0100001`, while the flash is on and zero when it is off. `+0xE0` holds an
+`IRefCounted` object at the same time and is cleared with it.
+
+### The camera, and why the player stops turning in circles
+
+Three camera sessions found no float moving in any camera object within its
+first 1 KB: `CameraManager`, two `PlayerCameraComponent`s, `PlayerCameraTPSMode`.
+The view state is elsewhere or further in. It is no longer hunted by the
+player. The aim comes from the detect component, which needs no camera at all,
+and the view direction for marking things that do not glint will be read out of
+the binary from `PlayerCameraComponent`'s methods.

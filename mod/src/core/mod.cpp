@@ -10,6 +10,7 @@
 #include "core/settings.h"
 #include "game/mapicon.h"
 #include "game/player.h"
+#include "game/aim.h"
 #include "hook/pad.h"
 #include "hook/tick.h"
 #include "game/rtti.h"
@@ -52,7 +53,7 @@ namespace
     // floats that all move when the player turns.
     const char* const kKeywords[] = {
         "MapIcon", "MiniMap", "Minimap", "WorldMap", "DetectMode", "SpecialMode",
-        "Camera",
+        "ClientDetectActorComponent", "ClientTransformSyncActorComponent",
     };
 
     const char* ShortName(const char* decorated)
@@ -428,8 +429,9 @@ namespace
                 }
                 else if (isCamera)
                 {
-                    // A view matrix announces itself as sixteen floats moving.
-                    gs::tick::AddProbe(ShortName(t.info.name), t.object, 0x400);
+                    // Not probed by the player any more. The view direction is
+                    // found from the binary offline; the aim comes from the
+                    // detect component instead.
                 }
             }
             if (found > shown) GS_LOG("  ... %zu more", found - shown);
@@ -569,7 +571,7 @@ namespace
         gs::pad::Init();
         g_key = cfg.key;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
-        GS_LOG("press %s (VK %02X) or RB+LB+A while aiming; this build logs the aim state and places nothing", gs::Settings::KeyName(cfg.key), cfg.key);
+        GS_LOG("press %s (VK %02X) or RB+LB+A with the flash aimed at a glint to pin the glint", gs::Settings::KeyName(cfg.key), cfg.key);
 
         // Early passes hunt for something that may not exist yet, so they come
         // quickly. Once everything is in hand a tick is one pointer read each and
@@ -584,6 +586,15 @@ namespace
                 if (!g_targets[i].hunt) continue;
                 ++hunted;
                 live += Recheck(g_targets[i]) ? 1 : 0;
+            }
+
+            // The two objects the aim depends on, once the player walk has
+            // named them. They change during ordinary play, so no ritual.
+            static bool watchingAim = false;
+            if (!watchingAim && gs::player::DetectComponent())
+            {
+                watchingAim = true;
+                gs::tick::AddProbe("detect", reinterpret_cast<void*>(gs::player::DetectComponent()), 0x400);
             }
 
             if (live < hunted)

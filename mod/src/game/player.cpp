@@ -8,6 +8,7 @@
 
 #include "core/log.h"
 #include "game/rtti.h"
+#include "game/aim.h"
 
 namespace
 {
@@ -21,6 +22,8 @@ namespace
     constexpr uintptr_t kOff_Tf_ParentPos  = 0xEC;
 
     std::atomic<void*> g_comp{nullptr};
+    std::atomic<uintptr_t> g_actor{0};
+    std::atomic<uintptr_t> g_detect{0};
     std::mutex g_mutex;
     gs::player::Pos g_last;
     int g_describeLeft = 3;   // first few reads log the whole walk
@@ -140,6 +143,27 @@ namespace gs::player
         }
 
         p.x = v[0]; p.y = v[1]; p.z = v[2]; p.valid = true;
+        if (g_actor.load() != actor)
+        {
+            g_actor.store(actor);
+            gs::aim::SetPlayerActor(actor);
+            gs::aim::SetSpecialComponent(comp);
+            // The flash's own component sits in the same block. Found by
+            // name, because slots can move between patches and names do not.
+            const uintptr_t comps = Deref(actor + kOff_Ent_Comps);
+            for (uintptr_t off = 0; comps && off < kComps_SlotsEnd; off += 8)
+            {
+                const uintptr_t c = Deref(comps + off);
+                const char* n = c ? NameOf(c) : nullptr;
+                if (n && strstr(n, "ClientDetectActorComponent"))
+                {
+                    g_detect.store(c);
+                    gs::aim::SetDetectComponent(c);
+                    GS_LOG_OK("[player] detect component at block+0x%llX -> 0x%p",
+                              static_cast<unsigned long long>(off), reinterpret_cast<void*>(c));
+                }
+            }
+        }
         std::lock_guard<std::mutex> lock(g_mutex);
         g_last = p;
         return p;
@@ -150,4 +174,7 @@ namespace gs::player
         std::lock_guard<std::mutex> lock(g_mutex);
         return g_last;
     }
+
+    uintptr_t Actor() { return g_actor.load(); }
+    uintptr_t DetectComponent() { return g_detect.load(); }
 }

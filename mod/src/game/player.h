@@ -34,4 +34,9 @@ namespace gs::player
 
     // The most recent valid read, for callers on other threads.
     Pos Last();
+
+    // The actor the walk resolved and the detect component in its block, both
+    // zero until the first successful read.
+    uintptr_t Actor();
+    uintptr_t DetectComponent();
 }

@@ -11,6 +11,7 @@
 #include "hook/vtable.h"
 #include "game/mapicon.h"
 #include "game/player.h"
+#include "game/aim.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
 extern "C" void* gs_minimapOriginal = nullptr;
@@ -179,14 +180,27 @@ extern "C" void gs_OnMinimapTick(void* self)
     if (g_probe.load() && (n % kSampleTicks) == 0) Probe(self);
 
     // A mark asked for elsewhere lands here, on the thread that owns icons.
-    // The pin must land where the crosshair points, not where the player
-    // stands. Until the aim is known, a request is logged with everything
-    // this build does know, and nothing is placed.
+    // The pin lands where the flash is aimed: the actor the detect component
+    // is focused on, read on this thread. Nothing is placed at the player.
     if (g_markPending.exchange(false))
     {
         const gs::player::Pos pp = gs::player::Read();
-        GS_LOG("[mark] requested. player at (%.3f, %.3f, %.3f)%s; aim not known yet, nothing placed",
-               pp.x, pp.y, pp.z, pp.valid ? "" : " (position walk not proven)");
+        const bool flash = gs::aim::FlashActive();
+        GS_LOG("[mark] requested. player at (%.3f, %.3f, %.3f), flash %s",
+               pp.x, pp.y, pp.z, flash ? "on" : "off");
+        const gs::aim::Target t = gs::aim::Resolve();
+        if (t.valid)
+        {
+            void* root = g_worldRoot.load();
+            if (!root) root = gs::mapicon::LastWorldRoot();
+            const float dx = t.x - pp.x, dz = t.z - pp.z;
+            GS_LOG("[mark] target %.1f units away; placing a Glint pin there", std::sqrt(dx * dx + dz * dz));
+            gs::mapicon::PlacePinNow(root, t.x, t.z, "Glint");
+        }
+        else
+        {
+            GS_LOG("[mark] no target resolved, nothing placed");
+        }
         (void)g_markX; (void)g_markZ; (void)g_markLabel;
     }
 }
