@@ -646,3 +646,80 @@ Two smaller things for the next build. Regions over 256 MB are still skipped and
 pass four skipped one of 275 MB; with residency filtering the size cap costs
 little and should rise. And the slot counter walks past the end of short vtables,
 so the slot count it logs is only meaningful for the two root controls.
+
+## Confirmed at runtime: a native pin, placed by the mod
+
+Session ten, 10 September 2026, probe 0.3.1. The first call the plugin ever made
+into the game placed a custom marker on the world map, and it showed up.
+
+```
+[spy world #430] game pin   type=0x0001 key=0/0x15    pos=(-9699.016, 0.000, -4551.179) label="Marker"
+[replay #1]      our pin    type=0x0001 key=1001/0x15 pos=(-9669.016, 0.000, -4521.179) label="Marker"
+[replay #1]      returned 0x1
+```
+
+The call is slot 170 on the world map root control, made on the game's own UI
+thread from inside a detour on that slot, right after the game placed a pin of
+its own. Every argument except two was byte for byte what the game had just
+passed: the position moved 30 units, and the key id started at 1001 so it could
+never land on the game's own counter. The struct at argument ten went in zeroed,
+because the captured one carries a pointer the constructor takes ownership of.
+
+### The argument list, settled
+
+Eleven arguments to slot 170, read from ten sessions of spying and one working
+call. The first spy build read thirteen: the dispatcher pushes seven registers
+where the constructor pushes five, and reusing the constructor's offsets put
+every stack argument two slots off. Return addresses turning up as a "struct"
+is what caught it.
+
+| # | where | what | pin value |
+|---|---|---|---|
+| 1 | RCX | the root control | scanned pointer |
+| 2 | RDX | `const uint16_t*` icon type | `0x0001` |
+| 3 | R8 | `const {int64 id; uint8 kind}*` key | `{n, 0x15}` |
+| 4 | R9 | `const uint32_t*` | `0` |
+| 5 | stack | `const float*` | `0` |
+| 6 | stack | `const float3*` position, Y is zero for a pin | world X, 0, world Z |
+| 7 | stack | `const char*` label, may be null | `"Marker"` |
+| 8 | stack | `const char*` icon name, must be non-empty | `"MapIcon_Pin_Marker"` |
+| 9 | stack | `uint8_t` by value | `0` |
+| 10 | stack | `const struct*` count at +4, pointer at +0x10 | zeroed |
+| 11 | stack | `uint8_t` by value | `1` |
+
+Other icon kinds seen through the same slot, for later: `MapIcon_ActorFocus` is
+the player, type 0, keyed by actor `A0100001` with kind `0x0C`, and it is created
+once at first map open and never refreshed, so it is not a live position.
+`MapIcon_StageFog` is type `0x020F` kind `0x02` with the radius in argument five.
+`MapIcon_PathFinderDestination` is type `0x0003` with kind `0x15`, the game's own
+Set Destination pin, and `0x15` is the constructor's default key kind.
+
+### What the game does with icons
+
+It builds them all once, on the first map open of the session, about four
+hundred calls in five seconds, and after that only a pin placement creates one.
+Reopening the map creates nothing. That is why session nine's replay, queued to
+run behind the next icon, never ran, and why the trigger became the pin
+placement itself.
+
+### What is left for the feature
+
+Three things, and none of them is a mystery any more.
+
+The trigger. The replay runs on the game's thread because it piggybacks on a
+game call into slot 170, and those only happen at map open and pin placement.
+The real feature needs a game-thread moment of its own choosing: hold the flash,
+see a glint, drop a pin. The per frame update at slot 35 is that moment and
+Crimson Route already owns the slot on both roots; stacking on it is the same
+shape as the D3D12 present hook problem, and that is the conversation with
+dofo7777 that is still drafted under `private`.
+
+The glint. Which objects are lit is data the game holds, `IsStageDetectModeTarget`
+and the `fx_detectmode_knowledge_gimmick` effect, and the entity scan from
+Master Looter already names every gimmick in range. Joining the two is the part
+that is not written yet.
+
+The pin's identity. Key ids from 1001 up are ours; the label is a free string.
+Whether the game persists these pins across a save, and whether it lets the
+player delete one placed with an id it did not issue, are two things a session
+will answer and static analysis will not.
