@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <cstdarg>
 #include <cstdio>
+#include <share.h>
 #include <mutex>
 #include <string>
 
@@ -65,7 +66,10 @@ namespace gs::Log
         // __fastfail, so the first fprintf below took the whole process down with
         // STATUS_STACK_BUFFER_OVERRUN and left this file holding nothing but the
         // byte order mark. Everything written here is ASCII, so bytes are enough.
-        _wfopen_s(&g_file, g_path.c_str(), L"w");
+        // _wfopen_s opens with deny-read sharing, so the log could not be read
+        // while the game was running and the first session had to be played
+        // twice. _SH_DENYWR keeps other writers out and lets readers in.
+        g_file = _wfsopen(g_path.c_str(), L"w", _SH_DENYWR);
     }
 
     void Write(const char* level, const char* fmt, ...)

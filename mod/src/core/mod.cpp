@@ -15,6 +15,7 @@ namespace
 {
     std::atomic<bool> g_stop{false};
     HANDLE g_thread = nullptr;
+    void* g_self = nullptr;
 
     struct Target
     {
@@ -32,6 +33,27 @@ namespace
     uintptr_t GameBase()
     {
         return reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    }
+
+    // __DATE__ and __TIME__ bake in when mod.cpp last compiled, and mod.cpp only
+    // recompiles when its own dependencies change, so the banner goes stale while
+    // the rest of the plugin moves. Master Looter's notes call this out after it
+    // cost a test round there. Report what the file on disk actually says instead.
+    void LogBuildStamp(void* selfModule)
+    {
+        wchar_t path[MAX_PATH]{};
+        if (!GetModuleFileNameW(static_cast<HMODULE>(selfModule), path, MAX_PATH)) return;
+
+        WIN32_FILE_ATTRIBUTE_DATA fad{};
+        if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) return;
+
+        SYSTEMTIME utc{}, local{};
+        FileTimeToSystemTime(&fad.ftLastWriteTime, &utc);
+        SystemTimeToTzSpecificLocalTime(nullptr, &utc, &local);
+
+        GS_LOG("plugin file written %04d-%02d-%02d %02d:%02d:%02d, %lu bytes",
+               local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute,
+               local.wSecond, fad.nFileSizeLow);
     }
 
     // Confirm the address named in signatures.h still holds the class we expect.
@@ -162,7 +184,8 @@ namespace
 {
     DWORD WINAPI Worker(LPVOID)
     {
-        GS_LOG("Glint Spotter %s probe, built %s %s", GS_VERSION_STRING, __DATE__, __TIME__);
+        GS_LOG("Glint Spotter %s probe", GS_VERSION_STRING);
+        LogBuildStamp(g_self);
         GS_LOG("Read-only. It looks for two UI objects and writes what it finds. No hooks, nothing called.");
 
         const uintptr_t base = GameBase();
@@ -248,6 +271,7 @@ namespace gs::Mod
     void Initialize(void* selfModule)
     {
         InstallInvalidParameterHandler();
+        g_self = selfModule;
 #if GS_STAGE >= 2
         Log::Start(selfModule);
 #else
