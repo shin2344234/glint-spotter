@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "core/log.h"
+#include "core/settings.h"
+#include "game/mapicon.h"
 #include "game/rtti.h"
 #include "game/scan.h"
 #include "game/signatures.h"
@@ -105,6 +107,9 @@ namespace
         delete canary;
     }
 
+    uintptr_t g_worldVt = 0;
+    uintptr_t g_miniVt = 0;
+
     void Discover()
     {
         uintptr_t base = 0;
@@ -158,8 +163,13 @@ namespace
                     strcmp(g_targets[i].info.name, e.name) == 0)
                     agreed = true;
             if (agreed)
+            {
                 GS_LOG_OK("signatures.h +0x%08llX still matches %s",
                           static_cast<unsigned long long>(e.rva), ShortName(e.name));
+                // Only a vtable the running game has just named gets hooked.
+                if (e.rva == gs::sig::kWorldMapVtable) g_worldVt = base + e.rva;
+                if (e.rva == gs::sig::kMiniMapVtable)  g_miniVt = base + e.rva;
+            }
             else
                 GS_LOG_ERR("signatures.h +0x%08llX no longer matches %s, RVAs are stale",
                            static_cast<unsigned long long>(e.rva), ShortName(e.name));
@@ -326,6 +336,9 @@ namespace
         // of the heap was never looked at. This runs only while something is
         // still missing, so a long pass costs a pause and not a stutter.
         opt.timeBudgetMs = 25000;
+        // Session six skipped one 275 MB region as too large. With residency
+        // filtering the size cap buys little, so it is generous now.
+        opt.maxRegionBytes = 1024ull * 1024 * 1024;
 
         std::vector<gs::scan::Hit> hits;
         gs::scan::Report rep = gs::scan::FindPointers(needles, n, hits, opt);
@@ -381,6 +394,29 @@ namespace
         return false;
     }
 
+    // What the hotkey does in this build: nothing to the game. It reports what
+    // the spy has seen and what a replay would pass, so the key path and the
+    // captured data can both be checked before a call is ever made.
+    void DryRun()
+    {
+        const uint64_t w = gs::mapicon::Seen(0);
+        const uint64_t m = gs::mapicon::Seen(1);
+        GS_LOG("[key] pressed. spy has seen %llu world map and %llu minimap create calls",
+               static_cast<unsigned long long>(w), static_cast<unsigned long long>(m));
+
+        gs::mapicon::Capture c;
+        if (!gs::mapicon::Last(0, c))
+        {
+            GS_LOG("[key] no world map call captured yet, nothing to replay from. Open the map first.");
+            return;
+        }
+        GS_LOG("[key] dry run. A replay would call slot 170 on 0x%p with type=0x%04X name=\"%s\"",
+               c.self, c.type, c.name10);
+        GS_LOG("[key]   at (%.3f, %.3f, %.3f) shifted 5 m north, key5=%016llX/%02X plus one, all else as captured",
+               c.pos[0], c.pos[1], c.pos[2], static_cast<unsigned long long>(c.key5q), c.key5b);
+        GS_LOG("[key]   this build does not make that call");
+    }
+
     // The CRT answers an invalid parameter by calling __fastfail, which kills the
     // whole process. That is a defensible default for an application and a
     // terrible one for a plugin living in someone else's: opening the log in the
@@ -431,6 +467,8 @@ namespace
 
         // The exe is mapped long before the UI exists, so RTTI can be read early
         // even though nothing has been built from it yet.
+        const gs::Settings::Values& cfg = gs::Settings::Load(g_self);
+
         for (int i = 0; i < 16 && !g_stop.load(); ++i) Sleep(500);
         SelfTest();
         Discover();
@@ -440,11 +478,25 @@ namespace
             return 0;
         }
 
+        // The first write to the game: one pointer in each of two vtables, only
+        // after the running exe has named both classes itself.
+        if (cfg.spy)
+        {
+            const int n = gs::mapicon::InstallSpy(g_worldVt, g_miniVt);
+            GS_LOG("spy: %d of 2 slots taken. Open the map and every icon the game creates is logged.", n);
+        }
+        else
+        {
+            GS_LOG("spy: off in the ini, the vtables are untouched");
+        }
+        GS_LOG("press %s (VK %02X) to log what a replay would use", gs::Settings::KeyName(cfg.key), cfg.key);
+
         // Early passes hunt for something that may not exist yet, so they come
         // quickly. Once everything is in hand a tick is one pointer read each and
         // the address space is left alone.
         int pass = 0;
         int idle = 0;
+        bool keyWasDown = false;
         while (!g_stop.load())
         {
             size_t live = 0, hunted = 0;
@@ -466,8 +518,16 @@ namespace
                 GS_LOG_OK("all %zu located, holding. Nothing more unless one changes.", hunted);
             }
 
-            const int ticks = (pass < 6) ? 10 : 30;  // 5 s early, 15 s once settled
-            for (int i = 0; i < ticks && !g_stop.load(); ++i) Sleep(500);
+            // 50 ms steps so a key press is not missed, edge-detected so a held
+            // key fires once. GetAsyncKeyState is a read; it steals nothing.
+            const int ticks = (pass < 6) ? 100 : 300;  // 5 s early, 15 s once settled
+            for (int i = 0; i < ticks && !g_stop.load(); ++i)
+            {
+                const bool down = (GetAsyncKeyState(static_cast<int>(cfg.key)) & 0x8000) != 0;
+                if (down && !keyWasDown) DryRun();
+                keyWasDown = down;
+                Sleep(50);
+            }
         }
         return 0;
     }
@@ -506,6 +566,10 @@ namespace gs::Mod
         // On process teardown the loader lock is held and other threads are
         // already gone, so waiting on one is how a plugin hangs an exit.
         if (!processTerminating && g_thread) WaitForSingleObject(g_thread, 3000);
+        // The vtable slots go back only when the process is staying up. On
+        // teardown the game is leaving anyway, and a write to its memory from
+        // inside DllMain buys nothing.
+        if (!processTerminating) gs::mapicon::RemoveSpy();
         if (g_thread)
         {
             CloseHandle(g_thread);

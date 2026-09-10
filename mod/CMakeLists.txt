@@ -5,8 +5,9 @@ project(GlintSpotter LANGUAGES CXX)
 # an ASI loader (winmm.dll from Ultimate ASI Loader) injects, the same loader
 # Master Looter already uses.
 #
-# 0.1.0 is a probe. No ImGui, no DirectX, no detours, so no FetchContent and no
-# third-party code at all. It scans for two UI objects and writes a log.
+# 0.2.0 spies. Still no ImGui, no DirectX, no third-party code. It finds the map
+# root controls read-only, then replaces one vtable slot on each with a logging
+# detour that forwards every argument unchanged. Nothing is created or altered.
 
 if(NOT WIN32)
     message(FATAL_ERROR "Glint Spotter targets Windows only.")
@@ -23,6 +24,9 @@ add_library(GlintSpotter SHARED
     src/game/rtti.cpp
     src/game/scan.cpp
     src/game/typescan.cpp
+    src/game/mapicon.cpp
+    src/hook/vtable.cpp
+    src/core/settings.cpp
 )
 
 target_include_directories(GlintSpotter PRIVATE src)
