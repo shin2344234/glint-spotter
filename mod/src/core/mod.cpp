@@ -134,6 +134,17 @@ namespace
             return false;
         }
 
+        // In a table of vtable pointers the neighbouring qword is another
+        // vtable, and in an object it is member data. Session two found 112
+        // candidates and every one was a table entry, so this test is what
+        // separates the two.
+        const auto* q = static_cast<const uintptr_t*>(t.object);
+        if (gs::rtti::VtableClassName(reinterpret_cast<const void*>(q[1])))
+        {
+            GS_LOG("    +08 is itself a vtable, so this is a pointer table, dropped");
+            return false;
+        }
+
         auto** vt = *reinterpret_cast<void***>(t.object);
         const int want = gs::sig::kSlotCreateIcon + 1;
         if (t.info.slots >= want &&
@@ -168,6 +179,42 @@ namespace
                rep.rawMatches, rep.rejectedNoRoom);
     }
 
+    // A region that answers to several different classes at once is a table of
+    // vtable pointers rather than a heap. One 48 KB region in session two held
+    // hits for all 56 classes and every one of them was noise. Returns how many
+    // hits are left standing.
+    size_t DropPointerTables(std::vector<gs::scan::Hit>& hits)
+    {
+        constexpr size_t kTableThreshold = 4;
+        for (size_t a = 0; a < hits.size(); ++a)
+        {
+            if (!hits[a].object) continue;
+            int seen[kMaxNeedles]{};
+            size_t distinct = 0;
+            for (size_t b = a; b < hits.size(); ++b)
+            {
+                if (!hits[b].object || hits[b].regionBase != hits[a].regionBase) continue;
+                bool already = false;
+                for (size_t k = 0; k < distinct; ++k)
+                    if (seen[k] == hits[b].needle) already = true;
+                if (!already && distinct < kMaxNeedles) seen[distinct++] = hits[b].needle;
+            }
+            if (distinct < kTableThreshold) continue;
+
+            size_t dropped = 0;
+            const uintptr_t region = hits[a].regionBase;
+            for (gs::scan::Hit& h : hits)
+                if (h.regionBase == region && h.object) { h.object = nullptr; ++dropped; }
+            GS_LOG("  region 0x%llX answers to %zu different classes, so it is a table "
+                   "of vtable pointers; %zu hit(s) discarded",
+                   static_cast<unsigned long long>(region), distinct, dropped);
+        }
+
+        size_t live = 0;
+        for (const gs::scan::Hit& h : hits) live += h.object ? 1 : 0;
+        return live;
+    }
+
     // One walk covering every class with no live pointer yet. Narrow first
     // because it is fast, then wide in the same tick if everything came back
     // empty, because a session costs real time and coming back with nothing is
@@ -191,18 +238,26 @@ namespace
 
         gs::scan::Options opt;
         opt.needleBytes = bytes;
+        // Session two spent its four seconds on 509 MB and stopped there, so most
+        // of the heap was never looked at. This runs only while something is
+        // still missing, so a long pass costs a pause and not a stutter.
+        opt.timeBudgetMs = 25000;
 
         std::vector<gs::scan::Hit> hits;
         gs::scan::Report rep = gs::scan::FindPointers(needles, n, hits, opt);
         LogReport("narrow scan", rep);
 
-        if (hits.empty())
+        // Tables have to be thrown out before deciding whether to widen, or a
+        // hundred table entries read as success and the wide pass never runs.
+        if (DropPointerTables(hits) == 0)
         {
+            hits.clear();
             opt.wideKinds = true;
-            opt.timeBudgetMs = 45000;
+            opt.timeBudgetMs = 60000;
             opt.maxRegionBytes = 4ull * 1024 * 1024 * 1024;
             rep = gs::scan::FindPointers(needles, n, hits, opt);
             LogReport("wide scan", rep);
+            DropPointerTables(hits);
         }
 
         for (size_t i = 0; i < n; ++i)
@@ -210,7 +265,7 @@ namespace
             Target& t = g_targets[slotOf[i]];
             size_t found = 0;
             for (const gs::scan::Hit& h : hits)
-                if (h.needle == static_cast<int>(i)) ++found;
+                if (h.object && h.needle == static_cast<int>(i)) ++found;
             if (found == 0) continue;
 
             t.candidates = found;
@@ -219,7 +274,7 @@ namespace
             size_t shown = 0;
             for (const gs::scan::Hit& h : hits)
             {
-                if (h.needle != static_cast<int>(i)) continue;
+                if (!h.object || h.needle != static_cast<int>(i)) continue;
                 if (shown++ >= 6) break;
                 GS_LOG("  [%zu] 0x%p in region 0x%llX +0x%llX", shown - 1, h.object,
                        static_cast<unsigned long long>(h.regionBase),
