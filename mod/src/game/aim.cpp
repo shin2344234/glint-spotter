@@ -21,7 +21,8 @@ namespace
     std::atomic<uintptr_t> g_player{0};
     std::atomic<uintptr_t> g_detect{0};
     std::atomic<uintptr_t> g_special{0};
-    int g_describeLeft = 4;
+    int g_describeLeft = 8;
+    uint64_t g_press = 0;
 
     uintptr_t Deref(uintptr_t at)
     {
@@ -73,20 +74,37 @@ namespace
         }
     }
 
-    // Dump an object's header as hex and as floats, for a layout that is not
-    // known yet. Only on the first few calls.
-    void DumpHeader(const char* tag, uintptr_t obj, size_t bytes)
+    // The target is not a pointer to an actor: session sixteen's task held the
+    // player, a Havok simulation, and nothing else with RTTI. In this engine
+    // things are keyed by actor id, A0100001 style, so the target is a dword.
+    // Dump the whole object so two presses, one aimed and one not, give the
+    // field by diff, and flag every dword shaped like an id on the way.
+    bool LooksLikeActorId(uint32_t v)
     {
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), bytes)) return;
+        const uint32_t top = v >> 24;
+        return (top == 0xA0 || top == 0xB0 || top == 0xA1 || top == 0xB1) && (v & 0x00FFFFFF) != 0;
+    }
+
+    void DumpObject(const char* tag, uintptr_t obj, size_t bytes)
+    {
+        size_t n = bytes;
+        while (n >= 0x40 && !gs::rtti::Readable(reinterpret_cast<const void*>(obj), n)) n /= 2;
+        if (n < 0x40) return;
         const auto* q = reinterpret_cast<const uint32_t*>(obj);
-        for (size_t off = 0; off + 16 <= bytes; off += 16)
+        for (size_t off = 0; off + 32 <= n; off += 32)
         {
-            float f[4];
-            memcpy(f, q + off / 4, 16);
-            GS_LOG("[aim]   %s +0x%03zX  %08X %08X %08X %08X   %11.3f %11.3f %11.3f %11.3f",
-                   tag, off, q[off/4], q[off/4+1], q[off/4+2], q[off/4+3], f[0], f[1], f[2], f[3]);
+            const size_t i = off / 4;
+            GS_LOG("[dump %s +%03zX] %08X %08X %08X %08X %08X %08X %08X %08X", tag, off,
+                   q[i], q[i+1], q[i+2], q[i+3], q[i+4], q[i+5], q[i+6], q[i+7]);
+        }
+        for (size_t off = 0; off + 4 <= n; off += 4)
+        {
+            const uint32_t v = q[off / 4];
+            if (LooksLikeActorId(v)) GS_LOG("[dump %s] actor id shaped dword at +0x%03zX: %08X", tag, off, v);
         }
     }
+
+    void DumpHeader(const char* tag, uintptr_t obj, size_t bytes) { DumpObject(tag, obj, bytes); }
 
     // Walk one object's pointer fields. Fills out on the first actor that is
     // not the player. Depth 1 also searches pointees that look like holders:
@@ -125,7 +143,7 @@ namespace
                 if (depth > 0 && (strstr(n, "Task") || strstr(n, "Target") || strstr(n, "Detect") ||
                                   strstr(n, "IRefCounted")))
                 {
-                    if (describe && strstr(n, "FindDetectTargetTask")) DumpHeader("task", p, 0x100);
+                    if (describe && strstr(n, "FindDetectTargetTask")) DumpHeader("task", p, 0x300);
                     if (Search(p, player, describe, depth - 1, "task", out)) return true;
                 }
             }
@@ -162,9 +180,13 @@ namespace gs::aim
         const bool describe = g_describeLeft > 0;
         if (describe) --g_describeLeft;
 
-        if (describe) GS_LOG("[aim] detect component 0x%p, special 0x%p, player 0x%p, flash %s",
+        ++g_press;
+        if (describe) GS_LOG("[aim] press %llu: detect component 0x%p, special 0x%p, player 0x%p, flash %s",
+                             static_cast<unsigned long long>(g_press),
                              reinterpret_cast<void*>(detect), reinterpret_cast<void*>(special),
                              reinterpret_cast<void*>(player), FlashActive() ? "on" : "off");
+        if (describe && detect) DumpObject("detect", detect, 0x800);
+        if (describe && special) DumpObject("special", special, 0x400);
 
         if (detect && Search(detect, player, describe, 1, "detect", &t))
         {
