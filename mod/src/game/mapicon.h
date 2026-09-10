@@ -70,4 +70,14 @@ namespace gs::mapicon
     // the next time the game creates a world map icon, and is logged either way.
     // Returns false, with a reason in the log, if there is nothing to replay yet.
     bool RequestReplay();
+
+    // Place a pin now. Must be called on the game's UI thread, which in practice
+    // means from the tick. Uses the constants session ten proved: type 1, kind
+    // 0x15, name MapIcon_Pin_Marker, and a key id of our own from 1001 up.
+    // Returns what slot 170 returned.
+    void* PlacePinNow(void* worldRoot, float x, float z, const char* label);
+
+    // The world map root the spy last saw a call on, or null. The tick uses
+    // this when the scan has not located the object yet.
+    void* LastWorldRoot();
 }

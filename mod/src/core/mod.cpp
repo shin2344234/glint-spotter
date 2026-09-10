@@ -9,6 +9,8 @@
 #include "core/log.h"
 #include "core/settings.h"
 #include "game/mapicon.h"
+#include "hook/pad.h"
+#include "hook/tick.h"
 #include "game/rtti.h"
 #include "game/scan.h"
 #include "game/signatures.h"
@@ -370,6 +372,11 @@ namespace
 
             t.candidates = found;
             GS_LOG_OK("%s: %zu candidate(s)", ShortName(t.info.name), found);
+            // The two objects the tick wants: the world root to place pins on,
+            // and the player's special mode component to watch for the flash.
+            const bool isWorldRoot = strstr(t.info.name, "UIGamePlayControlRootWorldMap") != nullptr;
+            const bool isSpecial = strstr(t.info.name, "ClientSpecialModeActorComponent") != nullptr;
+            (void)isWorldRoot; (void)isSpecial;
 
             size_t shown = 0;
             for (const gs::scan::Hit& h : hits)
@@ -381,6 +388,8 @@ namespace
                        static_cast<unsigned long long>(h.regionSize));
                 t.object = h.object;
                 if (!Describe(t)) t.object = nullptr;
+                else if (isWorldRoot) gs::tick::SetWorldRoot(t.object);
+                else if (isSpecial) gs::tick::SetExtraProbe("special", t.object, 0x400);
             }
             if (found > shown) GS_LOG("  ... %zu more", found - shown);
         }
@@ -399,21 +408,31 @@ namespace
     // What the hotkey does in this build: nothing to the game. It reports what
     // the spy has seen and what a replay would pass, so the key path and the
     // captured data can both be checked before a call is ever made.
-    void OnKey()
+    // The trigger. Position is the best one known at this stage: the last pin
+    // the player placed this session, offset 40 units, so the whole chain from
+    // trigger to tick to pin is proven while the probe is still finding the
+    // live position. Falls back to the player marker, which is stale but real.
+    void OnTrigger(const char* how)
     {
-        const uint64_t w = gs::mapicon::Seen(0);
-        const uint64_t m = gs::mapicon::Seen(1);
-        GS_LOG("[key] pressed. spy has seen %llu world map and %llu minimap create calls",
-               static_cast<unsigned long long>(w), static_cast<unsigned long long>(m));
+        GS_LOG("[trigger] %s. ticks so far %llu on thread %lu", how,
+               static_cast<unsigned long long>(gs::tick::Count()), gs::tick::ThreadId());
 
-        gs::mapicon::Capture player;
-        if (gs::mapicon::LastPlayer(player))
-            GS_LOG("[key] player marker last seen at (%.3f, %.3f, %.3f)",
-                   player.pos[0], player.pos[1], player.pos[2]);
-        else
-            GS_LOG("[key] no player marker seen yet; a replay would land at the captured pin's own position");
-
-        gs::mapicon::RequestReplay();
+        gs::mapicon::Capture c;
+        const char* from = nullptr;
+        if (gs::mapicon::LastPin(c)) from = "last placed pin, offset";
+        else if (gs::mapicon::LastPlayer(c)) from = "player marker from first map open, offset";
+        if (!from)
+        {
+            GS_LOG("[trigger] no position known yet. Open the map once, or place a pin, then try again.");
+            return;
+        }
+        if (gs::tick::Count() == 0)
+        {
+            GS_LOG("[trigger] the tick has never run, so there is no game thread to place from");
+            return;
+        }
+        GS_LOG("[trigger] mark requested at (%.1f, %.1f) from %s", c.pos[0] + 40.0f, c.pos[2] + 40.0f, from);
+        gs::tick::RequestMark(c.pos[0] + 40.0f, c.pos[2] + 40.0f, "GlintSpotter");
     }
 
     // The CRT answers an invalid parameter by calling __fastfail, which kills the
@@ -466,8 +485,10 @@ namespace
         while (!g_stop.load())
         {
             const bool down = (GetAsyncKeyState(static_cast<int>(g_key)) & 0x8000) != 0;
-            if (down && !wasDown) OnKey();
+            if (down && !wasDown) OnTrigger("key");
             wasDown = down;
+            // RB + LB + A. XINPUT_GAMEPAD_LEFT_SHOULDER 0x0100, RIGHT_SHOULDER 0x0200, A 0x1000.
+            if (gs::pad::ChordPressed(0x0100 | 0x0200 | 0x1000)) OnTrigger("RB+LB+A");
             Sleep(50);
         }
         return 0;
@@ -504,9 +525,18 @@ namespace
         {
             GS_LOG("spy: off in the ini, the vtables are untouched");
         }
+        // The per-frame tick on the game's thread, stacked on the minimap root's
+        // update, with the diff probe on for this discovery session.
+        if (gs::tick::Install(g_miniVt))
+        {
+            gs::tick::SetProbe(true);
+            GS_LOG("[tick] probe on: root fields that change are logged every 3 s");
+        }
+
+        gs::pad::Init();
         g_key = cfg.key;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
-        GS_LOG("press %s (VK %02X) to arm, then place a custom marker; a second one follows it", gs::Settings::KeyName(cfg.key), cfg.key);
+        GS_LOG("press %s (VK %02X) or RB+LB+A to drop a GlintSpotter pin", gs::Settings::KeyName(cfg.key), cfg.key);
 
         // Early passes hunt for something that may not exist yet, so they come
         // quickly. Once everything is in hand a tick is one pointer read each and
@@ -579,7 +609,7 @@ namespace gs::Mod
         // The vtable slots go back only when the process is staying up. On
         // teardown the game is leaving anyway, and a write to its memory from
         // inside DllMain buys nothing.
-        if (!processTerminating) gs::mapicon::RemoveSpy();
+        if (!processTerminating) { gs::tick::Remove(); gs::mapicon::RemoveSpy(); }
         if (g_thread)
         {
             CloseHandle(g_thread);

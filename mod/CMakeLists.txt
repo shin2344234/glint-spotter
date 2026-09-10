@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(GlintSpotter LANGUAGES CXX)
+project(GlintSpotter LANGUAGES CXX ASM_MASM)
 
 # Glint Spotter: an ASI plugin for Crimson Desert. Builds GlintSpotter.asi, which
 # an ASI loader (winmm.dll from Ultimate ASI Loader) injects, the same loader
@@ -26,6 +26,9 @@ add_library(GlintSpotter SHARED
     src/game/typescan.cpp
     src/game/mapicon.cpp
     src/hook/vtable.cpp
+    src/hook/tick.cpp
+    src/hook/thunk.asm
+    src/hook/pad.cpp
     src/core/settings.cpp
 )
 
@@ -33,7 +36,8 @@ target_include_directories(GlintSpotter PRIVATE src)
 # QueryWorkingSetEx, for skipping pages that are not resident.
 target_link_libraries(GlintSpotter PRIVATE psapi)
 target_compile_definitions(GlintSpotter PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
-target_compile_options(GlintSpotter PRIVATE /utf-8 /W3)
+target_compile_options(GlintSpotter PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W3>)
 
 # Bisect switch for load-time faults. 3 is the real plugin; lower numbers drop
 # one layer each so a crash inside LoadLibrary can be cornered without launching
@@ -50,7 +54,7 @@ target_compile_definitions(GlintSpotter PRIVATE GS_STAGE=${GS_STAGE})
 set_target_properties(GlintSpotter PROPERTIES PREFIX "" SUFFIX ".asi" OUTPUT_NAME "GlintSpotter")
 
 if(MSVC)
-    target_compile_options(GlintSpotter PRIVATE /guard:cf)
+    target_compile_options(GlintSpotter PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/guard:cf>)
     target_link_options(GlintSpotter PRIVATE /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf)
 endif()
 

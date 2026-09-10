@@ -21,6 +21,7 @@ namespace
     std::atomic<uint64_t> g_seen[2];
     std::mutex g_lastMutex;
     gs::mapicon::Capture g_last[2];
+    void CopyString(char* dst, size_t cap, const char* src);
     gs::mapicon::Capture g_lastPin;
     gs::mapicon::Capture g_lastPlayer;
     std::atomic<bool> g_replayPending{false};
@@ -29,6 +30,26 @@ namespace
     bool IsName(const gs::mapicon::Capture& c, const char* name)
     {
         return strcmp(c.name8, name) == 0;
+    }
+
+    // Every distinct icon name seen this session, so the first sight of a new
+    // one is logged in full no matter how many icons came before it. This is
+    // how a session with the flash tells us whether glints create icons.
+    constexpr size_t kMaxNames = 96;
+    char g_names[kMaxNames][64];
+    size_t g_nameCount = 0;
+    std::atomic<void*> g_lastWorldRoot{nullptr};
+
+    bool NewName(const char* name)
+    {
+        for (size_t i = 0; i < g_nameCount; ++i)
+            if (strcmp(g_names[i], name) == 0) return false;
+        if (g_nameCount < kMaxNames)
+        {
+            CopyString(g_names[g_nameCount], sizeof(g_names[0]), name);
+            ++g_nameCount;
+        }
+        return true;
     }
 
     // How many calls per surface get a full dump. The map creates dozens of icons
@@ -93,17 +114,23 @@ namespace
 
         const bool pin = c.ok && IsName(c, "MapIcon_Pin_Marker");
         const bool player = c.ok && IsName(c, "MapIcon_ActorFocus");
+        bool fresh = false;
         {
             std::lock_guard<std::mutex> lock(g_lastMutex);
             g_last[surface] = c;
             if (pin && surface == 0) g_lastPin = c;
             if (player && surface == 0) g_lastPlayer = c;
+            if (c.ok) fresh = NewName(c.name8);
         }
+        if (surface == 0) g_lastWorldRoot.store(c.self);
+        if (n == 1) GS_LOG("[spy %s] calls arrive on thread %lu", surface == 0 ? "world" : "mini", GetCurrentThreadId());
 
         const char* label = surface == 0 ? "world" : "mini";
-        // A pin marker is the call the replay copies, so it is always dumped in
-        // full no matter how many icons came before it.
-        if (n <= kFullDumps || pin)
+        // A pin marker is the call the replay copies, and a name never seen
+        // before is what a flash session is for, so both are dumped in full no
+        // matter how many icons came before them.
+        if (fresh) GS_LOG("[spy %s] new icon name: \"%s\"", label, c.name8);
+        if (n <= kFullDumps || pin || fresh)
         {
             GS_LOG("[spy %s #%llu] this=0x%p type=0x%04X key=%lld/0x%02X dword4=%u name=\"%s\"%s",
                    label, static_cast<unsigned long long>(n), c.self, c.type,
@@ -284,6 +311,39 @@ namespace gs::mapicon
         out = g_lastPlayer;
         return true;
     }
+
+    void* PlacePinNow(void* worldRoot, float x, float z, const char* labelText)
+    {
+        if (!worldRoot || !g_orig[0])
+        {
+            GS_LOG_ERR("[pin] no world root or no original slot 170, nothing placed");
+            return nullptr;
+        }
+        const uint64_t n = ++g_replayCount;
+
+        // Session ten, byte for byte, except the position and the key id.
+        uint16_t type = 0x0001;
+        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{1000 + static_cast<int64_t>(n), 0x15, {}};
+        uint32_t dword4 = 0;
+        float float5 = 0.0f;
+        float pos[3] = {x, 0.0f, z};
+        char label[48];
+        CopyString(label, sizeof(label), labelText ? labelText : "Marker");
+        char name[64] = "MapIcon_Pin_Marker";
+        uint8_t struct10[36]{};
+
+        GS_LOG("[pin #%llu] slot 170 on 0x%p: key=%lld/0x15 pos=(%.3f, 0, %.3f) label=\"%s\" thread %lu",
+               static_cast<unsigned long long>(n), worldRoot, static_cast<long long>(key.id), x, z, label,
+               GetCurrentThreadId());
+        void* r = g_orig[0](worldRoot, &type, &key, &dword4, &float5, pos, label, name,
+                            reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
+                            reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
+                            nullptr, nullptr, nullptr);
+        GS_LOG_OK("[pin #%llu] returned 0x%p", static_cast<unsigned long long>(n), r);
+        return r;
+    }
+
+    void* LastWorldRoot() { return g_lastWorldRoot.load(); }
 
     bool RequestReplay()
     {
