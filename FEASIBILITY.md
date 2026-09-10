@@ -765,3 +765,22 @@ The view state is elsewhere or further in. It is no longer hunted by the
 player. The aim comes from the detect component, which needs no camera at all,
 and the view direction for marking things that do not glint will be read out of
 the binary from `PlayerCameraComponent`'s methods.
+
+### The camera, found offline
+
+`PlayerCameraTPSMode` (vtable `+0x055F0908`, 109 slots) has its update at slot
+19, RVA `0x0113D8B0`, 2578 bytes, 47 multiply, square root and fused ops. It
+keeps the camera as scalars on its own object rather than a matrix: five stores
+at `this+0xC0`, `+0xC8`, `+0xCC`, `+0xD0` and `+0x104`, each after a clamp or
+interpolate helper at `0x1447A5EA4`, and one at `+0x360`. Yaw, pitch and
+distance live there. Two stores go through another object at `+0x1DC` and
+`+0x1E0`.
+
+The object is reallocated during play. A scan-found pointer to it went stale in
+session thirteen, which is why the probe saw no float move in any camera
+object. Holding it means a thunk on slot 19 that captures `this` on every
+update, the same pattern the minimap tick uses. That is the route for marking
+things that do not glint, and it is parked until the detect component route has
+been tried, because that one needs no camera at all.
+
+Nothing in the camera family needs the player to turn in circles again.
