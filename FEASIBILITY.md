@@ -15,8 +15,10 @@ path and a map icon key reserved for the detect effect. See the update at the
 bottom, dated the same day, which supersedes the pessimistic reading in the
 section on piece three.
 
-A mod-drawn pin over the map and the minimap remains the safe fallback, and
-Crimson Route already proves that route works, including the projection maths.
+A mod-drawn pin over the map and the minimap remains the safe fallback, and the
+world-to-map projection it needs is already a solved problem. What another mod on
+this machine has solved, and how that was read, is in `private/CRIMSON-ROUTE.md`,
+which stays local.
 
 ## Piece one: knowing which objects glint
 
@@ -51,8 +53,8 @@ fx_detectmode_quest_target_character
 what MasterLooter's `Fill()` already reads identity from, so a glinting object is
 an entity the existing scan can already see and name. There is also a `_fail`
 variant, which suggests the game evaluates a per-object test and shows a
-different effect when it fails. That is a data-driven reveal, not a blanket
-shader, which is the answer the whole design hung on.
+different effect when it fails. The reveal is data driven rather than a blanket
+shader, and that is what the design hung on.
 
 Two rows in `conditioninfo.staticinfobody` call `IsStageDetectModeTarget()`.
 Read those, never write them: FINDINGS.md line 1108 records that patching
@@ -83,74 +85,38 @@ That is one function to add.
 
 Guessed keybinds break when the player rebinds, so prefer reading the game's own
 state. `ui.paloc` names the action ids: `Key_Skill_8_Start` for the concentrate
-light stance, `Key_Skill_5_Start` for the Helm of Knowledge. Better still,
-Crimson Route already hooks a function it calls `special_mode_component_update`,
-which is the component family behind `Detect` and `Detect_Lantern`, and its logs
-in `bin64` show the hook installed and firing:
-
-```
-special_mode_component_update_hook_installed=1
-world_route_ticks_special_mode_component_update=76
-```
-
-So the hook point is proven installable and proven live. What it carries in its
-arguments is untested.
+light stance, `Key_Skill_5_Start` for the Helm of Knowledge. Better still, the
+special mode component has its own update function, and that is the component
+family behind `Detect` and `Detect_Lantern`. The hook point is proven installable
+and proven live on this build, with the evidence in `private/CRIMSON-ROUTE.md`.
+What it carries in its arguments is untested.
 
 ## Piece three: putting a pin on the map
 
-This is where the honest answer lives.
+This is the piece with the least good news.
 
-No native write. The most serious public work on this game,
+No native write turned up at first. The most serious public work on this game,
 [blizz3010/CrimsonDesertCoop](https://github.com/blizz3010/CrimsonDesertCoop),
 76 commits of verified offsets, documents a read-only hook at
 `CrimsonDesert.exe+0xAB5594` that pulls an outgoing waypoint out of
-`[r15+0x1C..0x28]`, and says the apply side has not been identified. Nothing in
-Crimson Route's five session logs on this machine contradicts that. Its
-marker-adjacent fields are all readers:
+`[r15+0x1C..0x28]`, and says the apply side has not been identified. Nothing
+found on this machine since contradicts that.
 
-```
-tracked_marker_reader=installed    tracked_marker_ready=1
-```
-
-and a grep across all five logs for `manual_pin`, `location_edited`,
-`api_custom_route` or `marker placed` returns nothing.
-
-The projection, though, is solved, and this is the finding that changes the
-plan. Route hooks `minimap_update` at RVA `0xd8aff0` and `world_map_update` at
-`0xd205f0`, and every time the map opens it prints the whole transform in plain
-text:
-
-```
-world_map=visible; world_map_active=1
-world_center=(-6176.708, 17.402); world_units_per_canvas_unit=0.593750
-world_canvas=(1920.0, 1080.0); zoom_range=(4.000000, 4.000000)
-minimap_layout=(66.67, 1126.67, 266.67, 266.67)
-controlled_position_source=current_controlled_transform_sync; controlled_position_live=1
-```
-
-and then checks itself against the player's own dot:
-
-```
-player=(-6075.441,656.685,-151.617); snapshot_map_center=(-6075.523,-151.560)
-predicted_player_marker=(199.63,1259.77); player_marker_error=0.442 px
-```
-
-Sub-pixel error on a live world-to-map projection, with map-open detection and a
-live player position beside it. Whatever else is unknown, drawing a pin at the
-right place on the map is not.
-
-Route's own `CrimsonRoute.ini` also carries a `[MapMarkers]` section with
-`Enabled=0`, `Minimap=1`, `WorldMap=1`, so it already ships a mod-drawn marker
-layer for both surfaces, switched off by default here.
+The projection is solved, though, and that is the finding that changes the plan.
+A live world-to-map transform runs here today, with map-open detection and a
+live player position beside it, holding to under half a pixel against the
+player's own dot. The parameters and where they were read are in
+`private/CRIMSON-ROUTE.md`. Whatever else is unknown, drawing a pin at the right
+place on the map is not.
 
 One thing the UI layer is not: scriptable. A byte search of the exe finds zero
 hits for CEF, Chromium, WebView2, CoherentUI, CoherentGT, V8 or Lua, against 216
 hits for Pearl Abyss and 64 for BlackSpace. The `.html`, `.css` and `.thtml`
 files in the archive are a proprietary markup format with no scripting engine
 behind them, so the Black Desert trick of injecting JavaScript and calling the
-map function from inside the UI does not exist here. Route's own label for its
-mechanism, `minimap_projection_source=coherent_hook_snapshot`, is its naming, not
-a loaded Coherent SDK.
+map function from inside the UI does not exist here. One mod's internal naming
+for its own mechanism suggests otherwise and is misleading; see
+`private/CRIMSON-ROUTE.md`.
 
 ## What to build
 
@@ -162,11 +128,11 @@ fighting for the same render slots is a problem nobody needs.
   entity's gimmick node against the Detect target families, and does not route
   through the skip at line 1874.
 - `hooks/xinput_hook.cpp`: a single-button held test next to `PadChordHeld`.
-- A prototype hook on `special_mode_component_update`, installed the way Route
-  installs it, logging its arguments through `events.cpp`'s existing
-  `SpyEnqueue` harness.
+- A prototype hook on the special mode component's update, installed the way
+  `private/CRIMSON-ROUTE.md` describes, logging its arguments through
+  `events.cpp`'s existing `SpyEnqueue` spy.
 - `hooks/dx12_hook.cpp`, in the existing overlay compositor: draw the pin, using
-  a world-to-map transform derived the same way Route derives its own.
+  a world-to-map transform taken off the map's own update call.
 
 ## Fallbacks, ranked
 
@@ -174,10 +140,10 @@ fighting for the same render slots is a problem nobody needs.
    native call. It does not survive the map closing and it does not reach the
    compass or the quest tracker. Say that on the mod page rather than letting
    people find out.
-2. Route's local API on port 17893, which ships `Enabled=0`. That hands the whole
-   render problem to Route, and it needs a conversation with dofo7777 first. The
-   note asking him about the native chain is already drafted under `private` and
-   still unsent, so ask both questions at once.
+2. Hand the render problem to the navigation mod that already draws on both map
+   surfaces. It ships a local API switched off by default. This route needs a
+   conversation with its author before a line is written against it, and the
+   note to him is still unsent. Both are in `private/CRIMSON-ROUTE.md`.
 3. No pin at all. Show bearing and distance to the nearest glint candidate and
    let the player place the vanilla pin by hand. This needs only piece one, which
    is the piece most likely to work.
@@ -204,10 +170,10 @@ the cheapest of the three and would make piece one nearly free.
 **Does a native marker write exist?** Place a pin by hand through the world map
 while logging writes near whatever the `+0xAB5594` read points at.
 
-**Do MasterLooter and Route collide on the map hooks?** Route owns
-`minimap_slot_owned=1` and `world_map_slot_owned=1`. The present-hook ordering
-problem in CLAUDE.md is the same shape, and the answer there was to stack rather
-than wrap. Assume the same applies and test it early.
+**Does MasterLooter collide on the map hooks?** Another mod already owns both
+map update slots on this machine. The present-hook ordering problem in CLAUDE.md
+is the same shape, and the answer there was to stack rather than wrap. Assume the
+same applies and test it early. Details in `private/CRIMSON-ROUTE.md`.
 
 ## Reasons not to build it
 
@@ -224,17 +190,9 @@ Worth knowing that before starting, not after.
 
 ## Corrections to the first research pass
 
-Three things the first pass got wrong, kept here so they do not come back.
-
-The `special_mode_component_update` hook was reported as never firing. It fires:
-`world_route_ticks_special_mode_component_update=76` in the 14:44 session.
-
-`require_lantern=0` was read as evidence the lantern was never equipped. It is a
-Route config key, `[WorldRoute] RequireLantern=0` in `CrimsonRoute.ini`.
-
-The world-to-map transform was called new reverse engineering work either way. It
-is not. Route has it working to 0.442 px and prints every input to it in plain
-text on every map open.
+Three findings from the first pass were wrong and were traced and fixed. All
+three were read out of another mod's logs and config, so they are recorded in
+`private/CRIMSON-ROUTE.md` rather than here.
 
 ## Prior art: nothing does this
 
@@ -304,8 +262,8 @@ StageChart_Function_UIShowMinimap   Base Class StageChart_Function_WithActor
 
 It takes an actor, turns its minimap presence on, flags it as a detect mode
 target, optionally draws a path to it, and picks its icon from
-`uimaptextureinfo`. That is the whole glint spotter feature as a built-in engine
-call, used by the game's own quest scripts.
+`uimaptextureinfo`. The game's own quest scripts already do what this mod wants
+to do, through one built-in call.
 
 The runtime side is named too:
 
@@ -532,9 +490,8 @@ object, and the `call [rdi+0x110]` at its tail is slot 34.
 
 ### The pointer arrives on its own
 
-Crimson Route hooks two functions it calls `world_map_update` at RVA `0xd205f0`
-and `minimap_update` at RVA `0xd8aff0`. Both are methods of these same two
-classes:
+Each map surface has a per frame update, at RVA `0xd205f0` for the world map and
+`0xd8aff0` for the minimap. Both resolve into the same two vtables:
 
 ```
 RVA 0x0555CD88 is slot 35 of vtable 0x0555CC70   UIGamePlayControlRootWorldMap
@@ -551,17 +508,10 @@ The two classes are laid out identically:
 RCX at slot 35 is the controller. Hook the update, cache RCX, call slot 170 on the
 cached pointer. Nothing else is needed, and there is no global to find.
 
-That hook is already proven on this machine. Route's session logs in `bin64` show
-both installed and running hot:
-
-```
-minimap_update=installed; world_map_update=installed
-world_route_ticks_worldmap_update=290; world_route_ticks_minimap_update=28065
-```
-
-Route also owns those slots today (`minimap_slot_owned=1`,
-`world_map_slot_owned=1`), so expect the ordering argument the D3D12 present hook
-already has, and plan to stack rather than wrap.
+That hook is already proven on this build, installed and running hot on both
+surfaces. The evidence is in `private/CRIMSON-ROUTE.md`, along with the fact that
+another mod owns both slots today, so expect the ordering argument the D3D12
+present hook already has and plan to stack rather than wrap.
 
 ### The registry, for completeness
 
