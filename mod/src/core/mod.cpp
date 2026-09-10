@@ -62,6 +62,49 @@ namespace
         return 0x100;
     }
 
+    // Prove the scanner can find a heap object before trusting it to say one is
+    // absent. Three sessions came back empty and the interesting question was
+    // always whether the game had no such object or the scan could not find one.
+    // This settles that in a few milliseconds, using an object we made ourselves.
+    struct Canary
+    {
+        virtual ~Canary() = default;
+        virtual int tag() { return 0x6C1A; }
+        char filler[0x200]{};
+    };
+
+    void SelfTest()
+    {
+        auto* canary = new Canary();
+        const uintptr_t vt = *reinterpret_cast<uintptr_t*>(canary);
+        const size_t bytes = sizeof(Canary);
+
+        gs::scan::Options opt;
+        opt.needleBytes = &bytes;
+        opt.timeBudgetMs = 20000;
+        opt.maxHits = 8;
+
+        std::vector<gs::scan::Hit> hits;
+        const gs::scan::Report rep = gs::scan::FindPointers(&vt, 1, hits, opt);
+
+        bool foundIt = false;
+        for (const gs::scan::Hit& h : hits) foundIt |= h.object == canary;
+
+        if (foundIt)
+            GS_LOG_OK("self test: found our own object at 0x%p in %llu ms, %llu MB read. "
+                      "The scanner works, so an empty result means absence.",
+                      static_cast<void*>(canary),
+                      static_cast<unsigned long long>(rep.microseconds / 1000),
+                      static_cast<unsigned long long>(rep.bytesScanned / (1024 * 1024)));
+        else
+            GS_LOG_ERR("self test: did NOT find our own object at 0x%p (%zu other hit(s), "
+                       "%llu MB read%s). The scanner is broken, not the game.",
+                       static_cast<void*>(canary), hits.size(),
+                       static_cast<unsigned long long>(rep.bytesScanned / (1024 * 1024)),
+                       rep.timeBudgetHit ? ", time budget hit" : "");
+        delete canary;
+    }
+
     void Discover()
     {
         uintptr_t base = 0;
@@ -347,6 +390,7 @@ namespace
         // The exe is mapped long before the UI exists, so RTTI can be read early
         // even though nothing has been built from it yet.
         for (int i = 0; i < 16 && !g_stop.load(); ++i) Sleep(500);
+        SelfTest();
         Discover();
         if (g_count == 0)
         {

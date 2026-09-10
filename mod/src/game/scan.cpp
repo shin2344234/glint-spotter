@@ -25,6 +25,7 @@ namespace
     // no second probe, and one with less is noise that never leaves this loop.
     size_t ScanRegion(const uint8_t* base, size_t size,
                       const uintptr_t* needles, size_t needleCount,
+                      uintptr_t lo, uintptr_t hi,
                       const size_t* needleBytes, RawHit* outBuf, size_t outCap,
                       size_t* rawMatches, size_t* rejectedNoRoom)
     {
@@ -38,8 +39,14 @@ namespace
             for (size_t i = 0; i < count && found < outCap; ++i)
             {
                 const uintptr_t v = p[i];
-                // Two or three needles, so a linear check beats anything clever
-                // and keeps the inner loop branch-predictable on the common miss.
+
+                // Every needle is a vtable inside the game module, so one
+                // unsigned compare against that span rejects almost every qword
+                // in memory. Without it the loop below ran for all 56 needles on
+                // every one of 655 million qwords, which is 36.7 billion compares
+                // and the 83 MB/s that made session three run out of time twice.
+                if (v - lo > hi - lo) continue;
+
                 for (size_t n = 0; n < needleCount; ++n)
                 {
                     if (v != needles[n]) continue;
@@ -87,6 +94,14 @@ namespace gs::scan
         size_t smallest = static_cast<size_t>(-1);
         for (size_t i = 0; i < needleCount; ++i)
             if (opt.needleBytes[i] < smallest) smallest = opt.needleBytes[i];
+
+        // The span every needle falls inside, for the pre-filter in ScanRegion.
+        uintptr_t lo = static_cast<uintptr_t>(-1), hi = 0;
+        for (size_t i = 0; i < needleCount; ++i)
+        {
+            if (needles[i] < lo) lo = needles[i];
+            if (needles[i] > hi) hi = needles[i];
+        }
 
         LARGE_INTEGER freq{}, start{}, now{};
         QueryPerformanceFrequency(&freq);
@@ -145,7 +160,7 @@ namespace gs::scan
                 const size_t room = opt.maxHits - out.size();
                 const size_t cap = room < 256 ? room : 256;
                 const size_t got = ScanRegion(regionBase, regionSize, needles, needleCount,
-                                              opt.needleBytes, buf, cap,
+                                              lo, hi, opt.needleBytes, buf, cap,
                                               &rep.rawMatches, &rep.rejectedNoRoom);
                 for (size_t i = 0; i < got; ++i)
                 {
