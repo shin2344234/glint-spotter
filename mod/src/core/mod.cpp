@@ -83,19 +83,27 @@ namespace
     }
 
     // What the create path would need, read once when an object first turns up.
-    void DescribeOnce(const Target& t)
+    // Returns false when the candidate does not stand up, and the caller must
+    // then drop it: session one cached a rejected pointer, Recheck happily
+    // confirmed the vtable was still there, and no further scan ever ran.
+    bool Describe(Target& t)
     {
         if (!gs::rtti::Readable(t.object, gs::sig::kRootControlSize))
         {
-            GS_LOG("  not readable for its full 0x%zX bytes, so this is a stale match rather than a live object",
-                   gs::sig::kRootControlSize);
-            return;
+            GS_LOG("  0x%p is not readable for a whole object, dropping it", t.object);
+            return false;
         }
         auto** vt = *reinterpret_cast<void***>(t.object);
-        if (!gs::rtti::Readable(vt, (gs::sig::kSlotCreateIcon + 1) * sizeof(void*))) return;
+        if (!gs::rtti::Readable(vt, (gs::sig::kSlotCreateIcon + 1) * sizeof(void*)))
+        {
+            GS_LOG("  0x%p has a vtable too short to hold slot %d, dropping it",
+                   t.object, gs::sig::kSlotCreateIcon);
+            return false;
+        }
 
         GS_LOG("  slot %d update      0x%p", gs::sig::kSlotUpdate, vt[gs::sig::kSlotUpdate]);
         GS_LOG("  slot %d create icon 0x%p", gs::sig::kSlotCreateIcon, vt[gs::sig::kSlotCreateIcon]);
+        return true;
     }
 
     // One walk of the address space covering every target that has no live
@@ -117,13 +125,22 @@ namespace
         }
         if (n == 0) return;
 
-        std::vector<gs::scan::Hit> hits;
-        const gs::scan::Report rep = gs::scan::FindPointers(needles, n, hits);
+        gs::scan::Options opt;
+        opt.objectBytes = gs::sig::kRootControlSize;
 
-        GS_LOG("scan: %zu region(s), %llu MB, %llu ms%s", rep.regionsScanned,
+        std::vector<gs::scan::Hit> hits;
+        const gs::scan::Report rep = gs::scan::FindPointers(needles, n, hits, opt);
+
+        GS_LOG("scan: %zu region(s) read, %llu MB, %llu ms%s",
+               rep.regionsScanned,
                static_cast<unsigned long long>(rep.bytesScanned / (1024 * 1024)),
                static_cast<unsigned long long>(rep.microseconds / 1000),
-               rep.budgetHit ? ", byte budget hit" : "");
+               rep.timeBudgetHit ? ", TIME BUDGET HIT, coverage incomplete" : "");
+        GS_LOG("  skipped %zu wrong kind, %zu too small, %zu too large (%llu MB)",
+               rep.regionsSkippedKind, rep.regionsSkippedSmall, rep.regionsSkippedLarge,
+               static_cast<unsigned long long>(rep.bytesSkippedLarge / (1024 * 1024)));
+        GS_LOG("  %zu pointer match(es), %zu rejected for having no room behind them",
+               rep.rawMatches, rep.rejectedNoRoom);
 
         for (size_t i = 0; i < n; ++i)
         {
@@ -145,7 +162,7 @@ namespace
             }
 
             t.object = first;
-            GS_LOG_OK("%s: %zu instance(s), first at 0x%p", t.label, found, first);
+            GS_LOG_OK("%s: %zu candidate(s), first at 0x%p", t.label, found, first);
 
             // More than one matters. The create call takes a single controller,
             // so if the game keeps several we have to know which is live before
@@ -157,13 +174,16 @@ namespace
                 {
                     if (h.needle != static_cast<int>(i)) continue;
                     if (shown++ >= 8) break;
-                    GS_LOG("  [%zu] 0x%p in %s region 0x%llX +0x%llX", shown - 1, h.object,
-                           h.regionType == MEM_PRIVATE ? "private" : "mapped",
+                    GS_LOG("  [%zu] 0x%p in region 0x%llX +0x%llX", shown - 1, h.object,
                            static_cast<unsigned long long>(h.regionBase),
                            static_cast<unsigned long long>(h.regionSize));
                 }
             }
-            DescribeOnce(t);
+            if (!Describe(t))
+            {
+                t.object = nullptr;
+                t.instances = 0;
+            }
         }
     }
 

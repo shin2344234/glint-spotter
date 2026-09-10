@@ -11,7 +11,7 @@ namespace
     // One raw hit, flat so the guarded frame below holds no C++ objects.
     struct RawHit
     {
-        void* at;
+        size_t offset;
         int needle;
     };
 
@@ -19,9 +19,14 @@ namespace
     // in the frame so it can sit inside __try. Another thread is free to unmap a
     // region while we walk it, and VirtualQuery only told us what was true a
     // moment ago, so the guard is doing real work rather than being decorative.
+    //
+    // objectBytes is applied here rather than by the caller: the whole region is
+    // known committed and readable, so a hit with that much room behind it needs
+    // no second probe, and one with less is noise that never leaves this loop.
     size_t ScanRegion(const uint8_t* base, size_t size,
                       const uintptr_t* needles, size_t needleCount,
-                      RawHit* outBuf, size_t outCap)
+                      size_t objectBytes, RawHit* outBuf, size_t outCap,
+                      size_t* rawMatches, size_t* rejectedNoRoom)
     {
         size_t found = 0;
         __try
@@ -38,7 +43,14 @@ namespace
                 for (size_t n = 0; n < needleCount; ++n)
                 {
                     if (v != needles[n]) continue;
-                    outBuf[found].at = const_cast<void*>(static_cast<const void*>(&p[i]));
+                    ++*rawMatches;
+                    const size_t off = i * sizeof(uintptr_t);
+                    if (off + objectBytes > size)
+                    {
+                        ++*rejectedNoRoom;
+                        break;
+                    }
+                    outBuf[found].offset = off;
                     outBuf[found].needle = static_cast<int>(n);
                     ++found;
                     break;
@@ -64,14 +76,16 @@ namespace gs::scan
     }
 
     Report FindPointers(const uintptr_t* needles, size_t needleCount,
-                        std::vector<Hit>& out, size_t maxHits, uint64_t byteBudget)
+                        std::vector<Hit>& out, const Options& opt)
     {
         Report rep{};
         if (!needles || needleCount == 0 || needleCount > kMaxNeedles) return rep;
 
-        LARGE_INTEGER freq{}, start{}, stop{};
+        LARGE_INTEGER freq{}, start{}, now{};
         QueryPerformanceFrequency(&freq);
         QueryPerformanceCounter(&start);
+        const long long budgetTicks =
+            freq.QuadPart ? static_cast<long long>(opt.timeBudgetMs) * freq.QuadPart / 1000 : 0;
 
         SYSTEM_INFO si{};
         GetSystemInfo(&si);
@@ -82,7 +96,7 @@ namespace gs::scan
         // the guarded frame, which cannot hold objects with destructors.
         RawHit buf[256];
 
-        while (addr < limit && out.size() < maxHits)
+        while (addr < limit && out.size() < opt.maxHits)
         {
             MEMORY_BASIC_INFORMATION mbi{};
             if (VirtualQuery(addr, &mbi, sizeof(mbi)) != sizeof(mbi)) break;
@@ -92,50 +106,64 @@ namespace gs::scan
             const size_t regionSize = mbi.RegionSize;
             if (regionSize == 0) break;  // no forward progress, stop rather than spin
 
+            // A UI control is a heap allocation: private, committed, read-write.
+            // MEM_IMAGE holds the vtable itself and every static pointer to it,
+            // which are not objects, and executable pages are code.
             const DWORD prot = mbi.Protect & 0xFF;
-            const bool readable =
-                prot == PAGE_READONLY || prot == PAGE_READWRITE ||
-                prot == PAGE_WRITECOPY || prot == PAGE_EXECUTE_READ ||
-                prot == PAGE_EXECUTE_READWRITE || prot == PAGE_EXECUTE_WRITECOPY;
-            const bool guarded = (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0;
+            const bool kindOk = mbi.State == MEM_COMMIT &&
+                                mbi.Type == MEM_PRIVATE &&
+                                prot == PAGE_READWRITE &&
+                                (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0;
 
-            // MEM_IMAGE is skipped on purpose. The vtable lives there and so does
-            // every static pointer to it, and those are not objects. What we want
-            // is a heap allocation, which the factory takes from the game's
-            // allocator into private memory.
-            const bool wanted = mbi.State == MEM_COMMIT && readable && !guarded &&
-                                (mbi.Type == MEM_PRIVATE || mbi.Type == MEM_MAPPED);
-
-            if (wanted)
+            if (!kindOk)
             {
-                if (rep.bytesScanned + regionSize > byteBudget)
-                {
-                    rep.budgetHit = true;
-                    break;
-                }
-                const size_t room = maxHits - out.size();
+                rep.regionsSkippedKind++;
+            }
+            else if (regionSize < opt.objectBytes)
+            {
+                rep.regionsSkippedSmall++;
+            }
+            else if (regionSize > opt.maxRegionBytes)
+            {
+                rep.regionsSkippedLarge++;
+                rep.bytesSkippedLarge += regionSize;
+            }
+            else
+            {
+                const size_t room = opt.maxHits - out.size();
                 const size_t cap = room < 256 ? room : 256;
-                const size_t got = ScanRegion(regionBase, regionSize, needles, needleCount, buf, cap);
+                const size_t got = ScanRegion(regionBase, regionSize, needles, needleCount,
+                                              opt.objectBytes, buf, cap,
+                                              &rep.rawMatches, &rep.rejectedNoRoom);
                 for (size_t i = 0; i < got; ++i)
                 {
                     Hit h{};
-                    h.object = buf[i].at;
+                    h.object = const_cast<uint8_t*>(regionBase) + buf[i].offset;
                     h.needle = buf[i].needle;
                     h.regionBase = reinterpret_cast<uintptr_t>(regionBase);
                     h.regionSize = regionSize;
-                    h.regionType = mbi.Type;
                     out.push_back(h);
                 }
                 rep.regionsScanned++;
                 rep.bytesScanned += regionSize;
+
+                if (budgetTicks)
+                {
+                    QueryPerformanceCounter(&now);
+                    if (now.QuadPart - start.QuadPart > budgetTicks)
+                    {
+                        rep.timeBudgetHit = true;
+                        break;
+                    }
+                }
             }
 
             addr = regionBase + regionSize;
         }
 
-        QueryPerformanceCounter(&stop);
+        QueryPerformanceCounter(&now);
         if (freq.QuadPart)
-            rep.microseconds = (stop.QuadPart - start.QuadPart) * 1000000ull / freq.QuadPart;
+            rep.microseconds = (now.QuadPart - start.QuadPart) * 1000000ull / freq.QuadPart;
         return rep;
     }
 }
