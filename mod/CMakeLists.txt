@@ -29,6 +29,7 @@ add_library(GlintSpotter SHARED
     src/game/aim.cpp
     src/game/actors.cpp
     src/game/snapshot.cpp
+    src/game/nearest.cpp
     src/hook/vtable.cpp
     src/hook/tick.cpp
     src/hook/thunk.asm

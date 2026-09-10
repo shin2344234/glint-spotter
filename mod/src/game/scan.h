@@ -61,6 +61,16 @@ namespace gs::scan
         uint64_t timeBudgetMs = 4000;
 
         size_t maxHits = 256;
+
+        // Regions smaller than this are skipped. The tables that pair vtables
+        // with their names live in regions of 8 to 48 KB; heap arenas are tens
+        // of megabytes. A single-needle scan cannot use the many-classes test,
+        // so this is how it avoids them. Zero means no floor.
+        size_t minRegionBytes = 0;
+
+        // Scan only the region containing this address. For the self test,
+        // which knows exactly where its canary is.
+        uintptr_t onlyRegionContaining = 0;
     };
 
     struct Report

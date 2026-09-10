@@ -13,6 +13,8 @@
 #include "game/player.h"
 #include "game/aim.h"
 #include "game/snapshot.h"
+#include "game/nearest.h"
+#include "game/actors.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
 extern "C" void* gs_minimapOriginal = nullptr;
@@ -212,6 +214,37 @@ extern "C" void gs_OnMinimapTick(void* self)
             how = "aim point at character control +0x318";
             GS_LOG("[mark] aim point local (%.2f, %.2f, %.2f) -> world (%.2f, %.2f, %.2f)",
                    a[0], a[1], a[2], tx, ty, tz);
+        }
+
+        // A ray from the player along the facing, against every entity in the
+        // actor manager's list. Needs nothing the game only sets sometimes;
+        // session eighteen had the aim field zeroed. Hits objects, not terrain.
+        if (!have)
+        {
+            float fx = 0, fz = 0;
+            if (!gs::actors::Ready())
+                GS_LOG("[mark] actor manager not located yet, no ray");
+            else if (!gs::nearest::ForwardFromQuat(pp.q, &fx, &fz))
+                GS_LOG("[mark] facing quaternion (%.3f, %.3f, %.3f, %.3f) is not a yaw, no ray",
+                       pp.q[0], pp.q[1], pp.q[2], pp.q[3]);
+            else
+            {
+                gs::nearest::Candidate c[6];
+                // 60 units out, a beam 1.5 units wide at the player widening by
+                // 0.06 per unit, so 5 units wide at the far end.
+                const int n = gs::nearest::Cast(reinterpret_cast<uintptr_t>(gs::actors::ManagerPtr()),
+                                                gs::player::Actor(), pp.x, pp.y, pp.z, fx, fz,
+                                                60.0f, 1.5f, 0.06f, c, 6);
+                GS_LOG("[mark] ray from (%.1f, %.1f, %.1f) along (%.3f, %.3f): %d hit(s)", pp.x, pp.y, pp.z, fx, fz, n);
+                for (int i = 0; i < n; ++i)
+                    GS_LOG("[mark]   %d. %s eid %08X at %.1f along, %.2f off, %+.1f up, (%.1f, %.1f, %.1f)",
+                           i + 1, c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy, c[i].x, c[i].y, c[i].z);
+                if (n > 0)
+                {
+                    have = true; tx = c[0].x; ty = c[0].y; tz = c[0].z;
+                    how = "first object on the ray";
+                }
+            }
         }
 
         // Fallbacks: an actor pointer, then the snapshot diff. Both local.

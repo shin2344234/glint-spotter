@@ -151,8 +151,12 @@ namespace gs::scan
             const bool kindOk = mbi.State == MEM_COMMIT && typeOk && writable &&
                                 (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0;
 
-            if (!kindOk) rep.regionsSkippedKind++;
-            else if (regionSize < smallest) rep.regionsSkippedSmall++;
+            const auto rb = reinterpret_cast<uintptr_t>(regionBase);
+            const bool wantedOnly = opt.onlyRegionContaining == 0 ||
+                (opt.onlyRegionContaining >= rb && opt.onlyRegionContaining < rb + regionSize);
+
+            if (!kindOk || !wantedOnly) rep.regionsSkippedKind++;
+            else if (regionSize < smallest || regionSize < opt.minRegionBytes) rep.regionsSkippedSmall++;
             else if (regionSize > opt.maxRegionBytes)
             {
                 rep.regionsSkippedLarge++;

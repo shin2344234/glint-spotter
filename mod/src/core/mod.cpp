@@ -46,6 +46,13 @@ namespace
     Target g_targets[kMaxClasses];
     size_t g_count = 0;
 
+    // The classes the feature depends on. Everything else in the sweep is
+    // discovery: named in the log, never hunted.
+    const char* const essential[] = {
+        "UIGamePlayControlRootWorldMap", "UIGamePlayControlRootMiniMap",
+        "ClientSpecialModeActorComponent", "ClientMinimapActorComponent",
+        "ClientActorManager"};
+
     // Anything in the map icon and detect mode families. Both spellings of
     // minimap appear in this binary, so both are listed.
     // Camera is here for the aim. The pin has to land where the crosshair
@@ -99,6 +106,10 @@ namespace
         opt.needleBytes = &bytes;
         opt.timeBudgetMs = 20000;
         opt.maxHits = 8;
+        // Only the region the canary lives in. It proves the same code path
+        // in milliseconds; walking everything else proved nothing extra and
+        // cost up to twenty seconds a session.
+        opt.onlyRegionContaining = reinterpret_cast<uintptr_t>(canary);
 
         std::vector<gs::scan::Hit> hits;
         const gs::scan::Report rep = gs::scan::FindPointers(&vt, 1, hits, opt);
@@ -346,10 +357,10 @@ namespace
         // Two passes: the classes the feature depends on first, then everything
         // else that fits. Session twelve lost the map roots to the needle cap
         // because a hundred camera classes sort ahead of them by address.
-        static const char* const essential[] = {
-            "UIGamePlayControlRootWorldMap", "UIGamePlayControlRootMiniMap",
-            "ClientSpecialModeActorComponent", "ClientMinimapActorComponent"};
-        for (int pass = 0; pass < 2; ++pass)
+        // Only the essentials are hunted. The other fifty classes were
+        // discovery, and scanning for them cost fifteen seconds in every twenty
+        // for the whole session.
+        for (int pass = 0; pass < 1; ++pass)
         {
             for (size_t i = 0; i < g_count; ++i)
             {
@@ -549,7 +560,7 @@ namespace
         // even though nothing has been built from it yet.
         const gs::Settings::Values& cfg = gs::Settings::Load(g_self);
 
-        for (int i = 0; i < 16 && !g_stop.load(); ++i) Sleep(500);
+        Sleep(1000);
         SelfTest();
         Discover();
         if (g_count == 0)
@@ -589,19 +600,28 @@ namespace
         // memory is a few seconds, and the player, the flash flag and the
         // detect component all hang off it. Session fifteen's presses came
         // before the general sweep reached it.
-        for (size_t i = 0; i < g_count; ++i)
+        // Retried until it lands: the world may still be loading on the first
+        // attempt, and a registry entry must never be taken for the player.
+        for (int attempt = 0; attempt < 40 && !g_stop.load(); ++attempt)
         {
+            bool done = false;
+            for (size_t i = 0; i < g_count && !done; ++i)
+            {
             Target& t = g_targets[i];
-            if (!strstr(t.info.name, "ClientSpecialModeActorComponent") || t.object) continue;
+            if (!strstr(t.info.name, "ClientSpecialModeActorComponent")) continue;
+            if (t.object) { done = true; break; }
             const uintptr_t needle = t.info.vtableVa;
             const size_t bytes = t.objectBytes;
             gs::scan::Options opt;
             opt.needleBytes = &bytes;
             opt.timeBudgetMs = 20000;
             opt.maxRegionBytes = 1024ull * 1024 * 1024;
+            // Session seventeen's fast pass took a 48 KB registry entry for the
+            // player's component. Real heap arenas are megabytes.
+            opt.minRegionBytes = 1024 * 1024;
             std::vector<gs::scan::Hit> hits;
             const gs::scan::Report rep = gs::scan::FindPointers(&needle, 1, hits, opt);
-            GS_LOG("fast pass for the special mode component: %zu hit(s) in %llu ms",
+            GS_LOG("fast pass %d for the special mode component: %zu hit(s) in %llu ms", attempt + 1,
                    hits.size(), static_cast<unsigned long long>(rep.microseconds / 1000));
             DropPointerTables(hits);
             for (const gs::scan::Hit& h : hits)
@@ -609,8 +629,19 @@ namespace
                 if (!h.object) continue;
                 t.object = h.object;
                 if (!Describe(t)) { t.object = nullptr; continue; }
-                gs::tick::AddProbe("special", t.object, 0x400);
+                // Every character has one of these. The player's is the one
+                // whose owner is the played body.
                 gs::player::SetSpecialComponent(t.object);
+                const gs::player::Pos probe = gs::player::Read();
+                if (!probe.valid || !gs::player::OwnerIsPlayedBody())
+                {
+                    GS_LOG("  0x%p is a special mode component but not the player's, skipped", t.object);
+                    gs::player::SetSpecialComponent(nullptr);
+                    t.object = nullptr;
+                    continue;
+                }
+                done = true;
+                gs::tick::AddProbe("special", t.object, 0x400);
                 // Walk to the player and the detect component right now rather
                 // than on the next probe sample, and say READY only when both
                 // are in hand, because the press needs both.
@@ -623,7 +654,10 @@ namespace
                            pp.valid ? "ok" : "pending", gs::player::DetectComponent() ? "ok" : "pending");
                 break;
             }
-            break;
+            }
+            if (done) break;
+            GS_LOG("player not in memory yet, trying again in five seconds");
+            for (int i = 0; i < 10 && !g_stop.load(); ++i) Sleep(500);
         }
 
         int pass = 0;
@@ -634,6 +668,9 @@ namespace
             for (size_t i = 0; i < g_count; ++i)
             {
                 if (!g_targets[i].hunt) continue;
+                bool ess = false;
+                for (const char* e : essential) if (strstr(g_targets[i].info.name, e)) ess = true;
+                if (!ess) continue;
                 ++hunted;
                 live += Recheck(g_targets[i]) ? 1 : 0;
             }

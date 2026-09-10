@@ -55,6 +55,7 @@ namespace gs::actors
 {
     void SetManager(void* manager) { g_mgr.store(manager); }
     bool Ready() { return g_mgr.load() != nullptr; }
+    void* ManagerPtr() { return g_mgr.load(); }
 
     uintptr_t ByEid(uint32_t eid)
     {

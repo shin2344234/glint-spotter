@@ -18,6 +18,7 @@ namespace gs::actors
     // Give the lookup the manager, found by the scan.
     void SetManager(void* manager);
     bool Ready();
+    void* ManagerPtr();
 
     // The entity carrying this id, or 0. Walks the list; guarded throughout.
     uintptr_t ByEid(uint32_t eid);

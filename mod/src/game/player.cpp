@@ -26,11 +26,15 @@ namespace
     // where the player stood, and a pin placed from the local one landed 9 km
     // from the player on the map.
     constexpr uintptr_t kOff_Tf_WorldPos   = 0x29C;
+    // Session eighteen: a yaw quaternion (x, y, z, w) sits right before each
+    // position, +0xA4 before the local one and +0x28C before the world one.
+    constexpr uintptr_t kOff_Tf_WorldQuat  = 0x28C;
 
     std::atomic<void*> g_comp{nullptr};
     std::atomic<uintptr_t> g_actor{0};
     std::atomic<uintptr_t> g_detect{0};
     std::atomic<uintptr_t> g_charctl{0};
+    std::atomic<bool> g_ownerIsBody{false};
     std::mutex g_mutex;
     gs::player::Pos g_last;
     int g_describeLeft = 3;   // first few reads log the whole walk
@@ -61,6 +65,7 @@ namespace
             if (!tf) return false;
             if (!gs::rtti::Readable(reinterpret_cast<const void*>(tf), kOff_Tf_WorldPos + 12)) return false;
             memcpy(world, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
+            memcpy(world + 3, reinterpret_cast<const void*>(tf + kOff_Tf_WorldQuat), 16);
 
             float v[3], pw[3];
             memcpy(v, reinterpret_cast<const void*>(tf + kOff_Tf_Pos), sizeof(v));
@@ -112,7 +117,7 @@ namespace gs::player
         const auto comp = reinterpret_cast<uintptr_t>(g_comp.load());
         if (!comp) return p;
 
-        float v[3]{}, w[3]{};
+        float v[3]{}, w[7]{};
         uintptr_t actor = 0, tf = 0;
         uint32_t parent = 0;
         if (!Walk(comp, v, w, &actor, &tf, &parent))
@@ -156,7 +161,12 @@ namespace gs::player
         p.lx = v[0]; p.ly = v[1]; p.lz = v[2];
         p.x = w[0]; p.y = w[1]; p.z = w[2];
         p.ox = w[0] - v[0]; p.oy = w[1] - v[1]; p.oz = w[2] - v[2];
+        memcpy(p.q, w + 3, 16);
         p.valid = true;
+        {
+            const char* on = NameOf(actor);
+            g_ownerIsBody.store(on && strstr(on, "ClientChildOnlyInGameActor") != nullptr);
+        }
         if (g_actor.load() != actor)
         {
             g_actor.store(actor);
@@ -198,4 +208,5 @@ namespace gs::player
     uintptr_t Actor() { return g_actor.load(); }
     uintptr_t DetectComponent() { return g_detect.load(); }
     uintptr_t CharacterControlComponent() { return g_charctl.load(); }
+    bool OwnerIsPlayedBody() { return g_ownerIsBody.load(); }
 }
