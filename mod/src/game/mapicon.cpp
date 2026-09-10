@@ -48,26 +48,21 @@ namespace
             if (a[1]) c->type = *static_cast<const uint16_t*>(a[1]);
             if (a[2])
             {
-                c->key3q = *static_cast<const uint64_t*>(a[2]);
-                c->key3b = static_cast<const uint8_t*>(a[2])[8];
+                c->keyId = *static_cast<const int64_t*>(a[2]);
+                c->keyKind = static_cast<const uint8_t*>(a[2])[8];
             }
             if (a[3]) c->dword4 = *static_cast<const uint32_t*>(a[3]);
-            if (a[4])
-            {
-                c->key5q = *static_cast<const uint64_t*>(a[4]);
-                c->key5b = static_cast<const uint8_t*>(a[4])[8];
-            }
-            if (a[5]) c->dword6 = *static_cast<const uint32_t*>(a[5]);
-            if (a[6]) c->float7 = *static_cast<const float*>(a[6]);
-            if (a[7]) memcpy(c->pos, a[7], sizeof(c->pos));
+            if (a[4]) c->float5 = *static_cast<const float*>(a[4]);
+            if (a[5]) memcpy(c->pos, a[5], sizeof(c->pos));
 
-            c->str9Null = a[8] == nullptr;
-            if (a[8]) CopyString(c->str9, sizeof(c->str9), static_cast<const char*>(a[8]));
-            if (a[9]) CopyString(c->name10, sizeof(c->name10), static_cast<const char*>(a[9]));
+            c->str7Null = a[6] == nullptr;
+            if (a[6]) CopyString(c->str7, sizeof(c->str7), static_cast<const char*>(a[6]));
+            if (a[7]) CopyString(c->name8, sizeof(c->name8), static_cast<const char*>(a[7]));
 
+            // Bytes by value ride in a full slot with whatever was above them.
+            c->byte9 = static_cast<uint8_t>(reinterpret_cast<uintptr_t>(a[8]) & 0xFF);
+            if (a[9]) memcpy(c->struct10, a[9], sizeof(c->struct10));
             c->byte11 = static_cast<uint8_t>(reinterpret_cast<uintptr_t>(a[10]) & 0xFF);
-            if (a[11]) memcpy(c->struct12, a[11], sizeof(c->struct12));
-            c->byte13 = static_cast<uint8_t>(reinterpret_cast<uintptr_t>(a[12]) & 0xFF);
             c->ok = true;
             return true;
         }
@@ -95,24 +90,28 @@ namespace
         const char* label = surface == 0 ? "world" : "mini";
         if (n <= kFullDumps)
         {
-            GS_LOG("[spy %s #%llu] this=0x%p type=0x%04X name=\"%s\" pos=(%.3f, %.3f, %.3f)%s",
-                   label, static_cast<unsigned long long>(n), c.self, c.type, c.name10,
-                   c.pos[0], c.pos[1], c.pos[2], c.ok ? "" : "  (READ FAULTED)");
-            GS_LOG("    key3=%016llX/%02X dword4=%u key5=%016llX/%02X dword6=%u float7=%.4f",
-                   static_cast<unsigned long long>(c.key3q), c.key3b, c.dword4,
-                   static_cast<unsigned long long>(c.key5q), c.key5b, c.dword6, c.float7);
-            GS_LOG("    str9=%s byte11=%u byte13=%u struct12.count=%u struct12.ptr=0x%016llX",
-                   c.str9Null ? "null" : c.str9, c.byte11, c.byte13,
-                   *reinterpret_cast<const uint32_t*>(c.struct12 + 4),
-                   static_cast<unsigned long long>(*reinterpret_cast<const uint64_t*>(c.struct12 + 0x10)));
-            GS_LOG("    raw: %p %p %p %p | %p %p %p %p %p | %p %p %p %p %p",
+            GS_LOG("[spy %s #%llu] this=0x%p type=0x%04X key=%lld/0x%02X dword4=%u name=\"%s\"%s",
+                   label, static_cast<unsigned long long>(n), c.self, c.type,
+                   static_cast<long long>(c.keyId), c.keyKind, c.dword4, c.name8,
+                   c.ok ? "" : "  (READ FAULTED)");
+            GS_LOG("    pos=(%.3f, %.3f, %.3f) float5=%.4f str7=%s byte9=%u byte11=%u",
+                   c.pos[0], c.pos[1], c.pos[2], c.float5,
+                   c.str7Null ? "null" : c.str7, c.byte9, c.byte11);
+            GS_LOG("    struct10: count=%u ptr=0x%016llX  +00 %08X %08X %08X %08X",
+                   *reinterpret_cast<const uint32_t*>(c.struct10 + 4),
+                   static_cast<unsigned long long>(*reinterpret_cast<const uint64_t*>(c.struct10 + 0x10)),
+                   *reinterpret_cast<const uint32_t*>(c.struct10 + 0),
+                   *reinterpret_cast<const uint32_t*>(c.struct10 + 4),
+                   *reinterpret_cast<const uint32_t*>(c.struct10 + 8),
+                   *reinterpret_cast<const uint32_t*>(c.struct10 + 12));
+            GS_LOG("    raw: %p %p %p %p | %p %p %p %p %p %p %p",
                    c.raw[0], c.raw[1], c.raw[2], c.raw[3], c.raw[4], c.raw[5], c.raw[6],
-                   c.raw[7], c.raw[8], c.raw[9], c.raw[10], c.raw[11], c.raw[12], c.raw[13]);
+                   c.raw[7], c.raw[8], c.raw[9], c.raw[10]);
         }
         else if (n % kSummaryEvery == 0)
         {
             GS_LOG("[spy %s] %llu calls so far, last type=0x%04X name=\"%s\"",
-                   label, static_cast<unsigned long long>(n), c.type, c.name10);
+                   label, static_cast<unsigned long long>(n), c.type, c.name8);
         }
     }
 

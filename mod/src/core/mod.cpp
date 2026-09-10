@@ -19,6 +19,8 @@ namespace
 {
     std::atomic<bool> g_stop{false};
     HANDLE g_thread = nullptr;
+    HANDLE g_keyThread = nullptr;
+    uint32_t g_key = 0x91;
     void* g_self = nullptr;
 
     // The keyword sweep finds 104 classes on build 2.01.00, so a cap of 48 was
@@ -411,9 +413,9 @@ namespace
             return;
         }
         GS_LOG("[key] dry run. A replay would call slot 170 on 0x%p with type=0x%04X name=\"%s\"",
-               c.self, c.type, c.name10);
-        GS_LOG("[key]   at (%.3f, %.3f, %.3f) shifted 5 m north, key5=%016llX/%02X plus one, all else as captured",
-               c.pos[0], c.pos[1], c.pos[2], static_cast<unsigned long long>(c.key5q), c.key5b);
+               c.self, c.type, c.name8);
+        GS_LOG("[key]   at (%.3f, %.3f, %.3f) shifted 5 m north, key=%lld/0x%02X plus one, all else as captured",
+               c.pos[0], c.pos[1], c.pos[2], static_cast<long long>(c.keyId), c.keyKind);
         GS_LOG("[key]   this build does not make that call");
     }
 
@@ -458,6 +460,22 @@ namespace
                local.wSecond, fad.nFileSizeLow);
     }
 
+    // 50 ms steps so a press is not missed, edge-detected so a held key fires
+    // once. On its own thread because the worker spends up to 25 seconds inside
+    // a scan, and session seven's press landed in one and was never seen.
+    DWORD WINAPI KeyThread(LPVOID)
+    {
+        bool wasDown = false;
+        while (!g_stop.load())
+        {
+            const bool down = (GetAsyncKeyState(static_cast<int>(g_key)) & 0x8000) != 0;
+            if (down && !wasDown) DryRun();
+            wasDown = down;
+            Sleep(50);
+        }
+        return 0;
+    }
+
     DWORD WorkerBody()
     {
         GS_LOG("Glint Spotter %s probe", GS_VERSION_STRING);
@@ -489,6 +507,8 @@ namespace
         {
             GS_LOG("spy: off in the ini, the vtables are untouched");
         }
+        g_key = cfg.key;
+        g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
         GS_LOG("press %s (VK %02X) to log what a replay would use", gs::Settings::KeyName(cfg.key), cfg.key);
 
         // Early passes hunt for something that may not exist yet, so they come
@@ -496,7 +516,6 @@ namespace
         // the address space is left alone.
         int pass = 0;
         int idle = 0;
-        bool keyWasDown = false;
         while (!g_stop.load())
         {
             size_t live = 0, hunted = 0;
@@ -518,16 +537,8 @@ namespace
                 GS_LOG_OK("all %zu located, holding. Nothing more unless one changes.", hunted);
             }
 
-            // 50 ms steps so a key press is not missed, edge-detected so a held
-            // key fires once. GetAsyncKeyState is a read; it steals nothing.
-            const int ticks = (pass < 6) ? 100 : 300;  // 5 s early, 15 s once settled
-            for (int i = 0; i < ticks && !g_stop.load(); ++i)
-            {
-                const bool down = (GetAsyncKeyState(static_cast<int>(cfg.key)) & 0x8000) != 0;
-                if (down && !keyWasDown) DryRun();
-                keyWasDown = down;
-                Sleep(50);
-            }
+            const int ticks = (pass < 6) ? 10 : 30;  // 5 s early, 15 s once settled
+            for (int i = 0; i < ticks && !g_stop.load(); ++i) Sleep(500);
         }
         return 0;
     }
@@ -566,6 +577,8 @@ namespace gs::Mod
         // On process teardown the loader lock is held and other threads are
         // already gone, so waiting on one is how a plugin hangs an exit.
         if (!processTerminating && g_thread) WaitForSingleObject(g_thread, 3000);
+        if (!processTerminating && g_keyThread) WaitForSingleObject(g_keyThread, 1000);
+        if (g_keyThread) { CloseHandle(g_keyThread); g_keyThread = nullptr; }
         // The vtable slots go back only when the process is staying up. On
         // teardown the game is leaving anyway, and a write to its memory from
         // inside DllMain buys nothing.
