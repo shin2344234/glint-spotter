@@ -64,6 +64,7 @@ namespace
         "ClientDetectActorComponent", "ClientTransformSyncActorComponent",
         "ClientActorManager",
     };
+    uintptr_t g_managerVt = 0;
 
     const char* ShortName(const char* decorated)
     {
@@ -167,6 +168,12 @@ namespace
             // still logged, because the argument lists in their names are how the
             // map icon event signature was read in the first place.
             t.hunt = ShortName(found[i].name)[0] != '?';
+            if (strcmp(found[i].name, ".?AVClientActorManager@pa@@") == 0)
+            {
+                g_managerVt = found[i].vtableVa;
+                gs::actors::SetManagerVtable(g_managerVt);
+                t.hunt = false;   // found through the globals instead
+            }
             // Of the camera family, only objects that are a camera. The events,
             // parameter blocks, presets and descriptors that share the word are
             // data, and session twelve filled every probe slot with them.
@@ -442,10 +449,11 @@ namespace
                     gs::tick::AddProbe("special", t.object, 0x400);
                     gs::player::SetSpecialComponent(t.object);
                 }
-                else if (isManager && !gs::actors::Ready())
+                else if (isManager)
                 {
-                    gs::actors::SetManager(t.object);
-                    GS_LOG_OK("actor manager at 0x%p; actor ids can be resolved", t.object);
+                    // A heap hit for the manager is not trusted: session nineteen
+                    // found a registry entry. The vtable is what the globals
+                    // finder needs, and it was set at discovery.
                 }
                 else if (isCamera)
                 {
@@ -646,9 +654,11 @@ namespace
                 // than on the next probe sample, and say READY only when both
                 // are in hand, because the press needs both.
                 const gs::player::Pos pp = gs::player::Read();
+                gs::actors::Locate(GetTickCount());
                 if (pp.valid && gs::player::DetectComponent() && gs::player::CharacterControlComponent())
-                    GS_LOG_OK("READY: player world (%.1f, %.1f, %.1f), origin (%.0f, %.0f, %.0f). "
-                              "Aim the flash at a glint and press.", pp.x, pp.y, pp.z, pp.ox, pp.oy, pp.oz);
+                    GS_LOG_OK("READY: player world (%.1f, %.1f, %.1f), origin (%.0f, %.0f, %.0f), actor manager %s. "
+                              "Aim the flash at a glint and press.", pp.x, pp.y, pp.z, pp.ox, pp.oy, pp.oz,
+                              gs::actors::Ready() ? "found" : "pending");
                 else
                     GS_LOG("special mode component found; player walk %s, detect component %s",
                            pp.valid ? "ok" : "pending", gs::player::DetectComponent() ? "ok" : "pending");
@@ -683,6 +693,8 @@ namespace
                 watchingAim = true;
                 gs::tick::AddProbe("detect", reinterpret_cast<void*>(gs::player::DetectComponent()), 0x400);
             }
+
+            gs::actors::Locate(GetTickCount());
 
             if (live < hunted)
             {

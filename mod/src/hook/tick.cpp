@@ -169,6 +169,72 @@ namespace
     }
 }
 
+namespace
+{
+    // The automatic marker's state. With the flash on and the detect
+    // component reporting a target, the object at that distance along the
+    // facing gets a pin once the target has held for a second.
+    uint32_t g_autoSinceMs = 0;
+    float g_autoLastDist = -1.0f;
+    uint64_t g_lastRefreshTick = 0;
+
+    void PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp)
+    {
+        if (gs::mapicon::PinNear(tx, tz, 8.0f))
+        {
+            GS_LOG("[mark] a pin already sits within 8 units of (%.1f, %.1f); not placing another", tx, tz);
+            return;
+        }
+        void* root = g_worldRoot.load();
+        if (!root) root = gs::mapicon::LastWorldRoot();
+        const float dx = tx - pp.x, dz = tz - pp.z;
+        GS_LOG("[mark] target %.1f units away via %s; placing a %s pin there", std::sqrt(dx * dx + dz * dz), how, label);
+        gs::mapicon::PlacePinNow(root, tx, tz, label);
+        (void)ty;
+    }
+
+    // Flash on, detect component reporting a target for a full second: pin
+    // the object at that distance along the facing, once per area.
+    void AutoMark(uint32_t now)
+    {
+        float dist = 0;
+        if (!gs::aim::FlashActive() || !gs::aim::DetectDistance(&dist))
+        {
+            g_autoSinceMs = 0;
+            return;
+        }
+        if (g_autoSinceMs == 0 || std::fabs(dist - g_autoLastDist) > 3.0f)
+        {
+            g_autoSinceMs = now;
+            g_autoLastDist = dist;
+            return;
+        }
+        if (now - g_autoSinceMs < 1000) return;
+        g_autoSinceMs = now + 5000;   // and not again for five seconds
+
+        const gs::player::Pos pp = gs::player::Read();
+        float fx = 0, fz = 0;
+        if (!pp.valid || !gs::nearest::ForwardFromQuat(pp.q, &fx, &fz)) return;
+        gs::nearest::Candidate c[8];
+        const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y, pp.z, fx, fz, 60.0f, 2.5f, 0.15f, c, 8);
+        GS_LOG("[auto] flash on, detect distance %.1f, %d object(s) in the cone", dist, n);
+        int best = -1;
+        float bestErr = 1e9f;
+        for (int i = 0; i < n; ++i)
+        {
+            const float err = std::fabs(c[i].along - dist);
+            GS_LOG("[auto]   %s eid %08X at %.1f along, %.2f off, distance error %.1f", c[i].cls, c[i].eid, c[i].along, c[i].off, err);
+            if (err < bestErr) { bestErr = err; best = i; }
+        }
+        if (best < 0 || bestErr > 6.0f)
+        {
+            GS_LOG("[auto] nothing in the cone at the detect distance, no pin");
+            return;
+        }
+        PlaceAt(c[best].x, c[best].y, c[best].z, "automatic, detect distance matched an object", "Glint", pp);
+    }
+}
+
 // Called from the thunk every tick with the minimap root in rcx. Runs on the
 // game's UI thread; keep it cheap and never let anything escape.
 extern "C" void gs_OnMinimapTick(void* self)
@@ -181,6 +247,16 @@ extern "C" void gs_OnMinimapTick(void* self)
                   GetCurrentThreadId(), self, gs_minimapOriginal);
     }
     if (g_probe.load() && (n % kSampleTicks) == 0) Probe(self);
+
+    // Every quarter second, merge what the manager is handing over now and
+    // give the automatic marker a look.
+    if (n - g_lastRefreshTick >= 15)
+    {
+        g_lastRefreshTick = n;
+        const uint32_t now = GetTickCount();
+        gs::actors::Refresh(now);
+        AutoMark(now);
+    }
 
     // A mark asked for elsewhere lands here, on the thread that owns icons.
     // The pin lands where the flash is aimed: the actor the detect component
@@ -205,16 +281,16 @@ extern "C" void gs_OnMinimapTick(void* self)
         bool have = false;
         const char* how = "";
 
-        // The aim point, which is the whole feature in one read.
+        // The game's own aim field, logged when present. Populated in session
+        // seventeen and zero in eighteen and nineteen, so it is a hint, not
+        // the aim.
         float a[3];
         if (gs::aim::AimPointLocal(gs::player::CharacterControlComponent(), pp.lx, pp.ly, pp.lz, a))
-        {
-            tx = a[0] + pp.ox; ty = a[1] + pp.oy; tz = a[2] + pp.oz;
-            have = true;
-            how = "aim point at character control +0x318";
-            GS_LOG("[mark] aim point local (%.2f, %.2f, %.2f) -> world (%.2f, %.2f, %.2f)",
-                   a[0], a[1], a[2], tx, ty, tz);
-        }
+            GS_LOG("[mark] game aim field local (%.2f, %.2f, %.2f) -> world (%.2f, %.2f, %.2f)",
+                   a[0], a[1], a[2], a[0] + pp.ox, a[1] + pp.oy, a[2] + pp.oz);
+        float detectDist = 0;
+        const bool hasDetect = gs::aim::DetectDistance(&detectDist);
+        GS_LOG("[mark] detect target: %s", hasDetect ? "present" : "none");
 
         // A ray from the player along the facing, against every entity in the
         // actor manager's list. Needs nothing the game only sets sometimes;
@@ -224,6 +300,8 @@ extern "C" void gs_OnMinimapTick(void* self)
             float fx = 0, fz = 0;
             if (!gs::actors::Ready())
                 GS_LOG("[mark] actor manager not located yet, no ray");
+            else if (gs::actors::Count() == 0)
+                GS_LOG("[mark] actor set is empty, no ray");
             else if (!gs::nearest::ForwardFromQuat(pp.q, &fx, &fz))
                 GS_LOG("[mark] facing quaternion (%.3f, %.3f, %.3f, %.3f) is not a yaw, no ray",
                        pp.q[0], pp.q[1], pp.q[2], pp.q[3]);
@@ -232,10 +310,10 @@ extern "C" void gs_OnMinimapTick(void* self)
                 gs::nearest::Candidate c[6];
                 // 60 units out, a beam 1.5 units wide at the player widening by
                 // 0.06 per unit, so 5 units wide at the far end.
-                const int n = gs::nearest::Cast(reinterpret_cast<uintptr_t>(gs::actors::ManagerPtr()),
-                                                gs::player::Actor(), pp.x, pp.y, pp.z, fx, fz,
+                const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y, pp.z, fx, fz,
                                                 60.0f, 1.5f, 0.06f, c, 6);
-                GS_LOG("[mark] ray from (%.1f, %.1f, %.1f) along (%.3f, %.3f): %d hit(s)", pp.x, pp.y, pp.z, fx, fz, n);
+                GS_LOG("[mark] ray from (%.1f, %.1f, %.1f) along (%.3f, %.3f) over %d entities: %d hit(s)",
+                       pp.x, pp.y, pp.z, fx, fz, gs::actors::Count(), n);
                 for (int i = 0; i < n; ++i)
                     GS_LOG("[mark]   %d. %s eid %08X at %.1f along, %.2f off, %+.1f up, (%.1f, %.1f, %.1f)",
                            i + 1, c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy, c[i].x, c[i].y, c[i].z);
@@ -247,18 +325,20 @@ extern "C" void gs_OnMinimapTick(void* self)
             }
         }
 
-        // Fallbacks: an actor pointer, then the snapshot diff. Both local.
-        if (!have)
+        // Fallback: the detect distance along the facing, which is where the
+        // game says its target is even when the ray saw nothing there.
+        if (!have && hasDetect && detectDist > 0.5f && detectDist < 80.0f)
         {
-            gs::aim::Target t = gs::aim::Resolve();
-            if (t.valid) { have = true; tx = t.x + pp.ox; ty = t.y + pp.oy; tz = t.z + pp.oz; how = "actor pointer"; }
+            float fx = 0, fz = 0;
+            if (gs::nearest::ForwardFromQuat(pp.q, &fx, &fz))
+            {
+                tx = pp.x + fx * detectDist; ty = pp.y; tz = pp.z + fz * detectDist;
+                have = true;
+                how = "detect distance along the facing";
+            }
         }
-        if (!have)
-        {
-            const gs::snapshot::Found f = gs::snapshot::PressAndDiff(
-                gs::player::Actor(), gs::aim::DetectTask(), pp.lx, pp.ly, pp.lz);
-            if (f.valid) { have = true; tx = f.x + pp.ox; ty = f.y + pp.oy; tz = f.z + pp.oz; how = f.how; }
-        }
+        // The actor-pointer route found a fixed reference 104 units away at every
+        // press in session nineteen. It is not an aim and it places nothing.
 
         // The detect component's scalars that moved when the flash was aimed
         // in session seventeen, next to the ray's candidates, so the one that
@@ -279,19 +359,7 @@ extern "C" void gs_OnMinimapTick(void* self)
             }
         }
 
-        if (have && gs::mapicon::PinNear(tx, tz, 8.0f))
-        {
-            GS_LOG("[mark] a pin already sits within 8 units of (%.1f, %.1f); not placing another", tx, tz);
-        }
-        else if (have)
-        {
-            void* root = g_worldRoot.load();
-            if (!root) root = gs::mapicon::LastWorldRoot();
-            const float dx = tx - pp.x, dz = tz - pp.z;
-            GS_LOG("[mark] target %.1f units away via %s; placing a Glint pin there", std::sqrt(dx * dx + dz * dz), how);
-            gs::mapicon::PlacePinNow(root, tx, tz, "Glint");
-            (void)ty;
-        }
+        if (have) PlaceAt(tx, ty, tz, how, "Mark", pp);
         else
         {
             GS_LOG("[mark] no target resolved, nothing placed");

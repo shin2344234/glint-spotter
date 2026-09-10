@@ -227,6 +227,20 @@ namespace gs::aim
         return true;
     }
 
+    bool DetectDistance(float* out)
+    {
+        const uintptr_t d = g_detect.load();
+        if (!d) return false;
+        const uintptr_t at = d + 0x3EC;
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 4)) return false;
+        float v;
+        __try { memcpy(&v, reinterpret_cast<const void*>(at), 4); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        if (!std::isfinite(v) || v > 1.0e6f || v < 0.0f) return false;
+        *out = v;
+        return true;
+    }
+
     uintptr_t DetectTask()
     {
         const uintptr_t detect = g_detect.load();

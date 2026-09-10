@@ -3,18 +3,15 @@
 
 // The first world object along a ray from the player.
 //
-// The game's own aim field on the character control component is real but
-// conditional: session seventeen had it 10.7 units ahead while the flash was
-// aimed, session eighteen had it zeroed at the same kind of press. This is the
-// route that needs nothing conditional. The transform carries the player's
-// facing as a yaw quaternion right before its position, the actor manager
-// carries every entity, and each entity's transform carries a world position.
-// Cast a ray from the player along the facing, test every entity in range
-// against it as a small sphere, and the first hit along the ray is what the
-// crosshair is on.
+// The transform carries the player's facing as a yaw quaternion right before
+// its position, and the actor set holds every entity the manager has handed
+// over in the last twelve seconds with its world position. Cast a ray from the
+// player along the facing, test every entity as a small sphere in a beam that
+// widens with distance, and the first hit along the ray is what the crosshair
+// is on. A wide spread turns the beam into a cone, which is what the automatic
+// marker uses.
 //
-// The limit: this ray hits objects, not terrain. Marking bare ground with
-// nothing on it needs the engine's own raycast, which is a later step.
+// The limit: this hits objects, not terrain.
 
 namespace gs::nearest
 {
@@ -29,16 +26,11 @@ namespace gs::nearest
         char cls[80]{};
     };
 
-    // Facing from a yaw quaternion (x, y, z, w) about the vertical axis, as a
-    // unit vector in the XZ plane. Returns false if it is not a yaw rotation.
     bool ForwardFromQuat(const float* q, float* fx, float* fz);
 
-    // Walk the actor manager's list and test every entity against the ray.
-    // The beam is `radius` wide at the player and widens by `spread` per unit
-    // of distance, so a far object needs to be closer to the line than a near
-    // one is allowed to be. Fills up to n hits ordered by distance along the
-    // ray, nearest first. Returns how many.
-    int Cast(uintptr_t manager, uintptr_t playerActor,
+    // Cast against the actor set. Fills up to n hits ordered by distance along
+    // the ray, nearest first. Returns how many.
+    int Cast(uintptr_t playerActor,
              float px, float py, float pz, float fx, float fz,
              float maxAlong, float radius, float spread,
              Candidate* out, int n);

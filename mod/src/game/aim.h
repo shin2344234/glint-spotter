@@ -48,4 +48,10 @@ namespace gs::aim
     // aimed at a glint and sat 10.7 units from the player. Valid only when it
     // is finite and within reach.
     bool AimPointLocal(uintptr_t charctl, float lx, float ly, float lz, float* out);
+
+    // The detect component's distance to its current target, at +0x3EC.
+    // Session nineteen: FLT_MAX at every press with no target; session
+    // seventeen: 0.5 while aimed at a glint, with +0x580 at 3.0. Returns
+    // false when there is no target.
+    bool DetectDistance(float* out);
 }
