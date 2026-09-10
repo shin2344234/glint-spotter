@@ -399,24 +399,21 @@ namespace
     // What the hotkey does in this build: nothing to the game. It reports what
     // the spy has seen and what a replay would pass, so the key path and the
     // captured data can both be checked before a call is ever made.
-    void DryRun()
+    void OnKey()
     {
         const uint64_t w = gs::mapicon::Seen(0);
         const uint64_t m = gs::mapicon::Seen(1);
         GS_LOG("[key] pressed. spy has seen %llu world map and %llu minimap create calls",
                static_cast<unsigned long long>(w), static_cast<unsigned long long>(m));
 
-        gs::mapicon::Capture c;
-        if (!gs::mapicon::Last(0, c))
-        {
-            GS_LOG("[key] no world map call captured yet, nothing to replay from. Open the map first.");
-            return;
-        }
-        GS_LOG("[key] dry run. A replay would call slot 170 on 0x%p with type=0x%04X name=\"%s\"",
-               c.self, c.type, c.name8);
-        GS_LOG("[key]   at (%.3f, %.3f, %.3f) shifted 5 m north, key=%lld/0x%02X plus one, all else as captured",
-               c.pos[0], c.pos[1], c.pos[2], static_cast<long long>(c.keyId), c.keyKind);
-        GS_LOG("[key]   this build does not make that call");
+        gs::mapicon::Capture player;
+        if (gs::mapicon::LastPlayer(player))
+            GS_LOG("[key] player marker last seen at (%.3f, %.3f, %.3f)",
+                   player.pos[0], player.pos[1], player.pos[2]);
+        else
+            GS_LOG("[key] no player marker seen yet; a replay would land at the captured pin's own position");
+
+        gs::mapicon::RequestReplay();
     }
 
     // The CRT answers an invalid parameter by calling __fastfail, which kills the
@@ -469,7 +466,7 @@ namespace
         while (!g_stop.load())
         {
             const bool down = (GetAsyncKeyState(static_cast<int>(g_key)) & 0x8000) != 0;
-            if (down && !wasDown) DryRun();
+            if (down && !wasDown) OnKey();
             wasDown = down;
             Sleep(50);
         }
@@ -509,7 +506,7 @@ namespace
         }
         g_key = cfg.key;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
-        GS_LOG("press %s (VK %02X) to log what a replay would use", gs::Settings::KeyName(cfg.key), cfg.key);
+        GS_LOG("press %s (VK %02X) to place a copy of the last custom pin 5 m from you", gs::Settings::KeyName(cfg.key), cfg.key);
 
         // Early passes hunt for something that may not exist yet, so they come
         // quickly. Once everything is in hand a tick is one pointer read each and

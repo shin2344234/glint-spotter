@@ -21,6 +21,15 @@ namespace
     std::atomic<uint64_t> g_seen[2];
     std::mutex g_lastMutex;
     gs::mapicon::Capture g_last[2];
+    gs::mapicon::Capture g_lastPin;
+    gs::mapicon::Capture g_lastPlayer;
+    std::atomic<bool> g_replayPending{false};
+    std::atomic<uint64_t> g_replayCount{0};
+
+    bool IsName(const gs::mapicon::Capture& c, const char* name)
+    {
+        return strcmp(c.name8, name) == 0;
+    }
 
     // How many calls per surface get a full dump. The map creates dozens of icons
     // on open, and the first few say everything the replay needs.
@@ -82,13 +91,19 @@ namespace
         c.sequence = n;
         Snapshot(a, &c);
 
+        const bool pin = c.ok && IsName(c, "MapIcon_Pin_Marker");
+        const bool player = c.ok && IsName(c, "MapIcon_ActorFocus");
         {
             std::lock_guard<std::mutex> lock(g_lastMutex);
             g_last[surface] = c;
+            if (pin && surface == 0) g_lastPin = c;
+            if (player && surface == 0) g_lastPlayer = c;
         }
 
         const char* label = surface == 0 ? "world" : "mini";
-        if (n <= kFullDumps)
+        // A pin marker is the call the replay copies, so it is always dumped in
+        // full no matter how many icons came before it.
+        if (n <= kFullDumps || pin)
         {
             GS_LOG("[spy %s #%llu] this=0x%p type=0x%04X key=%lld/0x%02X dword4=%u name=\"%s\"%s",
                    label, static_cast<unsigned long long>(n), c.self, c.type,
@@ -115,12 +130,76 @@ namespace
         }
     }
 
+    // One call of our own, made on the thread the game just used for its own.
+    // Every pointer argument points at our copies, because the game's were on
+    // its stack and are gone. The struct at argument 10 is passed zeroed: the
+    // captured one may carry a pointer into memory the game has since freed,
+    // a zero count makes the dispatcher skip it, and the constructor swaps it
+    // in as the object's own resting state.
+    void Replay(void* self)
+    {
+        gs::mapicon::Capture pin, player;
+        {
+            std::lock_guard<std::mutex> lock(g_lastMutex);
+            pin = g_lastPin;
+            player = g_lastPlayer;
+        }
+        if (pin.sequence == 0)
+        {
+            GS_LOG_ERR("[replay] no MapIcon_Pin_Marker captured yet. Place a custom marker on the map first.");
+            return;
+        }
+
+        const uint64_t n = ++g_replayCount;
+
+        uint16_t type = pin.type;
+        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{pin.keyId + static_cast<int64_t>(n), pin.keyKind, {}};
+        uint32_t dword4 = pin.dword4;
+        float float5 = pin.float5;
+        float pos[3] = {pin.pos[0], pin.pos[1], pin.pos[2]};
+        if (player.sequence != 0)
+        {
+            pos[0] = player.pos[0] + 5.0f;
+            pos[1] = player.pos[1];
+            pos[2] = player.pos[2] + 5.0f;
+        }
+        char str7[48];
+        memcpy(str7, pin.str7, sizeof(str7));
+        char name8[64];
+        memcpy(name8, pin.name8, sizeof(name8));
+        uint8_t struct10[36]{};
+
+        GS_LOG("[replay #%llu] calling slot 170 on 0x%p: type=0x%04X key=%lld/0x%02X dword4=%u name=\"%s\"",
+               static_cast<unsigned long long>(n), self, type, static_cast<long long>(key.id), key.kind,
+               dword4, name8);
+        GS_LOG("[replay #%llu]   pos=(%.3f, %.3f, %.3f) float5=%.4f str7=%s byte9=%u byte11=%u struct10=zeroed (captured count was %u)",
+               static_cast<unsigned long long>(n), pos[0], pos[1], pos[2], float5,
+               pin.str7Null ? "null" : str7, pin.byte9, pin.byte11,
+               *reinterpret_cast<const uint32_t*>(pin.struct10 + 4));
+
+        void* result = g_orig[0](self, &type, &key, &dword4, &float5, pos,
+                                 pin.str7Null ? nullptr : static_cast<void*>(str7),
+                                 name8,
+                                 reinterpret_cast<void*>(static_cast<uintptr_t>(pin.byte9)),
+                                 struct10,
+                                 reinterpret_cast<void*>(static_cast<uintptr_t>(pin.byte11)),
+                                 nullptr, nullptr, nullptr);
+
+        GS_LOG_OK("[replay #%llu] returned 0x%p. If a pin appeared 5 m from you on the map, this is it.",
+                  static_cast<unsigned long long>(n), result);
+    }
+
     void* DetourWorld(void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* a7,
                       void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
     {
         void* a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
         Record(0, a);
-        return g_orig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+        void* r = g_orig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+
+        // The game's call is done and we are on its thread with its controller
+        // in hand. If a replay was asked for, this is the moment.
+        if (g_replayPending.exchange(false)) Replay(a1);
+        return r;
     }
 
     void* DetourMini(void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* a7,
@@ -177,6 +256,41 @@ namespace gs::mapicon
         std::lock_guard<std::mutex> lock(g_lastMutex);
         if (g_last[surface].sequence == 0) return false;
         out = g_last[surface];
+        return true;
+    }
+
+    bool LastPin(Capture& out)
+    {
+        std::lock_guard<std::mutex> lock(g_lastMutex);
+        if (g_lastPin.sequence == 0) return false;
+        out = g_lastPin;
+        return true;
+    }
+
+    bool LastPlayer(Capture& out)
+    {
+        std::lock_guard<std::mutex> lock(g_lastMutex);
+        if (g_lastPlayer.sequence == 0) return false;
+        out = g_lastPlayer;
+        return true;
+    }
+
+    bool RequestReplay()
+    {
+        Capture pin;
+        if (!LastPin(pin))
+        {
+            GS_LOG("[key] no MapIcon_Pin_Marker captured yet, so there is nothing to copy. "
+                   "Place a custom marker on the world map, then press again.");
+            return false;
+        }
+        if (!g_swap[0].installed || !g_orig[0])
+        {
+            GS_LOG_ERR("[key] the world map spy is not installed, no replay");
+            return false;
+        }
+        g_replayPending.store(true);
+        GS_LOG("[key] replay queued. It runs on the game's thread the next time the game creates a world map icon.");
         return true;
     }
 }

@@ -59,4 +59,15 @@ namespace gs::mapicon
     // Counts and the most recent capture per surface, for the hotkey dry run.
     uint64_t Seen(int surface);
     bool Last(int surface, Capture& out);
+
+    // The most recent MapIcon_Pin_Marker call and the most recent player marker
+    // (MapIcon_ActorFocus), kept separately from Last because the map creates
+    // hundreds of other icons in between.
+    bool LastPin(Capture& out);
+    bool LastPlayer(Capture& out);
+
+    // Ask for one replay. It happens inside the detour on the game's own thread
+    // the next time the game creates a world map icon, and is logged either way.
+    // Returns false, with a reason in the log, if there is nothing to replay yet.
+    bool RequestReplay();
 }
