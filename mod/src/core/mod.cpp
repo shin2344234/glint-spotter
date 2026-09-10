@@ -506,7 +506,7 @@ namespace
         }
         g_key = cfg.key;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
-        GS_LOG("press %s (VK %02X) to place a copy of the last custom pin 5 m from you", gs::Settings::KeyName(cfg.key), cfg.key);
+        GS_LOG("press %s (VK %02X) to arm, then place a custom marker; a second one follows it", gs::Settings::KeyName(cfg.key), cfg.key);
 
         // Early passes hunt for something that may not exist yet, so they come
         // quickly. Once everything is in hand a tick is one pointer read each and

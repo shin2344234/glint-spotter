@@ -153,16 +153,15 @@ namespace
         const uint64_t n = ++g_replayCount;
 
         uint16_t type = pin.type;
-        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{pin.keyId + static_cast<int64_t>(n), pin.keyKind, {}};
+        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{1000 + static_cast<int64_t>(n), pin.keyKind, {}};
         uint32_t dword4 = pin.dword4;
         float float5 = pin.float5;
-        float pos[3] = {pin.pos[0], pin.pos[1], pin.pos[2]};
-        if (player.sequence != 0)
-        {
-            pos[0] = player.pos[0] + 5.0f;
-            pos[1] = player.pos[1];
-            pos[2] = player.pos[2] + 5.0f;
-        }
+        // Offset from the pin the player just placed. The player marker looked
+        // like the better anchor and is not: it is created once at first map
+        // open and never refreshed, so session nine had it ten minutes stale.
+        // Pins carry no elevation, and 30 units is far enough apart to see.
+        (void)player;
+        float pos[3] = {pin.pos[0] + 30.0f, 0.0f, pin.pos[2] + 30.0f};
         char str7[48];
         memcpy(str7, pin.str7, sizeof(str7));
         char name8[64];
@@ -185,7 +184,7 @@ namespace
                                  reinterpret_cast<void*>(static_cast<uintptr_t>(pin.byte11)),
                                  nullptr, nullptr, nullptr);
 
-        GS_LOG_OK("[replay #%llu] returned 0x%p. If a pin appeared 5 m from you on the map, this is it.",
+        GS_LOG_OK("[replay #%llu] returned 0x%p. A second pin 30 units from the one you placed is ours.",
                   static_cast<unsigned long long>(n), result);
     }
 
@@ -197,8 +196,19 @@ namespace
         void* r = g_orig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 
         // The game's call is done and we are on its thread with its controller
-        // in hand. If a replay was asked for, this is the moment.
-        if (g_replayPending.exchange(false)) Replay(a1);
+        // in hand. Session nine showed the map creates its icons once and then
+        // only when a pin is placed, so a pin placement is the moment, and it is
+        // also the call the replay copies, captured a few lines up.
+        if (g_replayPending.load())
+        {
+            gs::mapicon::Capture last;
+            {
+                std::lock_guard<std::mutex> lock(g_lastMutex);
+                last = g_last[0];
+            }
+            if (last.ok && IsName(last, "MapIcon_Pin_Marker") && g_replayPending.exchange(false))
+                Replay(a1);
+        }
         return r;
     }
 
@@ -277,20 +287,15 @@ namespace gs::mapicon
 
     bool RequestReplay()
     {
-        Capture pin;
-        if (!LastPin(pin))
-        {
-            GS_LOG("[key] no MapIcon_Pin_Marker captured yet, so there is nothing to copy. "
-                   "Place a custom marker on the world map, then press again.");
-            return false;
-        }
         if (!g_swap[0].installed || !g_orig[0])
         {
             GS_LOG_ERR("[key] the world map spy is not installed, no replay");
             return false;
         }
-        g_replayPending.store(true);
-        GS_LOG("[key] replay queued. It runs on the game's thread the next time the game creates a world map icon.");
+        const bool already = g_replayPending.exchange(true);
+        GS_LOG(already
+               ? "[key] still armed. Place a custom marker on the world map and a second one follows it."
+               : "[key] armed. Place a custom marker on the world map; right after the game places it, a copy goes 30 units away.");
         return true;
     }
 }
