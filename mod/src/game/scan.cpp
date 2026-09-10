@@ -1,58 +1,60 @@
 #include "game/scan.h"
 
 #include <Windows.h>
+#include <psapi.h>
 
 #include "game/rtti.h"
 
 namespace
 {
     constexpr size_t kMaxNeedles = 64;
+    constexpr size_t kPageSize = 4096;
+    constexpr size_t kPagesPerQuery = 1024;  // 4 MB of address space per call
 
     // One raw hit, flat so the guarded frame below holds no C++ objects.
     struct RawHit
     {
-        size_t offset;
+        size_t offset;   // from the start of the region, not the run
         int needle;
     };
 
-    // The compare over one region, kept in its own function with no C++ objects
-    // in the frame so it can sit inside __try. Another thread is free to unmap a
-    // region while we walk it, and VirtualQuery only told us what was true a
-    // moment ago, so the guard is doing real work rather than being decorative.
+    // The compare over one run of pages, kept in its own function with no C++
+    // objects in the frame so it can sit inside __try. Another thread is free to
+    // unmap memory while we walk it, and VirtualQuery only told us what was true
+    // a moment ago, so the guard is doing real work rather than being decorative.
     //
-    // objectBytes is applied here rather than by the caller: the whole region is
-    // known committed and readable, so a hit with that much room behind it needs
-    // no second probe, and one with less is noise that never leaves this loop.
-    size_t ScanRegion(const uint8_t* base, size_t size,
-                      const uintptr_t* needles, size_t needleCount,
-                      uintptr_t lo, uintptr_t hi,
-                      const size_t* needleBytes, RawHit* outBuf, size_t outCap,
-                      size_t* rawMatches, size_t* rejectedNoRoom)
+    // The fit test measures against the whole region rather than this run,
+    // because an object can start in a resident page and continue into one that
+    // is not, and it is still an object.
+    size_t ScanRun(const uint8_t* regionBase, size_t regionSize,
+                   size_t runOffset, size_t runBytes,
+                   const uintptr_t* needles, size_t needleCount,
+                   uintptr_t lo, uintptr_t hi,
+                   const size_t* needleBytes, RawHit* outBuf, size_t outCap,
+                   size_t* rawMatches, size_t* rejectedNoRoom)
     {
         size_t found = 0;
         __try
         {
             // Objects are pointer-aligned, so an 8-byte stride is not just a
             // speed-up, it is the only alignment a vptr can land on.
-            const uintptr_t* p = reinterpret_cast<const uintptr_t*>(base);
-            const size_t count = size / sizeof(uintptr_t);
+            const uintptr_t* p = reinterpret_cast<const uintptr_t*>(regionBase + runOffset);
+            const size_t count = runBytes / sizeof(uintptr_t);
             for (size_t i = 0; i < count && found < outCap; ++i)
             {
                 const uintptr_t v = p[i];
 
                 // Every needle is a vtable inside the game module, so one
                 // unsigned compare against that span rejects almost every qword
-                // in memory. Without it the loop below ran for all 56 needles on
-                // every one of 655 million qwords, which is 36.7 billion compares
-                // and the 83 MB/s that made session three run out of time twice.
+                // before the loop below is reached.
                 if (v - lo > hi - lo) continue;
 
                 for (size_t n = 0; n < needleCount; ++n)
                 {
                     if (v != needles[n]) continue;
                     ++*rawMatches;
-                    const size_t off = i * sizeof(uintptr_t);
-                    if (off + needleBytes[n] > size)
+                    const size_t off = runOffset + i * sizeof(uintptr_t);
+                    if (off + needleBytes[n] > regionSize)
                     {
                         ++*rejectedNoRoom;
                         break;
@@ -66,8 +68,8 @@ namespace
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            // Region went away underneath us. Whatever was found before the
-            // fault is still valid; the rest of this region is simply skipped.
+            // Memory went away underneath us. Whatever was found before the
+            // fault is still valid; the rest of this run is simply skipped.
         }
         return found;
     }
@@ -95,7 +97,7 @@ namespace gs::scan
         for (size_t i = 0; i < needleCount; ++i)
             if (opt.needleBytes[i] < smallest) smallest = opt.needleBytes[i];
 
-        // The span every needle falls inside, for the pre-filter in ScanRegion.
+        // The span every needle falls inside, for the pre-filter in ScanRun.
         uintptr_t lo = static_cast<uintptr_t>(-1), hi = 0;
         for (size_t i = 0; i < needleCount; ++i)
         {
@@ -113,10 +115,10 @@ namespace gs::scan
         GetSystemInfo(&si);
         const auto* addr = static_cast<const uint8_t*>(si.lpMinimumApplicationAddress);
         const auto* limit = static_cast<const uint8_t*>(si.lpMaximumApplicationAddress);
+        const HANDLE self = GetCurrentProcess();
 
-        // One scratch buffer reused per region rather than a vector push inside
-        // the guarded frame, which cannot hold objects with destructors.
         RawHit buf[256];
+        static PSAPI_WORKING_SET_EX_INFORMATION ws[kPagesPerQuery];
 
         while (addr < limit && out.size() < opt.maxHits)
         {
@@ -142,14 +144,8 @@ namespace gs::scan
             const bool kindOk = mbi.State == MEM_COMMIT && typeOk && writable &&
                                 (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0;
 
-            if (!kindOk)
-            {
-                rep.regionsSkippedKind++;
-            }
-            else if (regionSize < smallest)
-            {
-                rep.regionsSkippedSmall++;
-            }
+            if (!kindOk) rep.regionsSkippedKind++;
+            else if (regionSize < smallest) rep.regionsSkippedSmall++;
             else if (regionSize > opt.maxRegionBytes)
             {
                 rep.regionsSkippedLarge++;
@@ -157,22 +153,70 @@ namespace gs::scan
             }
             else
             {
-                const size_t room = opt.maxHits - out.size();
-                const size_t cap = room < 256 ? room : 256;
-                const size_t got = ScanRegion(regionBase, regionSize, needles, needleCount,
-                                              lo, hi, opt.needleBytes, buf, cap,
-                                              &rep.rawMatches, &rep.rejectedNoRoom);
-                for (size_t i = 0; i < got; ++i)
+                // Reading a page that is committed but not resident costs a soft
+                // fault, and one fault per page works out near 60 ns a qword.
+                // That is why session four read 6.8 GB in a minute and still ran
+                // out of time: about 90 MB/s, against the 4 GB/s the same loop
+                // manages on memory already in the working set. So ask which
+                // pages are resident and read only those.
+                size_t offset = 0;
+                while (offset < regionSize && out.size() < opt.maxHits)
                 {
-                    Hit h{};
-                    h.object = const_cast<uint8_t*>(regionBase) + buf[i].offset;
-                    h.needle = buf[i].needle;
-                    h.regionBase = reinterpret_cast<uintptr_t>(regionBase);
-                    h.regionSize = regionSize;
-                    out.push_back(h);
+                    const size_t pagesLeft = (regionSize - offset + kPageSize - 1) / kPageSize;
+                    const size_t pages = pagesLeft < kPagesPerQuery ? pagesLeft : kPagesPerQuery;
+
+                    for (size_t i = 0; i < pages; ++i)
+                        ws[i].VirtualAddress =
+                            const_cast<uint8_t*>(regionBase + offset + i * kPageSize);
+
+                    const bool queried = opt.residentOnly &&
+                        QueryWorkingSetEx(self, ws,
+                                          static_cast<DWORD>(pages * sizeof(ws[0]))) != FALSE;
+
+                    size_t i = 0;
+                    while (i < pages)
+                    {
+                        // With no residency information, treat everything as
+                        // resident rather than skipping the region outright.
+                        const bool valid = !queried || ws[i].VirtualAttributes.Valid != 0;
+                        size_t run = 1;
+                        while (i + run < pages &&
+                               (!queried || ws[i + run].VirtualAttributes.Valid != 0) == valid)
+                            ++run;
+
+                        const size_t runOffset = offset + i * kPageSize;
+                        size_t runBytes = run * kPageSize;
+                        if (runOffset >= regionSize) break;
+                        if (runOffset + runBytes > regionSize) runBytes = regionSize - runOffset;
+
+                        if (!valid)
+                        {
+                            rep.bytesSkippedNotResident += runBytes;
+                        }
+                        else
+                        {
+                            const size_t room = opt.maxHits - out.size();
+                            const size_t cap = room < 256 ? room : 256;
+                            const size_t got = ScanRun(regionBase, regionSize, runOffset, runBytes,
+                                                       needles, needleCount, lo, hi,
+                                                       opt.needleBytes, buf, cap,
+                                                       &rep.rawMatches, &rep.rejectedNoRoom);
+                            for (size_t k = 0; k < got; ++k)
+                            {
+                                Hit h{};
+                                h.object = const_cast<uint8_t*>(regionBase) + buf[k].offset;
+                                h.needle = buf[k].needle;
+                                h.regionBase = reinterpret_cast<uintptr_t>(regionBase);
+                                h.regionSize = regionSize;
+                                out.push_back(h);
+                            }
+                            rep.bytesScanned += runBytes;
+                        }
+                        i += run;
+                    }
+                    offset += pages * kPageSize;
                 }
                 rep.regionsScanned++;
-                rep.bytesScanned += regionSize;
 
                 if (budgetTicks)
                 {

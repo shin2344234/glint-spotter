@@ -26,6 +26,8 @@ add_library(GlintSpotter SHARED
 )
 
 target_include_directories(GlintSpotter PRIVATE src)
+# QueryWorkingSetEx, for skipping pages that are not resident.
+target_link_libraries(GlintSpotter PRIVATE psapi)
 target_compile_definitions(GlintSpotter PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_compile_options(GlintSpotter PRIVATE /utf-8 /W3)
 

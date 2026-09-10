@@ -215,9 +215,11 @@ namespace
                static_cast<unsigned long long>(rep.bytesScanned / (1024 * 1024)),
                static_cast<unsigned long long>(rep.microseconds / 1000),
                rep.timeBudgetHit ? ", TIME BUDGET HIT, coverage incomplete" : "");
-        GS_LOG("  skipped %zu wrong kind, %zu too small, %zu too large (%llu MB)",
+        GS_LOG("  skipped %zu wrong kind, %zu too small, %zu too large (%llu MB), "
+               "%llu MB not resident",
                rep.regionsSkippedKind, rep.regionsSkippedSmall, rep.regionsSkippedLarge,
-               static_cast<unsigned long long>(rep.bytesSkippedLarge / (1024 * 1024)));
+               static_cast<unsigned long long>(rep.bytesSkippedLarge / (1024 * 1024)),
+               static_cast<unsigned long long>(rep.bytesSkippedNotResident / (1024 * 1024)));
         GS_LOG("  %zu pointer match(es), %zu rejected for having no room behind them",
                rep.rawMatches, rep.rejectedNoRoom);
     }
@@ -296,6 +298,7 @@ namespace
         {
             hits.clear();
             opt.wideKinds = true;
+            opt.residentOnly = false;
             opt.timeBudgetMs = 60000;
             opt.maxRegionBytes = 4ull * 1024 * 1024 * 1024;
             rep = gs::scan::FindPointers(needles, n, hits, opt);

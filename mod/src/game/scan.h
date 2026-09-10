@@ -50,6 +50,13 @@ namespace gs::scan
         // be told apart from a bad threshold.
         size_t maxRegionBytes = 256ull * 1024 * 1024;
 
+        // Read only pages already in the working set. A committed page that is
+        // not resident costs a soft fault to touch, which is roughly a fortieth
+        // of the throughput, and an object the game is actively drawing with is
+        // resident by definition. Turn this off only to prove something is
+        // genuinely absent rather than merely paged out.
+        bool residentOnly = true;
+
         // Wall clock ceiling. Time is what the player notices, not bytes.
         uint64_t timeBudgetMs = 4000;
 
@@ -65,6 +72,7 @@ namespace gs::scan
         size_t regionsSkippedSmall = 0;  // cannot hold the object at all
         uint64_t bytesScanned = 0;
         uint64_t bytesSkippedLarge = 0;
+        uint64_t bytesSkippedNotResident = 0;
         size_t rawMatches = 0;           // pointer matched
         size_t rejectedNoRoom = 0;       // matched but too near the end of its region
         uint64_t microseconds = 0;
