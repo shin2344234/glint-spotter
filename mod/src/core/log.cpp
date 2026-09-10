@@ -59,7 +59,13 @@ namespace gs::Log
         if (g_path.empty()) return;
 
         Rotate(g_path);
-        _wfopen_s(&g_file, g_path.c_str(), L"w, ccs=UTF-8");
+        // Plain bytes, no ccs= mode. Opening with ccs=UTF-8 puts the stream in
+        // the CRT's Unicode mode, and every narrow call on a Unicode-mode stream
+        // is an invalid parameter. The default handler answers that with
+        // __fastfail, so the first fprintf below took the whole process down with
+        // STATUS_STACK_BUFFER_OVERRUN and left this file holding nothing but the
+        // byte order mark. Everything written here is ASCII, so bytes are enough.
+        _wfopen_s(&g_file, g_path.c_str(), L"w");
     }
 
     void Write(const char* level, const char* fmt, ...)

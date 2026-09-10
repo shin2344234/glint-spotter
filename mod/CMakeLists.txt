@@ -28,6 +28,18 @@ target_include_directories(GlintSpotter PRIVATE src)
 target_compile_definitions(GlintSpotter PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_compile_options(GlintSpotter PRIVATE /utf-8 /W3)
 
+# Bisect switch for load-time faults. 3 is the real plugin; lower numbers drop
+# one layer each so a crash inside LoadLibrary can be cornered without launching
+# the game. 0 is a DLL whose DllMain does nothing at all.
+#   cmake -DGS_STAGE=0 ...
+if(DEFINED ENV{GS_STAGE})
+    set(GS_STAGE $ENV{GS_STAGE})
+else()
+    set(GS_STAGE 3)
+endif()
+message(STATUS "GS_STAGE=${GS_STAGE}")
+target_compile_definitions(GlintSpotter PRIVATE GS_STAGE=${GS_STAGE})
+
 set_target_properties(GlintSpotter PROPERTIES PREFIX "" SUFFIX ".asi" OUTPUT_NAME "GlintSpotter")
 
 if(MSVC)

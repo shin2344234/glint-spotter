@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <atomic>
+#include <cstdlib>
 #include <vector>
 
 #include "core/log.h"
@@ -213,12 +214,48 @@ namespace
     }
 }
 
+namespace
+{
+    // The CRT answers an invalid parameter by calling __fastfail, which kills the
+    // whole process. That is a defensible default for an application and a
+    // terrible one for a plugin living in someone else's: opening the log in the
+    // CRT's Unicode mode made the first narrow fprintf invalid, and the game died
+    // at startup with STATUS_STACK_BUFFER_OVERRUN and no log to say why.
+    //
+    // The static CRT means this handler is ours alone and the game's own CRT is
+    // untouched. Returning from it makes the offending call fail and set errno
+    // instead of taking the process down.
+    thread_local bool t_inHandler = false;
+
+    void __cdecl OnInvalidParameter(const wchar_t*, const wchar_t*, const wchar_t*,
+                                    unsigned int, uintptr_t)
+    {
+        // The log is a plausible source of the fault, so never re-enter it.
+        if (t_inHandler) return;
+        t_inHandler = true;
+        GS_LOG_ERR("CRT invalid parameter swallowed; a call failed but the process lives");
+        t_inHandler = false;
+    }
+
+    void InstallInvalidParameterHandler()
+    {
+        _set_invalid_parameter_handler(OnInvalidParameter);
+    }
+}
+
 namespace gs::Mod
 {
     void Initialize(void* selfModule)
     {
+        InstallInvalidParameterHandler();
+#if GS_STAGE >= 2
         Log::Start(selfModule);
+#else
+        (void)selfModule;
+#endif
+#if GS_STAGE >= 3
         g_thread = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);
+#endif
     }
 
     void Shutdown(bool processTerminating)
