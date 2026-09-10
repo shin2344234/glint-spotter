@@ -73,34 +73,61 @@ namespace
         }
     }
 
-    // Walk one component's pointer fields. Fills out on the first actor that is
-    // not the player. Plain data in and out so the frame can hold the handler.
-    bool Search(uintptr_t comp, uintptr_t player, bool describe, gs::aim::Target* out)
+    // Dump an object's header as hex and as floats, for a layout that is not
+    // known yet. Only on the first few calls.
+    void DumpHeader(const char* tag, uintptr_t obj, size_t bytes)
+    {
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), bytes)) return;
+        const auto* q = reinterpret_cast<const uint32_t*>(obj);
+        for (size_t off = 0; off + 16 <= bytes; off += 16)
+        {
+            float f[4];
+            memcpy(f, q + off / 4, 16);
+            GS_LOG("[aim]   %s +0x%03zX  %08X %08X %08X %08X   %11.3f %11.3f %11.3f %11.3f",
+                   tag, off, q[off/4], q[off/4+1], q[off/4+2], q[off/4+3], f[0], f[1], f[2], f[3]);
+        }
+    }
+
+    // Walk one object's pointer fields. Fills out on the first actor that is
+    // not the player. Depth 1 also searches pointees that look like holders:
+    // the detect component keeps a FindDetectTargetTask at +0x1D0, and the
+    // target is in the task, not on the component. Plain data in and out so
+    // the frame can hold the handler.
+    bool Search(uintptr_t obj, uintptr_t player, bool describe, int depth, const char* tag,
+                gs::aim::Target* out)
     {
         __try
         {
-            if (!comp || !gs::rtti::Readable(reinterpret_cast<const void*>(comp), 0x40)) return false;
+            if (!obj || !gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x40)) return false;
             size_t bytes = kSearchBytes;
-            while (bytes > 0x40 && !gs::rtti::Readable(reinterpret_cast<const void*>(comp), bytes)) bytes /= 2;
+            while (bytes > 0x40 && !gs::rtti::Readable(reinterpret_cast<const void*>(obj), bytes)) bytes /= 2;
 
-            for (uintptr_t off = 0x10; off + 8 <= bytes; off += 8)
+            for (uintptr_t off = 0x08; off + 8 <= bytes; off += 8)
             {
-                const uintptr_t p = *reinterpret_cast<const uintptr_t*>(comp + off);
-                if (p < 0x10000 || (p & 7) != 0 || p == player) continue;
+                const uintptr_t p = *reinterpret_cast<const uintptr_t*>(obj + off);
+                if (p < 0x10000 || (p & 7) != 0 || p == player || p == obj) continue;
                 const char* n = NameOf(p);
                 if (!n) continue;
-                if (describe) GS_LOG("[aim]   +0x%03llX -> 0x%p %s", static_cast<unsigned long long>(off),
-                                     reinterpret_cast<void*>(p), n);
-                if (!IsActorClass(n)) continue;
-
-                float v[3];
-                if (!PositionOf(p, v)) continue;
-                out->x = v[0]; out->y = v[1]; out->z = v[2];
-                out->actor = p;
-                out->foundAt = off;
-                strncpy_s(out->cls, sizeof(out->cls), n, _TRUNCATE);
-                out->valid = true;
-                return true;
+                if (describe) GS_LOG("[aim]   %s+0x%03llX -> 0x%p %s", tag,
+                                     static_cast<unsigned long long>(off), reinterpret_cast<void*>(p), n);
+                if (IsActorClass(n))
+                {
+                    float v[3];
+                    if (!PositionOf(p, v)) continue;
+                    out->x = v[0]; out->y = v[1]; out->z = v[2];
+                    out->actor = p;
+                    out->foundAt = off;
+                    strncpy_s(out->cls, sizeof(out->cls), n, _TRUNCATE);
+                    out->valid = true;
+                    return true;
+                }
+                // One level down into anything that could hold a result.
+                if (depth > 0 && (strstr(n, "Task") || strstr(n, "Target") || strstr(n, "Detect") ||
+                                  strstr(n, "IRefCounted")))
+                {
+                    if (describe && strstr(n, "FindDetectTargetTask")) DumpHeader("task", p, 0x100);
+                    if (Search(p, player, describe, depth - 1, "task", out)) return true;
+                }
             }
             return false;
         }
@@ -139,13 +166,13 @@ namespace gs::aim
                              reinterpret_cast<void*>(detect), reinterpret_cast<void*>(special),
                              reinterpret_cast<void*>(player), FlashActive() ? "on" : "off");
 
-        if (detect && Search(detect, player, describe, &t))
+        if (detect && Search(detect, player, describe, 1, "detect", &t))
         {
             GS_LOG_OK("[aim] target via detect component +0x%llX: %s at (%.3f, %.3f, %.3f)",
                       static_cast<unsigned long long>(t.foundAt), t.cls, t.x, t.y, t.z);
             return t;
         }
-        if (special && Search(special, player, describe, &t))
+        if (special && Search(special, player, describe, 1, "special", &t))
         {
             GS_LOG_OK("[aim] target via special component +0x%llX: %s at (%.3f, %.3f, %.3f)",
                       static_cast<unsigned long long>(t.foundAt), t.cls, t.x, t.y, t.z);
