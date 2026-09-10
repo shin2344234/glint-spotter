@@ -148,9 +148,9 @@ fighting for the same render slots is a problem nobody needs.
    feeds the `+0xAB5594` read.
 
 Driving another mod's local API was on this list and came off it on 10 September
-2026. Seth ruled out integrating with the navigation mod, so everything here
-stands on its own hooks. The only thing still owed to its author is a heads-up
-about the shared slots, drafted in `private/discord/`.
+2026. Seth ruled out integrating with the navigation mod and is not involving
+its author, so everything here stands on its own hooks, and where a slot is
+shared the plugin stacks on it the way Master Looter already does.
 
 ## Experiments, cheapest first
 
@@ -709,10 +709,11 @@ Three things, and none of them is a mystery any more.
 The trigger. The replay runs on the game's thread because it piggybacks on a
 game call into slot 170, and those only happen at map open and pin placement.
 The real feature needs a game-thread moment of its own choosing: hold the flash,
-see a glint, drop a pin. The per frame update at slot 35 is that moment and
-Crimson Route already owns the slot on both roots; stacking on it is the same
-shape as the D3D12 present hook problem, and that is the conversation with
-dofo7777 that is still drafted under `private`.
+see a glint, drop a pin. The per frame update at slot 35 is that moment. Another
+mod already holds that slot on both roots, so the plugin stacks: it reads
+whatever the slot holds, forwards to it, and never assumes it is the game's
+own function. That is the same shape as Master Looter's present hook and it
+needs nobody's agreement, only a build and a session.
 
 The glint. Which objects are lit is data the game holds, `IsStageDetectModeTarget`
 and the `fx_detectmode_knowledge_gimmick` effect, and the entity scan from
