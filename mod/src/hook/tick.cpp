@@ -431,7 +431,20 @@ namespace
         gs::nearest::Candidate c[8];
         const int n = gs::nearest::CastBearing(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fz,
                                                400.0f, 0.26f, 40.0f, true, c, 8);   // fifteen degrees
-        const int pick = n > 0 ? 0 : -1;   // CastBearing orders by bearing
+        // Nothing the player is standing on. Session forty-one put the pin on
+        // firewood 0.7 metres from him: it was 1.3 degrees off the bearing,
+        // nearer the heading than the blueberry sockets he was pointing at
+        // twenty-four metres out, and a pin under his own feet is a pin on
+        // him. Four metres is the line, measured from the player and not
+        // from the camera six metres behind him.
+        int pick = -1;
+        for (int i = 0; i < n; ++i)
+        {
+            const float dx = c[i].x - pp.x, dz = c[i].z - pp.z;
+            if (std::sqrt(dx * dx + dz * dz) < 4.0f) continue;
+            pick = i;   // already ordered by bearing
+            break;
+        }
 
         // While the flash is on, a line every two seconds, sixty at most.
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
@@ -442,9 +455,13 @@ namespace
                    v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fz, pp.x, pp.y, pp.z,
                    gs::actors::Count(), gs::actors::PickupCount(), n);
             for (int i = 0; i < n && i < 4; ++i)
-                GS_LOG("[auto]   %s\"%s\" eid %08X at %.1f away, %.1f deg off the bearing, %+.1f up%s", i == pick ? "PICK " : "",
-                       c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, c[i].along, c[i].off * 57.2958f, c[i].dy,
-                       c[i].lit ? ", lit" : "");
+            {
+                const float dx = c[i].x - pp.x, dz = c[i].z - pp.z;
+                const float fromPlayer = std::sqrt(dx * dx + dz * dz);
+                GS_LOG("[auto]   %s\"%s\" eid %08X at %.1f away, %.1f deg off the bearing, %+.1f up%s%s", i == pick ? "PICK " : "",
+                       c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, fromPlayer, c[i].off * 57.2958f, c[i].dy,
+                       c[i].lit ? ", lit" : "", fromPlayer < 4.0f ? ", underfoot, skipped" : "");
+            }
             // What is on the bearing at all, marked or not, so a session says
             // what the crosshair was on.
             gs::nearest::Candidate all[6];
