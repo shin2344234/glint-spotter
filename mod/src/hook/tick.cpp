@@ -409,6 +409,7 @@ namespace
     int g_setListingsLeft = 2;
     int g_targetLogsLeft = 12;
     uint32_t g_targetLastMs = 0;
+    int g_heldWinsLeft = 40;   // how many times the log says the target took the pick
     uint32_t g_heldEid = 0;
     uint32_t g_heldSinceMs = 0;
     float g_heldX = 0, g_heldZ = 0;
@@ -521,6 +522,7 @@ namespace
         const float cap = gs::Settings::Get().radius;
         int n = 0;
         int marked = 0;
+        gs::aim::Held held;
         View v;
         if (ViewRay(pp, &v))
         {
@@ -538,18 +540,81 @@ namespace
                     gs::actors::LogGimmicks(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen);
                 }
                 if (now - g_flashOnMs > 700) Calibrate(pp);
-                // And what the game's own detect system is holding, which is
-                // the thing the mod should be pinning instead of guessing.
-                if (g_targetLogsLeft > 0 && now - g_targetLastMs > 1500)
-                {
-                    --g_targetLogsLeft;
-                    g_targetLastMs = now;
-                    gs::aim::DescribeTargets(pp.x, pp.y, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen);
-                }
+                // And what the game's own detect system is holding. This is
+                // the game's own answer to the question the bearing can only
+                // guess at, so it is asked on every press and it outranks the
+                // guess when it lands on the crosshair.
+                gs::aim::Eye eye;
+                eye.px = pp.x; eye.py = pp.y; eye.pz = pp.z;
+                eye.lx = pp.lx; eye.ly = pp.ly; eye.lz = pp.lz;
+                eye.ox = v.ox; eye.oz = v.oz;
+                eye.ux = v.fx / flen; eye.uz = v.fz / flen;
+                const bool sayTargets = g_targetLogsLeft > 0 && now - g_targetLastMs > 1500;
+                if (sayTargets) { --g_targetLogsLeft; g_targetLastMs = now; }
+                held = gs::aim::DescribeTargets(eye, sayTargets);
             }
         }
-        const int pick = n > 0 ? 0 : -1;
-        const float pickAngle = n > 0 ? angles[0] : 0.0f;
+        int pick = n > 0 ? 0 : -1;
+        float pickAngle = n > 0 ? angles[0] : 0.0f;
+
+        // The game's own detect target, when it has one on the crosshair,
+        // beats anything the bearing found. Fifteen degrees is the same cone
+        // the nodes are held to, and a target has to be somewhere between five
+        // metres and half a kilometre to be a thing the player is looking at.
+        //
+        // Build 0.6.0 threw this route away for placing a pin "104 units off"
+        // in session nineteen. The arithmetic in aim.h says that pin was a
+        // hundred and four metres from the player because the target was, and
+        // session forty-seven measured a real glint at a hundred and eighteen.
+        // Being far away was the evidence against it, and being far away is
+        // the whole point.
+        bool byTarget = false;
+        if (held.valid && held.angle < 15.0f && held.dist > 5.0f && held.dist < 500.0f)
+        {
+            byTarget = true;
+            pickAngle = held.angle;
+        }
+
+        // One chosen thing, whichever route named it, so the hold and the pin
+        // below do not care which one did.
+        struct Chosen
+        {
+            float x = 0, y = 0, z = 0;
+            float angleDeg = 0;
+            uint32_t eid = 0;
+            const char* how = "";
+            char name[64]{};
+            bool valid = false;
+        } chosen;
+        if (byTarget)
+        {
+            chosen.x = held.x; chosen.y = held.y; chosen.z = held.z;
+            chosen.angleDeg = held.angle;
+            chosen.eid = held.eid;
+            chosen.how = "the target the game's own detect system is holding";
+            _snprintf_s(chosen.name, sizeof(chosen.name), _TRUNCATE, "%s at %s+0x%llX",
+                        held.cls[0] == '.' ? held.cls + 4 : held.cls, held.where,
+                        static_cast<unsigned long long>(held.at));
+            chosen.valid = true;
+        }
+        else if (pick >= 0)
+        {
+            chosen.x = around[pick].x; chosen.y = around[pick].y; chosen.z = around[pick].z;
+            chosen.angleDeg = angles[pick] * 57.2958f;
+            chosen.eid = around[pick].eid;
+            chosen.how = around[pick].how ? around[pick].how : "?";
+            strncpy_s(chosen.name, sizeof(chosen.name),
+                      around[pick].name[0] ? around[pick].name : "?", _TRUNCATE);
+            chosen.valid = true;
+        }
+        if (byTarget && g_heldWinsLeft > 0)
+        {
+            --g_heldWinsLeft;
+            GS_LOG("[auto] the game says it is holding %s, %.1f metres away, %.1f degrees off the "
+                   "crosshair; that outranks %s",
+                   chosen.name, held.dist, held.angle,
+                   pick >= 0 ? "the node the bearing found" : "an empty bearing search");
+        }
 
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
@@ -567,11 +632,12 @@ namespace
                        around[i].name[0] ? around[i].name : "?", around[i].eid, angles[i] * 57.2958f,
                        std::sqrt(dx * dx + dz * dz), around[i].x, around[i].y, around[i].z);
             }
-            if (pick < 0) GS_LOG("[auto]   nothing marked within fifteen degrees of the crosshair");
-            else
-                GS_LOG("[auto]   the crosshair has held that place for %u ms; a second earns a pin%s",
-                       g_heldSinceMs ? now - g_heldSinceMs : 0,
-                       gs::mapicon::PinNear(around[pick].x, around[pick].z, 8.0f) ? ", but it is pinned already" : "");
+            if (pick < 0) GS_LOG("[auto]   no node within fifteen degrees of the crosshair");
+            if (held.valid)
+                GS_LOG("[auto]   the game's detect system holds %s at %.1f metres, %.1f degrees off%s",
+                       held.cls[0] == '.' ? held.cls + 4 : held.cls, held.dist, held.angle,
+                       byTarget ? ", and it takes the pick" : ", too far off the crosshair to take the pick");
+            else GS_LOG("[auto]   the game's detect system is holding nothing the mod can resolve");
         }
 
         // One pin, on the place the crosshair held for a second. The hold
@@ -579,35 +645,37 @@ namespace
         // patch of berry bushes and the nearest by bearing swapped between
         // neighbours every pass, so a hold keyed on the object's id never
         // reached a second.
-        if (pick < 0)
+        if (!chosen.valid)
         {
             g_heldEid = 0;
             g_heldSinceMs = 0;
         }
         else
         {
-            const float hx = around[pick].x - g_heldX, hz = around[pick].z - g_heldZ;
+            const float hx = chosen.x - g_heldX, hz = chosen.z - g_heldZ;
             const bool samePlace = g_heldSinceMs && std::sqrt(hx * hx + hz * hz) <= 6.0f;
             if (!samePlace) g_heldSinceMs = now;
-            g_heldEid = around[pick].eid;
-            g_heldX = around[pick].x;
-            g_heldZ = around[pick].z;
+            g_heldEid = chosen.eid;
+            g_heldX = chosen.x;
+            g_heldZ = chosen.z;
         }
-        if (pick >= 0 && g_heldSinceMs && now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&
-            !gs::mapicon::PinNear(around[pick].x, around[pick].z, 8.0f))
+        if (chosen.valid && g_heldSinceMs && now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&
+            !gs::mapicon::PinNear(chosen.x, chosen.z, 8.0f))
         {
             g_cooldownUntil = now + 3000;
-            const float dx = around[pick].x - pp.x, dz = around[pick].z - pp.z;
+            const float dx = chosen.x - pp.x, dz = chosen.z - pp.z;
             GS_LOG("[auto] the crosshair held \"%s\" eid %08X for a second, %.1f degrees off, %.1f metres away; pinning it where it stands",
-                   around[pick].name[0] ? around[pick].name : "?", around[pick].eid, pickAngle * 57.2958f,
-                   std::sqrt(dx * dx + dz * dz));
+                   chosen.name, chosen.eid, chosen.angleDeg, std::sqrt(dx * dx + dz * dz));
             {
-                const float north = around[pick].z - pp.z, east = around[pick].x - pp.x;
+                const float north = chosen.z - pp.z, east = chosen.x - pp.x;
                 GS_LOG("[auto]   its position came from %s; that is %.0f metres %s and %.0f metres %s of you",
-                       around[pick].how ? around[pick].how : "?",
-                       std::fabs(north), north >= 0 ? "north" : "south", std::fabs(east), east >= 0 ? "east" : "west");
+                       chosen.how, std::fabs(north), north >= 0 ? "north" : "south",
+                       std::fabs(east), east >= 0 ? "east" : "west");
             }
-            PlaceAt(around[pick].x, around[pick].y, around[pick].z, "automatic, the node under the crosshair", "Glint", pp, 8.0f);
+            PlaceAt(chosen.x, chosen.y, chosen.z,
+                    byTarget ? "automatic, what the game's detect system is holding"
+                             : "automatic, the node under the crosshair",
+                    "Glint", pp, 8.0f);
         }
 
         // The measurement, once the flash has been on for a moment.

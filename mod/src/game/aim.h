@@ -47,17 +47,46 @@ namespace gs::aim
     uintptr_t DetectComponent();
     uintptr_t SpecialComponent();
 
+    // One actor the detect system is holding, resolved into the world.
+    struct Held
+    {
+        float x = 0, y = 0, z = 0;     // world
+        float dist = 0;                // flat, from the player
+        float angle = 0;               // degrees off the crosshair
+        uint32_t eid = 0;
+        uintptr_t at = 0;              // the offset it sat at
+        char where[16]{};              // which object held it
+        char cls[64]{};
+        bool valid = false;
+    };
+
+    // Where the player stands, in both frames, so a target's position can be
+    // resolved: the sub-level origin is the world minus the local.
+    struct Eye
+    {
+        float px = 0, py = 0, pz = 0;      // player, world
+        float lx = 0, ly = 0, lz = 0;      // player, local
+        float ox = 0, oz = 0;              // the eye the bearing starts from
+        float ux = 0, uz = 0;              // unit view bearing
+    };
+
     // Every actor the detect component, the special mode component and the
     // FindDetectTargetTask are holding a pointer to, each with the offset it
-    // sat at, its entity id, all three of its candidate positions, its
-    // distance and how far off the given bearing it is. The component's own
-    // target scalars go with it.
+    // sat at, its entity id, its position in whichever frame lands it near the
+    // player, its distance and how far off the crosshair it is. Returns the
+    // one nearest the crosshair.
     //
-    // Resolve() takes the first actor it finds and session nineteen's log
-    // shows that landing on a real target, but first is not a criterion. This
-    // lists them all so the offset that holds the true target can be named
-    // from evidence rather than picked.
-    void DescribeTargets(float px, float py, float pz, float ox, float oz, float ux, float uz);
+    // Session nineteen is why this is worth another look. Build 0.6.0 dropped
+    // this route reading its result as a fixed reference "104 units off", and
+    // that reading does not survive the arithmetic: the actor sat at local
+    // (-835.600, 536.055, -299.897) with the player at local (-731.963,
+    // 562.228, -301.813), which is 103.7 metres west of him, and the pin went
+    // to world (-9835.601, 0, -4299.897), which is that same spot correctly
+    // converted. The pointer held still across eight presses in thirty-four
+    // seconds, and so did the player, to three decimal places. Session
+    // forty-seven then measured a real glint at a hundred and eighteen metres.
+    // A target a hundred metres out is what this feature is looking for.
+    Held DescribeTargets(const Eye& eye, bool log);
 
     // The aim point the character control component keeps at +0x318, in the
     // sub-level's local space. Session seventeen: it moved when the flash was

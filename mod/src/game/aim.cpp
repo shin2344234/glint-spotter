@@ -175,9 +175,14 @@ namespace gs::aim
 
     namespace
     {
-        // One actor pointer found on one of the detect objects, described.
-        void Describe(const char* base, uintptr_t off, uintptr_t p, const char* cls,
-                      float px, float py, float pz, float ox, float oz, float ux, float uz)
+        // One actor pointer found on one of the detect objects, resolved and
+        // described. The transform does not say which frame its fields are in,
+        // so both are computed and the one that lands within a kilometre and a
+        // half of the player wins, the way actors.cpp does it. Session
+        // nineteen's target read (-835.600, 536.055, -299.897), which is the
+        // sub-level frame; the world is that plus the origin.
+        bool Describe(const char* base, uintptr_t off, uintptr_t p, const char* cls,
+                      const gs::aim::Eye& eye, bool log, gs::aim::Held* out)
         {
             __try
             {
@@ -190,40 +195,78 @@ namespace gs::aim
                 const uintptr_t tf = comps ? Deref(comps + kTf) : 0;
                 if (!tf || !gs::rtti::Readable(reinterpret_cast<const void*>(tf), kWorld + 12))
                 {
-                    GS_LOG("[target] %s+0x%03llX  %s  eid %08X  no transform", base,
-                           static_cast<unsigned long long>(off), cls, eid);
-                    return;
+                    if (log) GS_LOG("[target] %s+0x%03llX  %s  eid %08X  no transform", base,
+                                    static_cast<unsigned long long>(off), cls, eid);
+                    return false;
                 }
                 float w[3], l[3], pw[3];
                 memcpy(w, reinterpret_cast<const void*>(tf + kWorld), 12);
                 memcpy(l, reinterpret_cast<const void*>(tf + kLocal), 12);
                 memcpy(pw, reinterpret_cast<const void*>(tf + kParentPos), 12);
                 const uint32_t parent = *reinterpret_cast<const uint32_t*>(tf + kParentEid);
-                const float dx = w[0] - px, dz = w[2] - pz;
-                const float flat = std::sqrt(dx * dx + dz * dz);
-                float angle = -1.0f;
-                if (flat > 0.5f)
+                const float gx = eye.px - eye.lx, gy = eye.py - eye.ly, gz = eye.pz - eye.lz;
+
+                struct Cand { float p[3]; const char* how; };
+                Cand cands[3] = {
+                    {{w[0], w[1], w[2]}, "its cached world position"},
+                    {{l[0] + gx, l[1] + gy, l[2] + gz}, "its local position and the sub-level origin"},
+                    {{l[0] + pw[0], l[1] + pw[1], l[2] + pw[2]}, "its local position and its parent"},
+                };
+                int pick = -1;
+                float pickDist = 0;
+                for (int i = 0; i < 3; ++i)
                 {
-                    const float ax = w[0] - ox, az = w[2] - oz;
-                    const float f = std::sqrt(ax * ax + az * az);
-                    if (f > 0.5f)
-                        angle = std::fabs(std::atan2((ax * uz - az * ux) / f, (ax * ux + az * uz) / f)) * 57.2958f;
+                    if (!std::isfinite(cands[i].p[0]) || !std::isfinite(cands[i].p[2])) continue;
+                    const float dx = cands[i].p[0] - eye.px, dz = cands[i].p[2] - eye.pz;
+                    const float d = std::sqrt(dx * dx + dz * dz);
+                    if (d > 1500.0f) continue;
+                    if (pick < 0 || d < pickDist) { pick = i; pickDist = d; }
                 }
-                GS_LOG("[target] %s+0x%03llX  %s  eid %08X", base, static_cast<unsigned long long>(off), cls, eid);
-                GS_LOG("[target]   world (%.1f, %.1f, %.1f)  %.1f m away  %.1f deg off the crosshair",
-                       w[0], w[1], w[2], flat, angle);
-                GS_LOG("[target]   local (%.1f, %.1f, %.1f)  parent eid %08X at (%.1f, %.1f, %.1f)",
-                       l[0], l[1], l[2], parent, pw[0], pw[1], pw[2]);
-                (void)py;
+                if (log)
+                {
+                    GS_LOG("[target] %s+0x%03llX  %s  eid %08X", base,
+                           static_cast<unsigned long long>(off), cls, eid);
+                    GS_LOG("[target]   cached world (%.1f, %.1f, %.1f)  local (%.1f, %.1f, %.1f)  "
+                           "parent eid %08X at (%.1f, %.1f, %.1f)",
+                           w[0], w[1], w[2], l[0], l[1], l[2], parent, pw[0], pw[1], pw[2]);
+                }
+                if (pick < 0)
+                {
+                    if (log) GS_LOG("[target]   no frame puts it within a kilometre and a half of you");
+                    return false;
+                }
+                const float* q = cands[pick].p;
+                float angle = 180.0f;
+                const float ax = q[0] - eye.ox, az = q[2] - eye.oz;
+                const float f = std::sqrt(ax * ax + az * az);
+                if (f > 0.5f)
+                    angle = std::fabs(std::atan2((ax * eye.uz - az * eye.ux) / f,
+                                                 (ax * eye.ux + az * eye.uz) / f)) * 57.2958f;
+                if (log)
+                    GS_LOG("[target]   %s puts it at (%.1f, %.1f, %.1f), %.1f m away, %.1f degrees off "
+                           "the crosshair", cands[pick].how, q[0], q[1], q[2], pickDist, angle);
+                if (out && (!out->valid || angle < out->angle))
+                {
+                    out->x = q[0]; out->y = q[1]; out->z = q[2];
+                    out->dist = pickDist;
+                    out->angle = angle;
+                    out->eid = eid;
+                    out->at = off;
+                    strncpy_s(out->where, sizeof(out->where), base, _TRUNCATE);
+                    strncpy_s(out->cls, sizeof(out->cls), cls, _TRUNCATE);
+                    out->valid = true;
+                }
+                return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                return false;
             }
         }
 
         // Every actor pointer in one object, one level down into a task.
         int Walk(const char* base, uintptr_t obj, uintptr_t player, int depth,
-                 float px, float py, float pz, float ox, float oz, float ux, float uz)
+                 const gs::aim::Eye& eye, bool log, gs::aim::Held* out)
         {
             int found = 0;
             __try
@@ -239,12 +282,12 @@ namespace gs::aim
                     if (!n) continue;
                     if (IsActorClass(n))
                     {
-                        Describe(base, off, p, n, px, py, pz, ox, oz, ux, uz);
+                        Describe(base, off, p, n, eye, log, out);
                         if (++found >= 16) return found;
                         continue;
                     }
                     if (depth > 0 && strstr(n, "FindDetectTargetTask"))
-                        found += Walk("task", p, player, depth - 1, px, py, pz, ox, oz, ux, uz);
+                        found += Walk("task", p, player, depth - 1, eye, log, out);
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -272,20 +315,20 @@ namespace gs::aim
         }
     }
 
-    void DescribeTargets(float px, float py, float pz, float ox, float oz, float ux, float uz)
+    Held DescribeTargets(const Eye& eye, bool log)
     {
+        Held best;
         const uintptr_t detect = g_detect.load();
         const uintptr_t special = g_special.load();
         const uintptr_t player = g_player.load();
-        // The scalars a previous investigation read as the component's own
-        // account of its target, on the older build. Printed whatever they
-        // hold now, so the next session can confirm or retire them.
-        GS_LOG("[target] detect scalars: +3E8 %.3f  +3EC %.3f  +410 0x%08X  +42C %u  +300 %.3f  +580 %.3f",
-               ScalarAt(detect, 0x3E8), ScalarAt(detect, 0x3EC), DwordAt(detect, 0x410),
-               DwordAt(detect, 0x42C), ScalarAt(detect, 0x300), ScalarAt(detect, 0x580));
-        int n = Walk("detect", detect, player, 1, px, py, pz, ox, oz, ux, uz);
-        n += Walk("special", special, player, 1, px, py, pz, ox, oz, ux, uz);
-        if (!n) GS_LOG("[target] no actor pointer on either component or the task right now");
+        if (log)
+            GS_LOG("[target] detect scalars: +3E8 %.3f  +3EC %.3f  +410 0x%08X  +42C %u  +300 %.3f  +580 %.3f",
+                   ScalarAt(detect, 0x3E8), ScalarAt(detect, 0x3EC), DwordAt(detect, 0x410),
+                   DwordAt(detect, 0x42C), ScalarAt(detect, 0x300), ScalarAt(detect, 0x580));
+        int n = Walk("detect", detect, player, 1, eye, log, &best);
+        n += Walk("special", special, player, 1, eye, log, &best);
+        if (!n && log) GS_LOG("[target] no actor pointer on either component or the task right now");
+        return best;
     }
 
     Target Resolve()
