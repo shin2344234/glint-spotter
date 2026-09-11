@@ -247,6 +247,34 @@ namespace
         gs::mapicon::PlacePinNow(root, tx, ty, tz, label);
     }
 
+    // Three pins at known offsets from the player, once a session, the first
+    // time the flash is held.
+    //
+    // Every pin the mod has ever placed went to something twenty-odd metres
+    // away, and Seth has reported every one of them as sitting next to his
+    // character. Two different faults predict exactly that: the mod picking a
+    // near object when it should pick a far one, or the map ignoring the
+    // position and drawing every pin on the player. Twenty metres is a few
+    // pixels of world map, so the reports cannot tell them apart.
+    //
+    // These can. If "N200" appears two hundred metres north and "E100" a
+    // hundred metres east, the coordinate path is sound and the fault is the
+    // pick. If all three land on the player, the fault is the call.
+    bool g_calibrated = false;
+
+    void Calibrate(const gs::player::Pos& pp)
+    {
+        if (g_calibrated) return;
+        g_calibrated = true;
+        GS_LOG("[cal] placing three pins at known offsets from (%.1f, %.1f, %.1f): "
+               "\"Me\" on you, \"N200\" 200 metres north, \"E100\" 100 metres east. "
+               "Where they land says whether a pin goes where it is asked to.",
+               pp.x, pp.y, pp.z);
+        PlaceAt(pp.x, pp.y, pp.z, "calibration, your own position", "Me", pp, 0.0f);
+        PlaceAt(pp.x, pp.y, pp.z + 200.0f, "calibration, 200 north", "N200", pp, 0.0f);
+        PlaceAt(pp.x + 100.0f, pp.y, pp.z, "calibration, 100 east", "E100", pp, 0.0f);
+    }
+
     // The view ray. The camera's own forward when its object is in hand,
     // otherwise the body's facing held level. The origin is eye height.
     struct View
@@ -378,6 +406,9 @@ namespace
     bool g_flashWas = false;
     bool g_probedThisPress = false;
     int g_flashProbesLeft = 3;
+    int g_setListingsLeft = 2;
+    int g_targetLogsLeft = 12;
+    uint32_t g_targetLastMs = 0;
     uint32_t g_heldEid = 0;
     uint32_t g_heldSinceMs = 0;
     float g_heldX = 0, g_heldZ = 0;
@@ -443,17 +474,26 @@ namespace
             if (task)
             {
                 GS_LOG("[flash] FindDetectTargetTask at 0x%p", reinterpret_cast<void*>(task));
-                gs::dump::Pointers("task", task, 0x200);
-                gs::dump::Object("taskhex", task, 0x200);
+                // Out to 0x600: session nineteen's probe found the detected
+                // actor at +0x540 and session fifty-two's dump stopped at
+                // 0x200, which is why the log showed an empty task.
+                gs::dump::Pointers("task", task, 0x600);
+                gs::dump::Object("taskhex", task, 0x600);
             }
             else
             {
                 GS_LOG("[flash] no FindDetectTargetTask on the detect component");
             }
             if (const uintptr_t special = gs::aim::SpecialComponent())
-                gs::dump::Pointers("special", special, 0x200);
+            {
+                gs::dump::Pointers("special", special, 0x600);
+                gs::dump::Object("specialhex", special, 0x600);
+            }
             if (const uintptr_t detect = gs::aim::DetectComponent())
-                gs::dump::Pointers("detectp", detect, 0x400);
+            {
+                gs::dump::Pointers("detectp", detect, 0x700);
+                gs::dump::Object("detecthex", detect, 0x700);
+            }
         }
         const gs::player::Pos pp = gs::player::Read();
         if (!pp.valid) return;
@@ -486,9 +526,27 @@ namespace
         {
             const float flen = std::sqrt(v.fx * v.fx + v.fz * v.fz);
             if (flen > 1e-3f)
+            {
                 n = gs::actors::MarkedOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
                                                 cap > 0.0f ? cap : 1.0e9f, 0.26f, 3.0f,
                                                 around, angles, 8, &marked);
+                // Once a session, on the first press: the whole gimmick set,
+                // named, so the log says whether the glint was in it.
+                if (g_setListingsLeft > 0 && now - g_flashOnMs > 700)
+                {
+                    --g_setListingsLeft;
+                    gs::actors::LogGimmicks(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen);
+                }
+                if (now - g_flashOnMs > 700) Calibrate(pp);
+                // And what the game's own detect system is holding, which is
+                // the thing the mod should be pinning instead of guessing.
+                if (g_targetLogsLeft > 0 && now - g_targetLastMs > 1500)
+                {
+                    --g_targetLogsLeft;
+                    g_targetLastMs = now;
+                    gs::aim::DescribeTargets(pp.x, pp.y, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen);
+                }
+            }
         }
         const int pick = n > 0 ? 0 : -1;
         const float pickAngle = n > 0 ? angles[0] : 0.0f;
@@ -497,7 +555,7 @@ namespace
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked nodes loaded, %d of them in radius, "
+            GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked nodes loaded, %d candidate node(s) in radius, "
                    "%d within fifteen degrees of the crosshair; the farthest marked node is %.0f metres out",
                    pp.x, pp.y, pp.z, gs::actors::PickupCount(), marked, n,
                    gs::actors::MarkedReach(pp.x, pp.z));

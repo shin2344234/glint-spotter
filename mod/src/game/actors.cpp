@@ -463,6 +463,19 @@ namespace
     //
     // So the name decides. The rejects win, because a trigger box sitting a
     // metre from the standing stone would otherwise take the pin.
+    // The reject list again, against a node's stored leaf name rather than
+    // its full path, so a candidate can be judged after the fact.
+    bool Machinery(const char* name)
+    {
+        static const char* const reject[] = {
+            "func_", "operator_", "trigger", "pointcontrol", "camera", "fit_height",
+            "volume", "sector", "spawn", "collision", "phase00", "_once"};
+        if (!name || !name[0]) return true;   // nameless is not worth a pin
+        for (const char* r : reject)
+            if (strstr(name, r)) return true;
+        return false;
+    }
+
     bool WorthMarking(const char* path)
     {
         static const char* const reject[] = {
@@ -883,6 +896,44 @@ namespace gs::actors
         return found;
     }
 
+    void LogGimmicks(float px, float pz, float ox, float oz, float ux, float uz)
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        int shown = 0;
+        GS_LOG("[set] every gimmick the pools hold, by how far off the crosshair it sits:");
+        // Smallest bearing error first, so the ones the crosshair could
+        // plausibly be on come first and a long tail can be read or ignored.
+        for (int rank = 0; rank < 60; ++rank)
+        {
+            int best = -1;
+            float bestAngle = 0;
+            for (int i = 0; i < g_setN; ++i)
+            {
+                if (!g_set[i].gimmick) continue;
+                if (g_set[i].shown) continue;
+                const float dx = g_set[i].x - ox, dz = g_set[i].z - oz;
+                const float flat = std::sqrt(dx * dx + dz * dz);
+                if (flat < 0.5f) continue;
+                const float dot = (dx * ux + dz * uz) / flat;
+                const float cross = (dx * uz - dz * ux) / flat;
+                const float angle = std::fabs(std::atan2(cross, dot));
+                if (best < 0 || angle < bestAngle) { best = i; bestAngle = angle; }
+            }
+            if (best < 0) break;
+            Entity& e = g_set[best];
+            e.shown = true;
+            const float dx = e.x - px, dz = e.z - pz;
+            const bool candidate = e.pickup || !Machinery(e.name);
+            GS_LOG("[set]   %6.1f deg  %6.1f m  %-46s eid %08X  %s%s%s", bestAngle * 57.2958f,
+                   std::sqrt(dx * dx + dz * dz), e.name[0] ? e.name : "(no name)", e.eid,
+                   candidate ? "candidate" : "machinery", e.pickup ? ", on the name list" : "",
+                   e.knowledge ? ", knowledge" : "");
+            ++shown;
+        }
+        for (int i = 0; i < g_setN; ++i) g_set[i].shown = false;
+        GS_LOG("[set] %d gimmick(s) listed of %d entities in the set", shown, g_setN);
+    }
+
     float MarkedReach(float px, float pz)
     {
         std::lock_guard<std::mutex> lock(g_setMutex);
@@ -906,7 +957,18 @@ namespace gs::actors
         int inRadius = 0;
         for (int i = 0; i < g_setN; ++i)
         {
-            if (!g_set[i].pickup && !(g_set[i].gimmick && g_set[i].knowledge)) continue;
+            // Every gimmick that is not machinery, not only the ones whose
+            // name is on the ini's list. Session forty-seven measured the
+            // miss: Seth's own marker on the glint sat a hundred and eighteen
+            // metres north of him and the mod pinned a berry bush twenty-one
+            // metres north, because berry bushes were the only things the
+            // name list let through. The angle decides, and the angle is
+            // harder on near things than far ones, so a wider field is safe:
+            // a bush twenty metres out has to sit within a third of a metre
+            // of the line to beat a glint a hundred metres out sitting within
+            // a metre and a half of it.
+            if (!g_set[i].gimmick) continue;
+            if (!g_set[i].pickup && Machinery(g_set[i].name)) continue;
             const float px2 = g_set[i].x - px, pz2 = g_set[i].z - pz;
             const float fromPlayer = std::sqrt(px2 * px2 + pz2 * pz2);
             if (fromPlayer > radius) continue;

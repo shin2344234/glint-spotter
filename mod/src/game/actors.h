@@ -33,6 +33,7 @@ namespace gs::actors
         bool pickup = false;         // a gimmick carrying item or gather data
         bool knowledge = false;      // carries a ClientKnowledgeActorComponent
         bool locked = false;
+        bool shown = false;          // scratch, for the one-shot set listing
         const char* how = "";        // which frame answered for its position
         char name[48]{};             // the gimmick's node name, when it has one
         uintptr_t gimmickComp = 0;
@@ -89,6 +90,16 @@ namespace gs::actors
     int MarkedOnBearing(float px, float pz, float ox, float oz, float ux, float uz,
                         float radius, float maxAngle, float minFromPlayer,
                         Entity* out, float* angles, int n, int* marked);
+
+    // Every gimmick in the set, named, with its distance and how far off the
+    // given bearing it sits, and whether the name filter counts it as marked.
+    //
+    // Session fifty-two is why: seven marked nodes out of ninety-six gimmicks,
+    // and the two that fell within fifteen degrees of the crosshair were both
+    // berry bushes twenty metres away, so the pin went to a berry bush. The
+    // log cannot say whether the glint was in the set under a name the filter
+    // throws away, or was never in the pools at all. This says which.
+    void LogGimmicks(float px, float pz, float ox, float oz, float ux, float uz);
 
     // How far the farthest marked node in the set stands from a point, flat.
     // The log says it on every press so that a pin landing short can be told

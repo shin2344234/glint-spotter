@@ -47,6 +47,18 @@ namespace gs::aim
     uintptr_t DetectComponent();
     uintptr_t SpecialComponent();
 
+    // Every actor the detect component, the special mode component and the
+    // FindDetectTargetTask are holding a pointer to, each with the offset it
+    // sat at, its entity id, all three of its candidate positions, its
+    // distance and how far off the given bearing it is. The component's own
+    // target scalars go with it.
+    //
+    // Resolve() takes the first actor it finds and session nineteen's log
+    // shows that landing on a real target, but first is not a criterion. This
+    // lists them all so the offset that holds the true target can be named
+    // from evidence rather than picked.
+    void DescribeTargets(float px, float py, float pz, float ox, float oz, float ux, float uz);
+
     // The aim point the character control component keeps at +0x318, in the
     // sub-level's local space. Session seventeen: it moved when the flash was
     // aimed at a glint and sat 10.7 units from the player. Valid only when it

@@ -173,6 +173,121 @@ namespace gs::aim
         return *reinterpret_cast<const uint32_t*>(at) != 0;
     }
 
+    namespace
+    {
+        // One actor pointer found on one of the detect objects, described.
+        void Describe(const char* base, uintptr_t off, uintptr_t p, const char* cls,
+                      float px, float py, float pz, float ox, float oz, float ux, float uz)
+        {
+            __try
+            {
+                constexpr uintptr_t kEid = 0x60, kComps = 0x68, kTf = 0x1A0;
+                constexpr uintptr_t kWorld = 0x29C, kLocal = 0xB4, kParentEid = 0xC8, kParentPos = 0xEC;
+                const uint32_t eid = gs::rtti::Readable(reinterpret_cast<const void*>(p + kEid), 4)
+                                         ? *reinterpret_cast<const uint32_t*>(p + kEid)
+                                         : 0;
+                const uintptr_t comps = Deref(p + kComps);
+                const uintptr_t tf = comps ? Deref(comps + kTf) : 0;
+                if (!tf || !gs::rtti::Readable(reinterpret_cast<const void*>(tf), kWorld + 12))
+                {
+                    GS_LOG("[target] %s+0x%03llX  %s  eid %08X  no transform", base,
+                           static_cast<unsigned long long>(off), cls, eid);
+                    return;
+                }
+                float w[3], l[3], pw[3];
+                memcpy(w, reinterpret_cast<const void*>(tf + kWorld), 12);
+                memcpy(l, reinterpret_cast<const void*>(tf + kLocal), 12);
+                memcpy(pw, reinterpret_cast<const void*>(tf + kParentPos), 12);
+                const uint32_t parent = *reinterpret_cast<const uint32_t*>(tf + kParentEid);
+                const float dx = w[0] - px, dz = w[2] - pz;
+                const float flat = std::sqrt(dx * dx + dz * dz);
+                float angle = -1.0f;
+                if (flat > 0.5f)
+                {
+                    const float ax = w[0] - ox, az = w[2] - oz;
+                    const float f = std::sqrt(ax * ax + az * az);
+                    if (f > 0.5f)
+                        angle = std::fabs(std::atan2((ax * uz - az * ux) / f, (ax * ux + az * uz) / f)) * 57.2958f;
+                }
+                GS_LOG("[target] %s+0x%03llX  %s  eid %08X", base, static_cast<unsigned long long>(off), cls, eid);
+                GS_LOG("[target]   world (%.1f, %.1f, %.1f)  %.1f m away  %.1f deg off the crosshair",
+                       w[0], w[1], w[2], flat, angle);
+                GS_LOG("[target]   local (%.1f, %.1f, %.1f)  parent eid %08X at (%.1f, %.1f, %.1f)",
+                       l[0], l[1], l[2], parent, pw[0], pw[1], pw[2]);
+                (void)py;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        // Every actor pointer in one object, one level down into a task.
+        int Walk(const char* base, uintptr_t obj, uintptr_t player, int depth,
+                 float px, float py, float pz, float ox, float oz, float ux, float uz)
+        {
+            int found = 0;
+            __try
+            {
+                if (!obj || !gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x40)) return 0;
+                size_t bytes = kSearchBytes;
+                while (bytes > 0x40 && !gs::rtti::Readable(reinterpret_cast<const void*>(obj), bytes)) bytes /= 2;
+                for (uintptr_t off = 0x08; off + 8 <= bytes; off += 8)
+                {
+                    const uintptr_t p = *reinterpret_cast<const uintptr_t*>(obj + off);
+                    if (p < 0x10000 || (p & 7) != 0 || p == player || p == obj) continue;
+                    const char* n = NameOf(p);
+                    if (!n) continue;
+                    if (IsActorClass(n))
+                    {
+                        Describe(base, off, p, n, px, py, pz, ox, oz, ux, uz);
+                        if (++found >= 16) return found;
+                        continue;
+                    }
+                    if (depth > 0 && strstr(n, "FindDetectTargetTask"))
+                        found += Walk("task", p, player, depth - 1, px, py, pz, ox, oz, ux, uz);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return found;
+        }
+
+        float ScalarAt(uintptr_t obj, uintptr_t off)
+        {
+            if (!obj || !gs::rtti::Readable(reinterpret_cast<const void*>(obj + off), 4)) return 0.0f;
+            float v;
+            __try { memcpy(&v, reinterpret_cast<const void*>(obj + off), 4); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0.0f; }
+            return v;
+        }
+
+        uint32_t DwordAt(uintptr_t obj, uintptr_t off)
+        {
+            if (!obj || !gs::rtti::Readable(reinterpret_cast<const void*>(obj + off), 4)) return 0;
+            uint32_t v;
+            __try { memcpy(&v, reinterpret_cast<const void*>(obj + off), 4); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+            return v;
+        }
+    }
+
+    void DescribeTargets(float px, float py, float pz, float ox, float oz, float ux, float uz)
+    {
+        const uintptr_t detect = g_detect.load();
+        const uintptr_t special = g_special.load();
+        const uintptr_t player = g_player.load();
+        // The scalars a previous investigation read as the component's own
+        // account of its target, on the older build. Printed whatever they
+        // hold now, so the next session can confirm or retire them.
+        GS_LOG("[target] detect scalars: +3E8 %.3f  +3EC %.3f  +410 0x%08X  +42C %u  +300 %.3f  +580 %.3f",
+               ScalarAt(detect, 0x3E8), ScalarAt(detect, 0x3EC), DwordAt(detect, 0x410),
+               DwordAt(detect, 0x42C), ScalarAt(detect, 0x300), ScalarAt(detect, 0x580));
+        int n = Walk("detect", detect, player, 1, px, py, pz, ox, oz, ux, uz);
+        n += Walk("special", special, player, 1, px, py, pz, ox, oz, ux, uz);
+        if (!n) GS_LOG("[target] no actor pointer on either component or the task right now");
+    }
+
     Target Resolve()
     {
         Target t;

@@ -355,7 +355,17 @@ namespace gs::mapicon
         struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{1000 + static_cast<int64_t>(n), 0x15, {}};
         uint32_t dword4 = 0;
         float float5 = 0.0f;
-        float pos[3] = {x, y, z};
+        // Height zero, because that is what the game passes for this icon.
+        // Session forty-seven caught it creating a Pin_Marker of its own when
+        // Seth placed a marker by hand: name "MapIcon_Pin_Marker", type
+        // 0x0001, key 0/0x15, label "Marker", pos (-9714.073, 0.000,
+        // -4141.196), with the player standing at (-9710.511, 569.144,
+        // -4259.204). The x and z are world coordinates in the player's own
+        // frame and the height is zero. Version 0.19.1 started sending the
+        // node's real height on the strength of the ActorFocus icon, which is
+        // a different icon of a different type, and this one wants zero.
+        float pos[3] = {x, 0.0f, z};
+        (void)y;
         char label[48];
         CopyString(label, sizeof(label), labelText ? labelText : "Marker");
         char name[64] = "MapIcon_Pin_Marker";
