@@ -118,30 +118,29 @@ namespace gs::lgso
     }
 
     int OnBearing(float px, float pz, float ox, float oz, float ux, float uz,
-                  float maxAngle, float minFromPlayer, float maxRange,
-                  Place* out, float* angles, int n)
+                  float maxPerp, float minFromPlayer, float maxRange,
+                  Place* out, float* dists, int n)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         int found = 0;
         for (int i = 0; i < g_n; ++i)
         {
+            const float dx = g_places[i].x - ox, dz = g_places[i].z - oz;
+            // How far along the ray it lies, and how far off it sits.
+            const float along = dx * ux + dz * uz;
+            if (along < minFromPlayer || along > maxRange) continue;
+            const float perp = std::fabs(dx * uz - dz * ux);
+            if (perp > maxPerp) continue;
             const float fx = g_places[i].x - px, fz = g_places[i].z - pz;
             const float fromPlayer = std::sqrt(fx * fx + fz * fz);
-            if (fromPlayer < minFromPlayer || fromPlayer > maxRange) continue;
-            const float dx = g_places[i].x - ox, dz = g_places[i].z - oz;
-            const float flat = std::sqrt(dx * dx + dz * dz);
-            if (flat < 0.5f) continue;
-            const float dot = (dx * ux + dz * uz) / flat;
-            const float cross = (dx * uz - dz * ux) / flat;
-            const float angle = std::fabs(std::atan2(cross, dot));
-            if (angle >= maxAngle) continue;
+            if (fromPlayer < minFromPlayer) continue;
             int pos = found;
-            while (pos > 0 && angles[pos - 1] > angle)
+            while (pos > 0 && dists[pos - 1] > along)
             {
-                if (pos < n) { out[pos] = out[pos - 1]; angles[pos] = angles[pos - 1]; }
+                if (pos < n) { out[pos] = out[pos - 1]; dists[pos] = dists[pos - 1]; }
                 --pos;
             }
-            if (pos < n) { out[pos] = g_places[i]; angles[pos] = angle; }
+            if (pos < n) { out[pos] = g_places[i]; dists[pos] = along; }
             if (found < n) ++found;
         }
         return found;

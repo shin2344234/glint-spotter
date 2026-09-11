@@ -53,13 +53,24 @@ namespace gs::lgso
 
     int Count();
 
-    // The placements nearest the given bearing, smallest angle first.
+    // The placements the crosshair is on, nearest the player first.
+    //
+    // By how far each one sits from the ray, not by its angle. Over a complete
+    // table an angle is the wrong measure: a placement five hundred metres out
+    // subtends almost nothing, so it wins the smallest-angle test against the
+    // thing the player is actually looking at every time. Session sixty-eight
+    // is that mistake in the log, picking objects at 497, 700 and 869 metres
+    // all at 0.0 degrees off while the glint sat at a hundred and nineteen.
+    //
+    // Distance from the ray is the honest measure and it does not care about
+    // range. Among everything within `maxPerp` metres of the line, the nearest
+    // along it wins, which is what "what am I pointing at" means.
+    //
     // `px, pz` is the player, `ox, oz` the eye, `ux, uz` the unit view bearing.
-    // Anything closer than `minFromPlayer` or beyond `maxRange` is skipped, and
-    // so is anything whose bearing error exceeds `maxAngle` radians.
+    // `dists` receives each kept placement's distance along the ray.
     int OnBearing(float px, float pz, float ox, float oz, float ux, float uz,
-                  float maxAngle, float minFromPlayer, float maxRange,
-                  Place* out, float* angles, int n);
+                  float maxPerp, float minFromPlayer, float maxRange,
+                  Place* out, float* dists, int n);
 
     // The placements nearest a point, for the log.
     int Near(float px, float pz, Place* out, int n);

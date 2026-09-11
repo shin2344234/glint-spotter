@@ -618,8 +618,10 @@ namespace
                                                 around, angles, 8, &marked);
                 glintN = gs::actors::GlintOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
                                                     glints, glintAngles, 8);
+                // Four metres off the line, which is about how precisely a
+                // crosshair can be held, and out to nine hundred.
                 tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             0.12f, 5.0f,
+                                             4.0f, 5.0f,
                                              cap > 0.0f ? cap : 900.0f,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
@@ -676,11 +678,14 @@ namespace
         {
             --g_tableLogsLeft;
             const float dx = table[0].x - pp.x, dz = table[0].z - pp.z;
-            GS_LOG("[auto] the level gimmick table has %d placement(s) on the crosshair; the nearest "
-                   "the line is record %u element %u at (%.1f, %.1f, %.1f), %.0f metres away, "
-                   "%.1f degrees off",
+            GS_LOG("[auto] the table has %d placement(s) within four metres of the line; the nearest "
+                   "is record %u element %u at (%.1f, %.1f, %.1f), %.0f metres away",
                    tableN, table[0].record, table[0].element, table[0].x, table[0].y, table[0].z,
-                   std::sqrt(dx * dx + dz * dz), tableAngles[0] * 57.2958f);
+                   std::sqrt(dx * dx + dz * dz));
+            for (int k = 1; k < tableN && k < 4; ++k)
+                GS_LOG("[auto]   then record %u element %u at (%.1f, %.1f, %.1f), %.0f metres",
+                       table[k].record, table[k].element, table[k].x, table[k].y, table[k].z,
+                       tableAngles[k]);
         }
 
         bool byGlint = false;
@@ -763,7 +768,7 @@ namespace
         if (byTable)
         {
             chosen.x = table[0].x; chosen.y = table[0].y; chosen.z = table[0].z;
-            chosen.angleDeg = tableAngles[0] * 57.2958f;
+            chosen.angleDeg = 0.0f;
             chosen.eid = 0;
             chosen.how = "the game's own level gimmick table";
             _snprintf_s(chosen.name, sizeof(chosen.name), _TRUNCATE,

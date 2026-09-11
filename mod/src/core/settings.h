@@ -8,8 +8,9 @@
 //   Spy=1         ; log every map icon the game creates, through slot 170
 //   Mark=clue,artifact,...   ; node names worth a pin, matched anywhere in
 //                            ; the prefab path
-//   Survey=1      ; one press per place pins every candidate, labelled by
-//                 ; distance, so the glint can be named off the map
+//   Survey=0      ; one press per place pins every candidate the old actor
+//                 ; search found, labelled by distance. A diagnostic from
+//                 ; before the level gimmick table; off by default now.
 //   Guess=0       ; pin the node nearest the crosshair when the game has not
 //                 ; marked anything. Off: only what the game marks is pinned.
 //   Radius=0      ; optional cap in metres on how far a node can be. Zero,
@@ -43,7 +44,7 @@ namespace gs::Settings
         // One press at each place pins every candidate inside the cone,
         // labelled with its distance, so the glint can be named by reading
         // one number off the map. Set Survey=0 once that is settled.
-        bool survey = true;
+        bool survey = false;
         // Seth's rule, and it took fifty-seven sessions to be able to keep
         // it: only the glint gets a pin. With this off the mod places
         // nothing unless the game has set a node's detect mode target
