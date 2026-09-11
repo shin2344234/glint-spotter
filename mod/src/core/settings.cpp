@@ -44,6 +44,14 @@ namespace
         fputs("Key=91\n", f);
         fputs("; 1 logs every map icon the game creates. 0 leaves the vtable alone.\n", f);
         fputs("Spy=1\n", f);
+        fputs("; What is worth a pin. Each entry is matched anywhere in the node's own\n", f);
+        fputs("; prefab name, so 'clue' marks gimmick_item_graymane_clue_01. Add what you\n", f);
+        fputs("; hunt for, remove what clutters your map. Names appear in the log beside\n", f);
+        fputs("; every pin, so the list can be grown from a session.\n", f);
+        fputs("Mark=clue,artifact,treasure,relic,chest,challenge,standstone,socket_collection,", f);
+        fputs("gather,ore,herb,flower,mushroom,useartifact,puzzle_attach,dial,crank,lever\n", f);
+        fputs("; How far from you a node can be and still be pinned, in metres.\n", f);
+        fputs("Radius=80\n", f);
         fclose(f);
     }
 }
@@ -88,6 +96,16 @@ namespace gs::Settings
             {
                 g_values.spy = atoi(val) != 0;
             }
+            else if (_stricmp(key, "Mark") == 0)
+            {
+                strncpy_s(g_values.mark, sizeof(g_values.mark), val, _TRUNCATE);
+            }
+            else if (_stricmp(key, "Radius") == 0)
+            {
+                const float r = static_cast<float>(atof(val));
+                if (r >= 5.0f && r <= 400.0f) g_values.radius = r;
+                else GS_LOG_ERR("settings: Radius=%s is out of range, keeping %.0f", val, g_values.radius);
+            }
             else
             {
                 GS_LOG("settings: unknown key '%s' ignored", key);
@@ -95,11 +113,32 @@ namespace gs::Settings
         }
         fclose(f);
 
-        GS_LOG("settings: Key=%02X (%s), Spy=%d", g_values.key, KeyName(g_values.key), g_values.spy ? 1 : 0);
+        GS_LOG("settings: Key=%02X (%s), Spy=%d, Radius=%.0f", g_values.key, KeyName(g_values.key),
+               g_values.spy ? 1 : 0, g_values.radius);
+        GS_LOG("settings: Mark=%s", g_values.mark);
         return g_values;
     }
 
     const Values& Get() { return g_values; }
+
+    bool Marked(const char* path)
+    {
+        if (!path || !path[0]) return false;
+        const char* p = g_values.mark;
+        while (*p)
+        {
+            while (*p == ' ' || *p == ',') ++p;
+            const char* start = p;
+            while (*p && *p != ',') ++p;
+            size_t len = static_cast<size_t>(p - start);
+            while (len && (start[len - 1] == ' ' || start[len - 1] == '\t')) --len;
+            if (len == 0) continue;
+            // A case insensitive search for this entry in the path.
+            for (const char* at = path; *at; ++at)
+                if (_strnicmp(at, start, len) == 0) return true;
+        }
+        return false;
+    }
 
     const char* KeyName(uint32_t vk)
     {

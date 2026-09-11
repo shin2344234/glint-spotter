@@ -6,6 +6,9 @@
 //   [GlintSpotter]
 //   Key=91        ; virtual-key code in hex for the trigger. 91 is Scroll Lock.
 //   Spy=1         ; log every map icon the game creates, through slot 170
+//   Mark=clue,artifact,...   ; node names worth a pin, matched anywhere in
+//                            ; the prefab path
+//   Radius=80     ; how far from the player a node can be and still be pinned
 //
 // Master Looter's notes record a whole test round lost to a key appended at the
 // end of a sectioned ini, where it landed under the wrong section and read as
@@ -18,7 +21,19 @@ namespace gs::Settings
     {
         uint32_t key = 0x91;   // VK_SCROLL
         bool spy = true;
+        // What is worth a pin, by name. The names come from the node's own
+        // prefab path, the same string Master Looter prints, so
+        // "gimmick_item_graymane_clue_01" is matched by "clue". The
+        // default is the things a player hunts for; firewood and lamps are
+        // deliberately not in it.
+        char mark[512] = "clue,artifact,treasure,relic,chest,challenge,standstone,"
+                         "socket_collection,gather,ore,herb,flower,mushroom,useartifact,"
+                         "puzzle_attach,dial,crank,lever";
+        float radius = 80.0f;
     };
+
+    // True when `path` contains any of the Mark list's entries.
+    bool Marked(const char* path);
 
     // Reads the ini beside the plugin. Missing file means defaults, and the
     // defaults are written out so the next run has a file to edit.

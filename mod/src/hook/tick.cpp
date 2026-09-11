@@ -19,6 +19,7 @@
 #include "game/camera.h"
 #include "game/dump.h"
 #include "game/physics.h"
+#include "core/settings.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
 extern "C" void* gs_minimapOriginal = nullptr;
@@ -386,8 +387,7 @@ namespace
     int g_autoLogsLeft = 60;
     uint32_t g_autoLastLogMs = 0;
 
-    constexpr float kAutoRadius = 30.0f;
-    constexpr int kAutoPerFlash = 4;
+    constexpr int kAutoPerFlash = 6;
 
     void AutoMark(uint32_t now)
     {
@@ -423,8 +423,9 @@ namespace
         const gs::player::Pos pp = gs::player::Read();
         if (!pp.valid) return;
 
+        const float radius = gs::Settings::Get().radius;
         gs::actors::Entity around[8];
-        const int n = gs::actors::MarkedNear(pp.x, pp.z, kAutoRadius, around, 8);
+        const int n = gs::actors::MarkedNear(pp.x, pp.z, radius, around, 8);
 
         // The reveal hunt. With the flash on, dump the gimmick state of the
         // four nearest nodes; two seconds after it ends, dump the same four.
@@ -451,7 +452,7 @@ namespace
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
             GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked in the set, %d within %.0f metres, %d pinned this flash",
-                   pp.x, pp.y, pp.z, gs::actors::PickupCount(), n, kAutoRadius, g_autoThisFlash);
+                   pp.x, pp.y, pp.z, gs::actors::PickupCount(), n, radius, g_autoThisFlash);
             for (int i = 0; i < n && i < 4; ++i)
             {
                 const float dx = around[i].x - pp.x, dz = around[i].z - pp.z;

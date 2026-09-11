@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "core/settings.h"
 #include "game/aim.h"
 #include "game/player.h"
 #include "game/rtti.h"
@@ -456,13 +457,8 @@ namespace
         for (const char* r : reject)
             if (strstr(path, r)) return false;
 
-        static const char* const accept[] = {
-            "item", "gather", "plant", "/ore", "socket_collection", "scenecolle",
-            "challenge", "standstone", "artifact", "treasure", "chest", "clue",
-            "knowledge", "relic", "puzzle_attach", "dial", "crank", "lever", "useartifact"};
-        for (const char* a : accept)
-            if (strstr(path, a)) return true;
-        return false;
+        // The rest is the player's list, from the ini.
+        return gs::Settings::Marked(path);
     }
 
     // What this gimmick is, and whether the player can take something from
