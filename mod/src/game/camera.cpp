@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "core/log.h"
@@ -172,5 +173,68 @@ namespace gs::camera
         if (vl > 0.5f)
             GS_LOG("[camera] if +14C points from the pivot to the camera: the view back along it has pitch %.1f yaw %.1f deg",
                    -std::asin(p.vec[1] / vl) * 57.2958f, std::atan2(-p.vec[0], -p.vec[2]) * 57.2958f);
+        DumpAtPress();
+    }
+
+    // The whole mode object and the whole owner, as floats, at a press.
+    // Session twenty-five's quaternion pitch stayed within thirteen degrees
+    // of level while the player looked down at a glint, and the offset at
+    // +0xC8 turned out to be the shoulder offset. Three presses at three
+    // known pitches, dumped whole, name the pitch field offline.
+    void DumpOne(const char* tag, uintptr_t obj, size_t bytes)
+    {
+        __try
+        {
+            size_t n = bytes;
+            while (n >= 0x40 && !gs::rtti::Readable(reinterpret_cast<const void*>(obj), n)) n /= 2;
+            if (n < 0x40) return;
+            const auto* f = reinterpret_cast<const float*>(obj);
+            const auto* u = reinterpret_cast<const uint32_t*>(obj);
+            char line[400];
+            for (size_t off = 0; off + 32 <= n; off += 32)
+            {
+                int w = 0;
+                for (int k = 0; k < 8; ++k)
+                {
+                    const size_t i = off / 4 + k;
+                    const float v = f[i];
+                    int r;
+                    if (std::isfinite(v) && (v == 0.0f || (std::fabs(v) > 1e-4f && std::fabs(v) < 1e6f)))
+                        r = _snprintf_s(line + w, sizeof(line) - w, _TRUNCATE, " %11.4f", v);
+                    else
+                        r = _snprintf_s(line + w, sizeof(line) - w, _TRUNCATE, "  0x%08X ", u[i]);
+                    if (r < 0) break;
+                    w += r;
+                }
+                line[w] = 0;
+                GS_LOG("[%s +%03zX]%s", tag, off, line);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
+    void DumpAtPress()
+    {
+        const uintptr_t obj = This();
+        if (!obj) return;
+        DumpOne("camdump", obj, 0x400);
+        uintptr_t owner = 0;
+        __try
+        {
+            if (gs::rtti::Readable(reinterpret_cast<const void*>(obj + 8), 8)) owner = *reinterpret_cast<const uintptr_t*>(obj + 8);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            owner = 0;
+        }
+        if (owner)
+        {
+            const uintptr_t vt = gs::rtti::Readable(reinterpret_cast<const void*>(owner), 8) ? *reinterpret_cast<const uintptr_t*>(owner) : 0;
+            const char* n = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+            GS_LOG("[camera] owner at +8 is 0x%p %s", reinterpret_cast<void*>(owner), n ? n : "?");
+            DumpOne("owndump", owner, 0x400);
+        }
     }
 }

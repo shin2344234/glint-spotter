@@ -486,6 +486,15 @@ extern "C" void gs_OnMinimapTick(void* self)
             for (int i = 0; i < n && i < 2; ++i) DescribeComponents(i == 0 ? "hit 1" : "hit 2", c[i].entity);
             if (missN > 0) DescribeComponents("near miss 1", miss[0].entity);
 
+            {
+                // "near" is a Windows macro; hence the name.
+                gs::nearest::Candidate close[8];
+                const int m = gs::nearest::Closest(gs::player::Actor(), pp.x, pp.y, pp.z, close, 8);
+                for (int i = 0; i < m; ++i)
+                    GS_LOG("[mark]   nearby %d: %s%s%s eid %08X %.1f away, %+.1f up, (%.1f, %.1f, %.1f)", i + 1,
+                           close[i].glint ? "GLINT " : "", close[i].gimmick ? "gimmick " : "", close[i].cls, close[i].eid,
+                           close[i].along, close[i].dy, close[i].x, close[i].y, close[i].z);
+            }
             float gx = 0, gy = 0, gz = 0, gt = 0;
             uint32_t geid = 0;
             bool ground = v.camera && gs::nearest::GroundAlong(v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, 100.0f,

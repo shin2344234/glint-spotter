@@ -52,6 +52,10 @@ namespace gs::nearest
                float maxAlong, float radius, float spread, bool glintOnly,
                Candidate* out, int n, Candidate* miss = nullptr, int missN = 0);
 
+    // The n entities closest to a point, any direction, nearest first. `along`
+    // carries the straight-line distance and `off` is zero.
+    int Closest(uintptr_t playerActor, float px, float py, float pz, Candidate* out, int n);
+
     // Where a ray meets the ground, with the ground estimated from the
     // entities near its path: objects stand on the terrain, so the height of
     // the nearest one within a few units is the terrain there. Walks the ray

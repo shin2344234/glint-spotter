@@ -98,6 +98,27 @@ namespace gs::nearest
         return found;
     }
 
+    int Closest(uintptr_t playerActor, float px, float py, float pz, Candidate* out, int n)
+    {
+        if (!out || n <= 0) return 0;
+        static gs::actors::Entity set[4096];
+        const int total = gs::actors::Snapshot(set, 4096);
+        const auto byAlong = [](const Candidate& c) { return c.along; };
+        int found = 0;
+        for (int i = 0; i < total; ++i)
+        {
+            const gs::actors::Entity& e = set[i];
+            if (!e.ptr || e.ptr == playerActor) continue;
+            const float dx = e.x - px, dy = e.y - py, dz = e.z - pz;
+            const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (found == n && d >= out[n - 1].along) continue;
+            Candidate cand;
+            Fill(cand, e, d, 0.0f, dy);
+            found = Insert(out, found, n, cand, byAlong);
+        }
+        return found;
+    }
+
     bool GroundAlong(float ox, float oy, float oz, float fx, float fy, float fz, float maxT,
                      float* gx, float* gy, float* gz, float* t, uint32_t* sampleEid)
     {

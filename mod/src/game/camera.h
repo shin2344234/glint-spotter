@@ -53,6 +53,8 @@ namespace gs::camera
     // One line with every candidate, for the probe cadence.
     void LogSample(uint64_t sample);
 
-    // Log the pose beside the body's facing yaw, at a press.
+    // Log the pose beside the body's facing yaw, at a press, then dump the
+    // mode object and its owner whole.
     void LogAtPress(float facingYaw);
+    void DumpAtPress();
 }

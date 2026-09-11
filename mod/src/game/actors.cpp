@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "game/player.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
 #include "game/typescan.h"
@@ -264,6 +265,69 @@ namespace
         }
     }
 
+    // Why an entity has no position. Session twenty-five kept 229 of 946
+    // offered and the glint the player looked at was not among them, so
+    // the first few entities whose transform walk fails are described:
+    // class, every component in the block, and for any component named
+    // Transform, the offsets inside it holding a float3 near the player.
+    int g_failLogsLeft = 8;
+
+    const char* Short(const char* n)
+    {
+        if (!n) return "?";
+        return n[0] == '.' ? n + 4 : n;
+    }
+
+    void FindPositionIn(uintptr_t comp, const gs::player::Pos& pp)
+    {
+        __try
+        {
+            size_t bytes = 0x400;
+            while (bytes >= 0x40 && !gs::rtti::Readable(reinterpret_cast<const void*>(comp), bytes)) bytes /= 2;
+            if (bytes < 0x40) return;
+            const auto* b = reinterpret_cast<const uint8_t*>(comp);
+            int found = 0;
+            for (size_t off = 0; off + 12 <= bytes && found < 6; off += 4)
+            {
+                float v[3];
+                memcpy(v, b + off, 12);
+                if (!std::isfinite(v[0]) || !std::isfinite(v[1]) || !std::isfinite(v[2])) continue;
+                const float dw = std::fabs(v[0] - pp.x) + std::fabs(v[1] - pp.y) + std::fabs(v[2] - pp.z);
+                const float dl = std::fabs(v[0] - pp.lx) + std::fabs(v[1] - pp.ly) + std::fabs(v[2] - pp.lz);
+                if (dw < 150.0f || dl < 150.0f)
+                {
+                    ++found;
+                    GS_LOG("[actors]       +0x%03llX (%.1f, %.1f, %.1f) is %s space, %.0f from the player",
+                           static_cast<unsigned long long>(off), v[0], v[1], v[2], dw < dl ? "world" : "local",
+                           dw < dl ? dw : dl);
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
+    void DescribeFailure(uintptr_t e, const gs::player::Pos& pp)
+    {
+        const uintptr_t vt = Deref(e);
+        const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+        const uintptr_t comps = Deref(e + kOff_Ent_Comps);
+        GS_LOG("[actors] no position for eid %08X %s, block 0x%p, +0x1A0 -> 0x%p",
+               EidOf(e), Short(cn), reinterpret_cast<void*>(comps), reinterpret_cast<void*>(comps ? Deref(comps + kOff_Comps_Transform) : 0));
+        if (!comps) return;
+        for (uintptr_t off = 0; off < 0x200; off += 8)
+        {
+            const uintptr_t c = Deref(comps + off);
+            if (!PtrLike(c)) continue;
+            const uintptr_t cvt = Deref(c);
+            const char* n = cvt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(cvt)) : nullptr;
+            if (!n) continue;
+            GS_LOG("[actors]     block+0x%03llX 0x%p %s", static_cast<unsigned long long>(off), reinterpret_cast<void*>(c), Short(n));
+            if (strstr(n, "Transform")) FindPositionIn(c, pp);
+        }
+    }
+
     // How many entities a manager offers right now, for the pick.
     int Held(uintptr_t mgr)
     {
@@ -342,15 +406,25 @@ namespace gs::actors
             if (nowMs - g_set[i].lastSeenMs <= kKeepMs) g_set[w++] = g_set[i];
         g_setN = w;
 
-        int gimmicks = 0;
+        int gimmicks = 0, dupes = 0, noPos = 0;
+        const gs::player::Pos pp = gs::player::Read();
         for (int i = 0; i < n; ++i)
         {
             const uintptr_t e = g_buf[i];
             int j = 0;
             for (; j < g_setN; ++j) if (g_set[j].ptr == e) break;
-            if (j < g_setN && g_set[j].lastSeenMs == nowMs) continue;   // listed twice this pass
+            if (j < g_setN && g_set[j].lastSeenMs == nowMs) { ++dupes; continue; }   // listed twice this pass
             float pos[3];
-            if (!WorldPos(e, pos)) continue;
+            if (!WorldPos(e, pos))
+            {
+                ++noPos;
+                if (g_failLogsLeft > 0 && pp.valid && (i % 7) == 3)
+                {
+                    --g_failLogsLeft;
+                    DescribeFailure(e, pp);
+                }
+                continue;
+            }
             if (j == g_setN)
             {
                 if (g_setN >= kSetMax) continue;
@@ -394,8 +468,8 @@ namespace gs::actors
         if (nowMs - g_lastSaidMs > 30000)
         {
             g_lastSaidMs = nowMs;
-            GS_LOG("[actors] pools offered %d this pass; set holds %d entities, %d with a gimmick component, %d glinting",
-                   n, g_setN, gimmicks, glints);
+            GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d with a gimmick component, %d glinting",
+                   n, dupes, noPos, g_setN, gimmicks, glints);
         }
         return static_cast<uint32_t>(n);
     }
