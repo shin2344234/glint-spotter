@@ -44,6 +44,31 @@ namespace gs::dump
         }
     }
 
+    void GimmickState(const char* tag, uintptr_t entity, size_t bytes)
+    {
+        uintptr_t comp = 0, sub = 0;
+        __try
+        {
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(entity + 0x68), 8)) return;
+            const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(entity + 0x68);
+            if (comps < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(comps), 0x80)) return;
+            comp = *reinterpret_cast<const uintptr_t*>(comps + 0x30);
+            if (comp < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(comp), 0x440)) return;
+            sub = *reinterpret_cast<const uintptr_t*>(comp + 0x438);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        Object(tag, comp, bytes);
+        if (sub >= 0x10000)
+        {
+            char t[64];
+            _snprintf_s(t, sizeof(t), _TRUNCATE, "%ssub", tag);
+            Object(t, sub, 0x200);
+        }
+    }
+
     void EntityComponents(const char* tag, uintptr_t entity, size_t bytesEach)
     {
         struct Slot { uintptr_t off; const char* name; };

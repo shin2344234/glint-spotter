@@ -376,6 +376,12 @@ namespace
     // nothing.
     uint32_t g_autoNextMs = 0;
     int g_autoThisFlash = 0;
+    uintptr_t g_huntEnts[4] = {0, 0, 0, 0};
+    uint32_t g_huntEids[4] = {0, 0, 0, 0};
+    int g_huntN = 0;
+    int g_huntLeft = 3;
+    uint32_t g_huntLastMs = 0;
+    uint32_t g_huntOffMs = 0;
     bool g_flashWas = false;
     int g_autoLogsLeft = 60;
     uint32_t g_autoLastLogMs = 0;
@@ -389,8 +395,25 @@ namespace
         if (!flash)
         {
             g_flashWas = false;
+            if (g_huntN)
+            {
+                if (!g_huntOffMs) g_huntOffMs = now;
+                else if (now - g_huntOffMs > 2000)
+                {
+                    for (int i = 0; i < g_huntN; ++i)
+                    {
+                        char tag[24];
+                        _snprintf_s(tag, sizeof(tag), _TRUNCATE, "off%d", i + 1);
+                        GS_LOG("[hunt] eid %08X with the flash off", g_huntEids[i]);
+                        gs::dump::GimmickState(tag, g_huntEnts[i], 0x480);
+                    }
+                    g_huntN = 0;
+                    g_huntOffMs = 0;
+                }
+            }
             return;
         }
+        g_huntOffMs = 0;
         if (!g_flashWas)
         {
             g_flashWas = true;
@@ -402,6 +425,26 @@ namespace
 
         gs::actors::Entity around[8];
         const int n = gs::actors::MarkedNear(pp.x, pp.z, kAutoRadius, around, 8);
+
+        // The reveal hunt. With the flash on, dump the gimmick state of the
+        // four nearest nodes; two seconds after it ends, dump the same four.
+        // One of them is the one Seth sees glowing, and the field that means
+        // "revealed" is the one that moves for that node and for no other.
+        if (g_huntLeft > 0 && n > 0 && !g_huntN && now - g_huntLastMs > 15000)
+        {
+            g_huntLastMs = now;
+            --g_huntLeft;
+            g_huntN = n < 4 ? n : 4;
+            for (int i = 0; i < g_huntN; ++i)
+            {
+                g_huntEnts[i] = around[i].ptr;
+                g_huntEids[i] = around[i].eid;
+                char tag[24];
+                _snprintf_s(tag, sizeof(tag), _TRUNCATE, "on%d", i + 1);
+                GS_LOG("[hunt] eid %08X \"%s\" with the flash on", around[i].eid, around[i].name[0] ? around[i].name : "?");
+                gs::dump::GimmickState(tag, around[i].ptr, 0x480);
+            }
+        }
 
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
@@ -422,6 +465,11 @@ namespace
         if (g_autoThisFlash >= kAutoPerFlash || now < g_autoNextMs) return;
         for (int i = 0; i < n; ++i)
         {
+            // Not what the player is standing on. Session forty-two pinned
+            // firewood half a metre from him: correct, and useless, since he
+            // can see what is at his feet.
+            const float ux = around[i].x - pp.x, uz = around[i].z - pp.z;
+            if (std::sqrt(ux * ux + uz * uz) < 3.0f) continue;
             if (gs::mapicon::PinNear(around[i].x, around[i].z, 8.0f)) continue;
             const float dx = around[i].x - pp.x, dz = around[i].z - pp.z;
             GS_LOG("[auto] \"%s\" eid %08X revealed %.1f metres away; pinning it where it stands",
