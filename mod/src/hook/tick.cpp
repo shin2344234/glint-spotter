@@ -568,8 +568,14 @@ namespace
         // session forty-seven measured a real glint at a hundred and eighteen.
         // Being far away was the evidence against it, and being far away is
         // the whole point.
+        // The game's answer takes the pin only when the manager's pools also
+        // hold the actor it points at. Without that test the walk can return a
+        // pointer read past the end of the object it was scanning, which is
+        // what session nineteen's +0x540 was: FindDetectTargetTask is 112
+        // bytes and that read was more than a kilobyte beyond it.
         bool byTarget = false;
-        if (held.valid && held.angle < 15.0f && held.dist > 5.0f && held.dist < 500.0f)
+        if (held.valid && held.inPools && held.angle < 15.0f &&
+            held.dist > 5.0f && held.dist < 500.0f)
         {
             byTarget = true;
             pickAngle = held.angle;
@@ -634,9 +640,10 @@ namespace
             }
             if (pick < 0) GS_LOG("[auto]   no node within fifteen degrees of the crosshair");
             if (held.valid)
-                GS_LOG("[auto]   the game's detect system holds %s at %.1f metres, %.1f degrees off%s",
+                GS_LOG("[auto]   the game's detect system holds %s at %.1f metres, %.1f degrees off, %s%s",
                        held.cls[0] == '.' ? held.cls + 4 : held.cls, held.dist, held.angle,
-                       byTarget ? ", and it takes the pick" : ", too far off the crosshair to take the pick");
+                       held.inPools ? "live in the pools" : "not in the pools",
+                       byTarget ? ", and it takes the pick" : ", so the bearing keeps the pick");
             else GS_LOG("[auto]   the game's detect system is holding nothing the mod can resolve");
         }
 

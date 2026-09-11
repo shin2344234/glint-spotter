@@ -106,6 +106,17 @@ namespace gs::actors
     // apart from a glint the game never put in the pools at all.
     float MarkedReach(float px, float pz);
 
+    // Is this pointer one of the entities the manager's pools hold?
+    //
+    // The test that tells a real actor from heap that happens to look like
+    // one. FindDetectTargetTask is a fixed 112-byte allocation, proved from
+    // the literal size at its only allocation site, so session nineteen's
+    // read at +0x540 was more than a kilobyte past the end of the object and
+    // whatever it found was the neighbouring allocation. The pools are the
+    // authority on what is a live entity, and the mod already walks them four
+    // times a second.
+    bool InSet(uintptr_t ptr);
+
     // The entity carrying this id, from the set, or 0.
     uintptr_t ByEid(uint32_t eid);
 

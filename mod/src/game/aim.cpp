@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "core/log.h"
+#include "game/actors.h"
 #include "game/rtti.h"
 
 namespace
@@ -222,10 +223,13 @@ namespace gs::aim
                     if (d > 1500.0f) continue;
                     if (pick < 0 || d < pickDist) { pick = i; pickDist = d; }
                 }
+                const bool live = gs::actors::InSet(p);
                 if (log)
                 {
-                    GS_LOG("[target] %s+0x%03llX  %s  eid %08X", base,
-                           static_cast<unsigned long long>(off), cls, eid);
+                    GS_LOG("[target] %s+0x%03llX  %s  eid %08X  %s", base,
+                           static_cast<unsigned long long>(off), cls, eid,
+                           live ? "the pools hold it, so it is live"
+                                : "the pools do not hold it, so it is stale or not an actor");
                     GS_LOG("[target]   cached world (%.1f, %.1f, %.1f)  local (%.1f, %.1f, %.1f)  "
                            "parent eid %08X at (%.1f, %.1f, %.1f)",
                            w[0], w[1], w[2], l[0], l[1], l[2], parent, pw[0], pw[1], pw[2]);
@@ -245,13 +249,18 @@ namespace gs::aim
                 if (log)
                     GS_LOG("[target]   %s puts it at (%.1f, %.1f, %.1f), %.1f m away, %.1f degrees off "
                            "the crosshair", cands[pick].how, q[0], q[1], q[2], pickDist, angle);
-                if (out && (!out->valid || angle < out->angle))
+                // A live actor always beats a stale one, and among equals the
+                // one nearest the crosshair wins.
+                const bool better = out && (!out->valid || (live && !out->inPools) ||
+                                            (live == out->inPools && angle < out->angle));
+                if (better)
                 {
                     out->x = q[0]; out->y = q[1]; out->z = q[2];
                     out->dist = pickDist;
                     out->angle = angle;
                     out->eid = eid;
                     out->at = off;
+                    out->inPools = live;
                     strncpy_s(out->where, sizeof(out->where), base, _TRUNCATE);
                     strncpy_s(out->cls, sizeof(out->cls), cls, _TRUNCATE);
                     out->valid = true;

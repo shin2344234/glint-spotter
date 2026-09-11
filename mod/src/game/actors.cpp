@@ -934,6 +934,15 @@ namespace gs::actors
         GS_LOG("[set] %d gimmick(s) listed of %d entities in the set", shown, g_setN);
     }
 
+    bool InSet(uintptr_t ptr)
+    {
+        if (!ptr) return false;
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        for (int i = 0; i < g_setN; ++i)
+            if (g_set[i].ptr == ptr) return true;
+        return false;
+    }
+
     float MarkedReach(float px, float pz)
     {
         std::lock_guard<std::mutex> lock(g_setMutex);

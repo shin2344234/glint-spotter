@@ -57,6 +57,7 @@ namespace gs::aim
         uintptr_t at = 0;              // the offset it sat at
         char where[16]{};              // which object held it
         char cls[64]{};
+        bool inPools = false;          // the manager holds it too, so it is live
         bool valid = false;
     };
 
