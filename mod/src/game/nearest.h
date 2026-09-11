@@ -3,15 +3,21 @@
 
 // The first world object along a ray from the player.
 //
-// The transform carries the player's facing as a yaw quaternion right before
-// its position, and the actor set holds every entity the manager has handed
-// over in the last twelve seconds with its world position. Cast a ray from the
-// player along the facing, test every entity as a small sphere in a beam that
-// widens with distance, and the first hit along the ray is what the crosshair
-// is on. A wide spread turns the beam into a cone, which is what the automatic
-// marker uses.
+// The actor set holds every entity the manager has handed over in the last
+// twelve seconds with its world position. Two casts:
 //
-// The limit: this hits objects, not terrain.
+// Cast: a level ray in the ground plane from the given origin along (fx, fz),
+// with a vertical band that widens with distance, because the body's facing
+// has no pitch. Session twenty-one's real hits sat six to eleven units below
+// the player at twenty units out, and a 3D beam around a level ray rejected
+// all of them (session twenty-three found nothing all session).
+//
+// Cast3D: a true beam around a unit direction in three axes, for when the
+// camera's forward vector is in hand. Then a floor below is outside the beam
+// because the ray is actually pointed where the player looks.
+//
+// Both hit objects, not terrain. Both can also report the nearest misses, so
+// a session log shows what a tighter or wider beam would have taken.
 
 namespace gs::nearest
 {
@@ -21,18 +27,28 @@ namespace gs::nearest
         uint32_t eid = 0;
         float x = 0, y = 0, z = 0;   // world
         float along = 0;             // distance along the ray to the closest point
-        float off = 0;               // distance from the ray at that point, XZ
-        float dy = 0;                // height difference from the player
-        bool gimmick = false;        // an interactable, the kind the glint is drawn on
+        float off = 0;               // distance from the ray at that point
+        float dy = 0;                // height relative to the ray origin
+        bool gimmick = false;        // carries a ClientGimmickActorComponent
+        bool glint = false;          // that component's detect mode target byte is set
         char cls[80]{};
     };
 
     bool ForwardFromQuat(const float* q, float* fx, float* fz);
 
-    // Cast against the actor set. Fills up to n hits ordered by distance along
-    // the ray, nearest first. Returns how many.
+    // Level ray. Accepts when the XZ distance from the ray is within
+    // radius + spread * along and |dy| within 4 + 0.35 * along. Hits are
+    // ordered by distance along the ray. `miss` receives up to missN rejected
+    // candidates with the smallest XZ offset, for the log.
     int Cast(uintptr_t playerActor,
              float px, float py, float pz, float fx, float fz,
-             float maxAlong, float radius, float spread,
-             Candidate* out, int n);
+             float maxAlong, float radius, float spread, bool glintOnly,
+             Candidate* out, int n, Candidate* miss = nullptr, int missN = 0);
+
+    // Beam around a unit direction. Accepts when the 3D distance from the ray
+    // is within radius + spread * along.
+    int Cast3D(uintptr_t playerActor,
+               float ox, float oy, float oz, float fx, float fy, float fz,
+               float maxAlong, float radius, float spread, bool glintOnly,
+               Candidate* out, int n, Candidate* miss = nullptr, int missN = 0);
 }

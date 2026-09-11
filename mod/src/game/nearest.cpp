@@ -15,6 +15,37 @@ namespace
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 8)) return 0;
         return *reinterpret_cast<const uintptr_t*>(at);
     }
+
+    void Fill(gs::nearest::Candidate& cand, const gs::actors::Entity& e, float along, float off, float dy)
+    {
+        cand.entity = e.ptr;
+        cand.eid = e.eid;
+        cand.x = e.x; cand.y = e.y; cand.z = e.z;
+        cand.along = along;
+        cand.off = off;
+        cand.dy = dy;
+        cand.gimmick = e.gimmick;
+        cand.glint = e.glint;
+        const uintptr_t vt = Deref(e.ptr);
+        const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+        strncpy_s(cand.cls, sizeof(cand.cls), cn ? (cn[0] == '.' ? cn + 4 : cn) : "?", _TRUNCATE);
+    }
+
+    // Insert keeping the array ordered by `key` ascending; drops the largest
+    // when full. Returns the new count.
+    template <typename Key>
+    int Insert(gs::nearest::Candidate* arr, int count, int cap, const gs::nearest::Candidate& c, Key key)
+    {
+        if (count == cap && key(c) >= key(arr[cap - 1])) return count;
+        int pos = count < cap ? count : cap - 1;
+        while (pos > 0 && key(arr[pos - 1]) > key(c))
+        {
+            arr[pos] = arr[pos - 1];
+            --pos;
+        }
+        arr[pos] = c;
+        return count < cap ? count + 1 : count;
+    }
 }
 
 namespace gs::nearest
@@ -34,50 +65,69 @@ namespace gs::nearest
 
     int Cast(uintptr_t playerActor,
              float px, float py, float pz, float fx, float fz,
-             float maxAlong, float radius, float spread,
-             Candidate* out, int n)
+             float maxAlong, float radius, float spread, bool glintOnly,
+             Candidate* out, int n, Candidate* miss, int missN)
     {
         if (!out || n <= 0) return 0;
         static gs::actors::Entity set[4096];
         const int total = gs::actors::Snapshot(set, 4096);
+        const auto byAlong = [](const Candidate& c) { return c.along; };
+        const auto byOff = [](const Candidate& c) { return c.off; };
 
-        int found = 0;
+        int found = 0, missed = 0;
         for (int i = 0; i < total; ++i)
         {
             const gs::actors::Entity& e = set[i];
             if (!e.ptr || e.ptr == playerActor) continue;
+            if (glintOnly && !e.glint) continue;
 
             const float dx = e.x - px, dz = e.z - pz, dy = e.y - py;
             const float along = dx * fx + dz * fz;
             if (along < 0.5f || along > maxAlong) continue;
-            // Off the ray in all three axes. The ray is level at the height the
-            // caller gave, so an object a floor below is out of the beam even
-            // when it sits right under the line; session twenty-one pinned one.
             const float ox = dx - along * fx, oz = dz - along * fz;
-            const float off = std::sqrt(ox * ox + oz * oz + dy * dy);
-            if (off > radius + spread * along) continue;
+            const float off = std::sqrt(ox * ox + oz * oz);
+            const float band = 4.0f + 0.35f * along;
+            const bool hit = off <= radius + spread * along && std::fabs(dy) <= band;
+            if (!hit && (!miss || missN <= 0 || off > 3.0f * (radius + spread * along))) continue;
 
             Candidate cand;
-            cand.entity = e.ptr;
-            cand.eid = e.eid;
-            cand.x = e.x; cand.y = e.y; cand.z = e.z;
-            cand.along = along;
-            cand.off = off;
-            cand.dy = dy;
-            cand.gimmick = e.gimmick;
-            const uintptr_t vt = Deref(e.ptr);
-            const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
-            strncpy_s(cand.cls, sizeof(cand.cls), cn ? (cn[0] == '.' ? cn + 4 : cn) : "?", _TRUNCATE);
+            Fill(cand, e, along, off, dy);
+            if (hit) found = Insert(out, found, n, cand, byAlong);
+            else missed = Insert(miss, missed, missN, cand, byOff);
+        }
+        return found;
+    }
 
-            if (found == n && along >= out[n - 1].along) continue;
-            int pos = found < n ? found : n - 1;
-            while (pos > 0 && out[pos - 1].along > along)
-            {
-                out[pos] = out[pos - 1];
-                --pos;
-            }
-            out[pos] = cand;
-            if (found < n) ++found;
+    int Cast3D(uintptr_t playerActor,
+               float ox, float oy, float oz, float fx, float fy, float fz,
+               float maxAlong, float radius, float spread, bool glintOnly,
+               Candidate* out, int n, Candidate* miss, int missN)
+    {
+        if (!out || n <= 0) return 0;
+        static gs::actors::Entity set[4096];
+        const int total = gs::actors::Snapshot(set, 4096);
+        const auto byAlong = [](const Candidate& c) { return c.along; };
+        const auto byOff = [](const Candidate& c) { return c.off; };
+
+        int found = 0, missed = 0;
+        for (int i = 0; i < total; ++i)
+        {
+            const gs::actors::Entity& e = set[i];
+            if (!e.ptr || e.ptr == playerActor) continue;
+            if (glintOnly && !e.glint) continue;
+
+            const float dx = e.x - ox, dy = e.y - oy, dz = e.z - oz;
+            const float along = dx * fx + dy * fy + dz * fz;
+            if (along < 0.5f || along > maxAlong) continue;
+            const float px = dx - along * fx, py = dy - along * fy, pz = dz - along * fz;
+            const float off = std::sqrt(px * px + py * py + pz * pz);
+            const bool hit = off <= radius + spread * along;
+            if (!hit && (!miss || missN <= 0 || off > 3.0f * (radius + spread * along))) continue;
+
+            Candidate cand;
+            Fill(cand, e, along, off, dy);
+            if (hit) found = Insert(out, found, n, cand, byAlong);
+            else missed = Insert(miss, missed, missN, cand, byOff);
         }
         return found;
     }

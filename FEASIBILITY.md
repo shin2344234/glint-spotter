@@ -862,3 +862,103 @@ minus local. Facing, transform `+0x28C`. Flash active, special component
 position, on the game's thread. Ready within about twenty seconds of entering
 the world, with the player's own special mode component and not another
 character's.
+
+
+## The deep dive, 10 September 2026, evening
+
+Five parallel investigations against the exe, each followed by a second
+pass whose job was to knock the first one down. Notes and evidence in
+`private/re-*.md`. What survived, and what it changes.
+
+### The camera hook was on the wrong class
+
+`PlayerCameraTPSMode`'s vtable has sixteen slots, not 109. The 109 came from
+counting plausible function pointers past the end, straight through the next
+class's locator into `PlayerCameraBlackHoleMode`'s vtable at `+0x055F0990`.
+"Slot 19" at `+0x055F09A0` is that class's slot 2, and `0x113D8B0` is the
+black hole camera's update. It fires when the camera is in that special mode
+and at no other time, which is why session 23 captured nothing in a minute of
+ordinary play. `vtres.py 55F09A0` says so in one line; the earlier work only
+ever ran it on the vtable base.
+
+The real update is slot 2, `0x113C100`, `Update(this, float dt)`. It walks
+the two blend weights at `+0x1DC` and `+0x1E0` (the "yaw and pitch" of the
+earlier note are fade weights) and calls three helpers: `0x113C230`,
+`0x113C500`, `0x113CA10`. The third builds the camera from fields on the
+object:
+
+```
++0x30  pivot position, float3, then packed cell indices in the high qword
++0x40  rotation quaternion x, y, z, w
++0x50  distance behind the pivot
+```
+
+At `0x113CDF8` it computes the forward vector as `(2(xz + wy), 2(yz - wx),
+1 - 2(x^2 + y^2))`, normalises it, and places the camera at pivot minus
+forward times distance. That forward is the view ray. Pitch is `asin(fwd.y)`,
+yaw is `atan2(fwd.x, fwd.z)`, the same convention as the body's facing. Build
+0.8.0 hooks slot 2, refuses to install if the slot does not hold `0x113C100`,
+and reads the quaternion at each press.
+
+The earlier field list (`+0xC0` through `+0xD0`, `+0x104`, `+0x360`) is
+smoothed preset state, not the pose. `+0xC0`/`+0xC4` are stored as a
+multiplied pair at the end of `0x113C230`.
+
+### Which objects glint: a byte on the gimmick component
+
+`GimmickEventHandlerData_EnableDetectMode`'s `Execute` (`0x233E3E0`) reads a
+byte from its own `+0x58` and calls slot 124 of the actor's
+`ClientGimmickActorComponent` (`0x8862F0`), which stores it at
+`component+0x45B`. Slot 7 (`0x88DD20`) reads it back. The component sits at
+slot `+0x30` of the entity's component block, vtable `+0x054A5A10`. The mesh
+highlight is a separate handler writing a different byte through a different
+sub-object, so `+0x45B` is the knowledge glint specifically. The refuter
+reproduced every instruction.
+
+The effect names (`fx_detectmode_knowledge_gimmick` and the rest) are not in
+the exe as text; they live in `effectinfo.staticinfobody` and are resolved by
+hash. The success-versus-fail split was not settled; it does not matter for
+marking.
+
+Build 0.8.0 reads `+0x45B` on every gimmick in the entity set each pass. The
+automatic marker now picks among glinting objects only, nearest the view ray
+by angle, held for a second.
+
+### The detect component is not the aim
+
+`FindDetectTargetTask` has five virtuals and none of them cast anything; the
+component's slot 42 (`0x8FBB30`) throttles and submits an asynchronous job
+through a registry at `0x1F59140`. `task+0x540` held the same actor at every
+press across 34 seconds in session 19, so it is not the aimed object.
+`detect+0x410` is a clean has-target byte (`0xFF`/`0x00`) and `+0x42C` counts
+ticks while a target is held, but "target" there is whatever the job picks,
+not the crosshair. `+0x3EC` read `-1`, `FLT_MAX`, `1.5` and `0.5` in different
+sessions and pinned the player's own feet when used. All of it stays in the
+log and none of it drives a pin.
+
+### The beam was too strict, and 300 entities were fine
+
+Session 21's real hits sat six to eleven units below the player at twenty
+units out. The 3D beam of 0.7.0 around a level ray rejected every one of them,
+which is why session 23 hit nothing with 300 entities in the set. With the
+camera's forward in hand the beam is a true cone around the actual view
+direction; without it the level ray keeps an XZ radius and a vertical band of
+`4 + 0.35 * along`. Near misses are logged at each press so the next tuning is
+against a real case.
+
+The entity set reads world position from `transform+0x29C` for every entity,
+while the player walk composes local plus parent. They agree for the objects
+the ray has hit so far; parented items may differ. Noted, not fixed.
+
+### Other mods
+
+Nothing public touches the camera pose by hook. Two camera mods (UCM,
+CDCamera) edit `playercamerapreset.xml` inside a PAZ archive and disclaim any
+memory work. `cd-tomtom-arrow` (Rust, GPLv3) captured player position and a
+camera heading write by byte pattern on build 1.08.00; none of its camera or
+entity patterns survive in 1.0.0.2760. Trinity's shipped menu targets this
+build and claims a live map marker read from a "navigation component", but its
+published source lags the binary and has no such code. CrimsonDesertCoop
+publishes offset tables that do not match ours and names `pa::ClientActorManager`
+from a cheat table. Nothing there is reusable as is, and none of it is needed
+now that the pose comes from the game's own camera object.

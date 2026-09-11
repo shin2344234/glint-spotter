@@ -225,6 +225,19 @@ namespace
                 GS_LOG_ERR("signatures.h +0x%08llX no longer matches %s, RVAs are stale",
                            static_cast<unsigned long long>(e.rva), ShortName(e.name));
         }
+
+        // The gimmick component's vtable, so the entity set can find the
+        // component with one compare and read its detect mode target byte.
+        if (gs::rtti::VtableIs(reinterpret_cast<const void*>(base + gs::sig::kGimmickVtable), gs::sig::kGimmickClass))
+        {
+            gs::actors::SetGimmickVtable(base + gs::sig::kGimmickVtable);
+            GS_LOG_OK("signatures.h +0x%08llX still matches ClientGimmickActorComponent; glint byte at +0x%llX",
+                      static_cast<unsigned long long>(gs::sig::kGimmickVtable),
+                      static_cast<unsigned long long>(gs::sig::kOff_Gimmick_DetectTgt));
+        }
+        else
+            GS_LOG_ERR("signatures.h +0x%08llX no longer names ClientGimmickActorComponent; gimmicks found by name, no glint byte",
+                       static_cast<unsigned long long>(gs::sig::kGimmickVtable));
     }
 
     // Read what the create path would need. False means the candidate does not

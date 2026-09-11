@@ -37,4 +37,30 @@ namespace gs::sig
     // Size the factory at 0x00E3CC40 allocates for a root control. Useful as a
     // sanity bound when a scan hit is checked.
     constexpr size_t kRootControlSize = 0xC48;
+
+    // The third person camera mode. Its vtable has sixteen slots, packed
+    // against its siblings; the "109 slots" an earlier note counted ran on
+    // into PlayerCameraBlackHoleMode's vtable, which is how a hook on "slot
+    // 19" ended up on the black hole camera's update and never fired. Slot 2
+    // is Update(this, float dt): it walks +0x1DC/+0x1E0 and calls three
+    // helpers, the last of which (0x113CA10) builds the camera's forward
+    // vector from the quaternion at this+0x40 and places the camera at the
+    // pivot (this+0x30) minus forward times the distance at this+0x50.
+    constexpr uintptr_t kCameraTPSVtable   = 0x055F0908;
+    constexpr const char* kCameraTPSClass  = ".?AVPlayerCameraTPSMode@gameClientScript@pa@@";
+    constexpr int       kSlotCameraUpdate  = 2;
+    constexpr uintptr_t kCameraTPSUpdate   = 0x0113C100;
+    constexpr uintptr_t kOff_Cam_Pivot     = 0x30;   // float3, then packed cell indices
+    constexpr uintptr_t kOff_Cam_Quat      = 0x40;   // x, y, z, w
+    constexpr uintptr_t kOff_Cam_Distance  = 0x50;
+
+    // The gimmick component on world objects, and the byte the detect mode
+    // event handler sets on it. GimmickEventHandlerData_EnableDetectMode's
+    // Execute (0x233E3E0) calls the component's slot 124 (0x8862F0), which
+    // stores its argument at component+0x45B; slot 7 (0x88DD20) reads it
+    // back. The component sits at slot +0x30 of the entity's block.
+    constexpr uintptr_t kGimmickVtable         = 0x054A5A10;
+    constexpr const char* kGimmickClass        = ".?AVClientGimmickActorComponent@pa@@";
+    constexpr uintptr_t kOff_Comps_Gimmick     = 0x30;
+    constexpr uintptr_t kOff_Gimmick_DetectTgt = 0x45B;
 }

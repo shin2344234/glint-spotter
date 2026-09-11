@@ -3,35 +3,40 @@
 
 // The third person camera, held through its own update.
 //
-// PlayerCameraTPSMode keeps the view as scalars on its object: slot 19, its
-// per-frame update, stores to this+0xC0, +0xC8, +0xCC, +0xD0, +0x104, +0x1DC,
-// +0x1E0 and +0x360 after clamp and interpolate helpers. Yaw, pitch and the
-// distance behind the player are among them. The object is reallocated during
-// play, so a pointer found by scanning goes stale; a thunk on slot 19 takes
-// the address from every call instead and never calls anything.
+// PlayerCameraTPSMode's vtable has sixteen slots. Slot 2 is Update(this,
+// float dt). It is taken by a thunk that stores this and jumps, because the
+// object is reallocated during play and a scanned pointer goes stale.
 //
-// Which field is the pitch is settled from the log: at each chord press every
-// candidate is printed beside the yaw the transform already gives, and the
-// ground point each candidate would produce.
+// What the object holds, from the disassembly of the update's third helper
+// (RVA 0x113CA10): a pivot position at +0x30, the camera's rotation as a
+// quaternion x, y, z, w at +0x40, and the distance behind the pivot at +0x50.
+// The helper builds the forward vector as (2(xz + wy), 2(yz - wx),
+// 1 - 2(x^2 + y^2)), normalises it, and puts the camera at pivot minus
+// forward times distance. The same forward is the view ray this mod wants.
 
 namespace gs::camera
 {
-    // Take slot 19 on the class's vtable. Safe to call once.
+    // Take slot 2 on the class's vtable. Refuses when the slot does not hold
+    // the update the analysis named, since that means a different layout.
     bool Install(uintptr_t vtable);
     void Remove();
 
     // The most recent this, or 0 before the first update.
     uintptr_t This();
 
-    struct Fields
+    struct Pose
     {
-        float c0 = 0, c4 = 0, c8 = 0, cc = 0, d0 = 0, f104 = 0, f1dc = 0, f1e0 = 0, f360 = 0;
-        bool valid = false;
+        float pivot[3]{};
+        float q[4]{};          // x, y, z, w
+        float dist = 0;
+        float fwd[3]{};        // unit, world axes
+        float pitch = 0;       // radians, positive looking up
+        float yaw = 0;         // radians, atan2(fwd.x, fwd.z), same convention as the body facing
+        bool valid = false;    // the object was readable
+        bool fwdValid = false; // the quaternion was a unit rotation
     };
-    Fields Read();
+    Pose Read();
 
-    // Log the fields beside the facing yaw, and for each angle-shaped one the
-    // point where a ray from eye height at that pitch meets the ground at the
-    // player's feet, along the facing.
-    void LogAtPress(float facingYaw, float px, float py, float pz, float fx, float fz);
+    // Log the pose beside the body's facing yaw, at a press.
+    void LogAtPress(float facingYaw);
 }

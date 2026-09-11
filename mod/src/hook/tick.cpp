@@ -172,10 +172,6 @@ namespace
 
 namespace
 {
-    // The automatic marker's state. With the flash on and the detect
-    // component reporting a target, the object at that distance along the
-    // facing gets a pin once the target has held for a second.
-    uint32_t g_autoSinceMs = 0;
     uint64_t g_lastRefreshTick = 0;
 
     // The world map root control does not exist until the map is opened
@@ -216,7 +212,8 @@ namespace
             return;
         }
         const float dx = tx - pp.x, dz = tz - pp.z;
-        GS_LOG("[mark] target %.1f units away via %s; placing a %s pin there", std::sqrt(dx * dx + dz * dz), how, label);
+        GS_LOG("[mark] target %.1f units away via %s; placing a %s pin at (%.1f, %.1f, %.1f)",
+               std::sqrt(dx * dx + dz * dz), how, label, tx, ty, tz);
         // Only a root the spy has seen the game call slot 170 on. The
         // sweep's candidate is never used for a call.
         void* root = gs::mapicon::LastWorldRoot();
@@ -234,15 +231,62 @@ namespace
             return;
         }
         gs::mapicon::PlacePinNow(root, tx, tz, label);
-        (void)ty;
     }
 
-    // Flash on: the first gimmick in a narrow beam along the facing is the
-    // candidate. When the same one stays the candidate for a second it gets a
-    // Glint pin, once per area, and no other automatic pin for five seconds.
-    // The detect component's own target field is still unknown (session
-    // twenty read -1 with the flash on a glint), so the pick is geometric.
+    // The view ray. The camera's own forward when its object is in hand,
+    // otherwise the body's facing held level. The origin is eye height.
+    struct View
+    {
+        float ox = 0, oy = 0, oz = 0;
+        float fx = 0, fy = 0, fz = 1;
+        bool camera = false;
+    };
+
+    bool ViewRay(const gs::player::Pos& pp, View* v)
+    {
+        v->ox = pp.x; v->oy = pp.y + 1.6f; v->oz = pp.z;
+        const gs::camera::Pose cam = gs::camera::Read();
+        if (cam.fwdValid)
+        {
+            v->fx = cam.fwd[0]; v->fy = cam.fwd[1]; v->fz = cam.fwd[2];
+            v->camera = true;
+            return true;
+        }
+        float fx = 0, fz = 0;
+        if (!gs::nearest::ForwardFromQuat(pp.q, &fx, &fz)) return false;
+        v->fx = fx; v->fy = 0; v->fz = fz;
+        v->camera = false;
+        return true;
+    }
+
+    // Where the view ray meets the plane of the player's feet. Only with a
+    // camera pitch, and only looking down.
+    bool GroundPoint(const View& v, float* gx, float* gy, float* gz, float* t)
+    {
+        if (!v.camera || v.fy > -0.03f) return false;
+        const float tt = 1.6f / (-v.fy);
+        if (tt > 120.0f) return false;
+        *t = tt;
+        *gx = v.ox + v.fx * tt; *gy = v.oy + v.fy * tt; *gz = v.oz + v.fz * tt;
+        return true;
+    }
+
+    int CastView(const View& v, float maxAlong, float radius, float spread, bool glintOnly,
+                 gs::nearest::Candidate* c, int n, gs::nearest::Candidate* miss, int missN)
+    {
+        if (v.camera)
+            return gs::nearest::Cast3D(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fy, v.fz,
+                                       maxAlong, radius, spread, glintOnly, c, n, miss, missN);
+        return gs::nearest::Cast(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fz,
+                                 maxAlong, radius, spread, glintOnly, c, n, miss, missN);
+    }
+
+    // Flash on: among the objects whose gimmick component carries the detect
+    // mode target byte, the one nearest the view ray within a cone. When the
+    // same one stays the pick for a second it gets a Glint pin, once per
+    // area, and no other automatic pin for five seconds.
     uint32_t g_autoEid = 0;
+    uint32_t g_autoSinceMs = 0;
     uint32_t g_autoCooldownUntil = 0;
     int g_autoLogsLeft = 40;
     uint32_t g_autoLastLogMs = 0;
@@ -256,26 +300,34 @@ namespace
             return;
         }
         const gs::player::Pos pp = gs::player::Read();
-        float fx = 0, fz = 0;
-        if (!pp.valid || !gs::nearest::ForwardFromQuat(pp.q, &fx, &fz)) return;
+        View v;
+        if (!pp.valid || !ViewRay(pp, &v)) return;
         gs::nearest::Candidate c[8];
-        const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y + 1.6f, pp.z, fx, fz, 40.0f, 1.5f, 0.08f, c, 8);
+        const int n = CastView(v, 45.0f, 2.0f, 0.12f, true, c, 8, nullptr, 0);
 
-        // While the flash is on, a line every two seconds saying what sits in
-        // the beam, so the glint's class and flags can be read off the log.
+        // Nearest the ray by angle, not by distance along it.
+        int pick = -1;
+        float bestAngle = 1e9f;
+        for (int i = 0; i < n; ++i)
+        {
+            const float angle = c[i].off / (c[i].along > 1.0f ? c[i].along : 1.0f);
+            if (angle < bestAngle) { bestAngle = angle; pick = i; }
+        }
+
+        // While the flash is on, a line every two seconds saying what the
+        // cone holds, forty lines at most.
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            float dd = 0;
-            const bool hd = gs::aim::DetectDistance(&dd);
-            GS_LOG("[auto] flash on, %d in the beam, set %d, detect distance %s %.2f", n, gs::actors::Count(), hd ? "is" : "none,", dd);
+            GS_LOG("[auto] flash on, view from the %s (pitch %.0f deg); set %d, %d gimmicks, %d glinting, %d glinting in the cone",
+                   v.camera ? "camera" : "body, level", std::asin(v.fy) * 57.2958f,
+                   gs::actors::Count(), gs::actors::GimmickCount(), gs::actors::GlintCount(), n);
             for (int i = 0; i < n && i < 4; ++i)
-                GS_LOG("[auto]   %s%s eid %08X at %.1f along, %.2f off, %+.1f up", c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy);
+                GS_LOG("[auto]   %s%s eid %08X at %.1f along, %.2f off, %+.1f up", i == pick ? "PICK " : "",
+                       c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy);
         }
 
-        int pick = -1;
-        for (int i = 0; i < n; ++i) if (c[i].gimmick) { pick = i; break; }
         if (pick < 0 || c[pick].eid == 0)
         {
             g_autoEid = 0;
@@ -290,8 +342,8 @@ namespace
         }
         if (now - g_autoSinceMs < 1000 || now < g_autoCooldownUntil) return;
         g_autoCooldownUntil = now + 5000;
-        GS_LOG("[auto] %s eid %08X held in the beam for a second at %.1f units", c[pick].cls, c[pick].eid, c[pick].along);
-        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, gimmick held in the beam", "Glint", pp, 8.0f);
+        GS_LOG("[auto] %s eid %08X, glinting, held in view for a second at %.1f units", c[pick].cls, c[pick].eid, c[pick].along);
+        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, glinting object held in view", "Glint", pp, 8.0f);
     }
 }
 
@@ -329,8 +381,8 @@ extern "C" void gs_OnMinimapTick(void* self)
     }
 
     // A mark asked for elsewhere lands here, on the thread that owns icons.
-    // The pin lands where the flash is aimed: the actor the detect component
-    // is focused on, read on this thread. Nothing is placed at the player.
+    // The pin lands where the view ray goes: the first object on it, or the
+    // ground under it when the camera is looking down. Never at the player.
     if (g_markPending.exchange(false))
     {
         const gs::player::Pos pp = gs::player::Read();
@@ -344,9 +396,6 @@ extern "C" void gs_OnMinimapTick(void* self)
         GS_LOG("[mark] requested. player world (%.3f, %.3f, %.3f) local (%.3f, %.3f, %.3f), flash %s",
                pp.x, pp.y, pp.z, pp.lx, pp.ly, pp.lz, flash ? "on" : "off");
 
-        // Everything read off the actor is in the sub-level's local space, and
-        // the map wants world space. The origin comes from the transform's own
-        // two positions, so it is right for whatever sub-level this is.
         float tx = 0, ty = 0, tz = 0;
         bool have = false;
         const char* how = "";
@@ -358,76 +407,70 @@ extern "C" void gs_OnMinimapTick(void* self)
         if (gs::aim::AimPointLocal(gs::player::CharacterControlComponent(), pp.lx, pp.ly, pp.lz, a))
             GS_LOG("[mark] game aim field local (%.2f, %.2f, %.2f) -> world (%.2f, %.2f, %.2f)",
                    a[0], a[1], a[2], a[0] + pp.ox, a[1] + pp.oy, a[2] + pp.oz);
-        float detectDist = 0;
-        const bool hasDetect = gs::aim::DetectDistance(&detectDist);
-        GS_LOG("[mark] detect target: %s", hasDetect ? "present" : "none");
 
-        // A ray from the player along the facing, against every entity in the
-        // actor manager's list. Needs nothing the game only sets sometimes;
-        // session eighteen had the aim field zeroed. Hits objects, not terrain.
-        if (!have)
+        gs::camera::LogAtPress(2.0f * std::atan2(pp.q[1], pp.q[3]));
+
+        View v;
+        if (!gs::actors::Ready())
+            GS_LOG("[mark] actor manager not located yet, no ray");
+        else if (gs::actors::Count() == 0)
+            GS_LOG("[mark] actor set is empty, no ray");
+        else if (!ViewRay(pp, &v))
+            GS_LOG("[mark] facing quaternion (%.3f, %.3f, %.3f, %.3f) is not a yaw and no camera, no ray",
+                   pp.q[0], pp.q[1], pp.q[2], pp.q[3]);
+        else
         {
-            float fx = 0, fz = 0;
-            if (!gs::actors::Ready())
-                GS_LOG("[mark] actor manager not located yet, no ray");
-            else if (gs::actors::Count() == 0)
-                GS_LOG("[mark] actor set is empty, no ray");
-            else if (!gs::nearest::ForwardFromQuat(pp.q, &fx, &fz))
-                GS_LOG("[mark] facing quaternion (%.3f, %.3f, %.3f, %.3f) is not a yaw, no ray",
-                       pp.q[0], pp.q[1], pp.q[2], pp.q[3]);
-            else
+            gs::nearest::Candidate c[6], miss[3];
+            // 60 units out, a beam 1.5 units wide at the eye widening by 0.06
+            // per unit, so 5 units wide at the far end.
+            const int n = CastView(v, 60.0f, 1.5f, 0.06f, false, c, 6, miss, 3);
+            GS_LOG("[mark] ray from the %s at (%.1f, %.1f, %.1f) along (%.3f, %.3f, %.3f) over %d entities: %d hit(s)",
+                   v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, gs::actors::Count(), n);
+            for (int i = 0; i < n; ++i)
+                GS_LOG("[mark]   %d. %s%s%s eid %08X at %.1f along, %.2f off, %+.1f up, (%.1f, %.1f, %.1f)",
+                       i + 1, c[i].glint ? "GLINT " : "", c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid,
+                       c[i].along, c[i].off, c[i].dy, c[i].x, c[i].y, c[i].z);
+            int missN = 0;
+            for (int i = 0; i < 3 && miss[i].entity; ++i) ++missN;
+            for (int i = 0; i < missN; ++i)
+                GS_LOG("[mark]   near miss: %s%s eid %08X at %.1f along, %.2f off, %+.1f up",
+                       miss[i].glint ? "GLINT " : "", miss[i].cls, miss[i].eid, miss[i].along, miss[i].off, miss[i].dy);
+
+            float gx = 0, gy = 0, gz = 0, gt = 0;
+            const bool ground = GroundPoint(v, &gx, &gy, &gz, &gt);
+            if (ground) GS_LOG("[mark] the view ray meets the ground %.1f units out at (%.1f, %.1f, %.1f)", gt, gx, gy, gz);
+            else GS_LOG("[mark] no ground point: %s", v.camera ? "looking level or up" : "no camera pitch");
+
+            // An object the ray hits before it reaches the ground wins;
+            // otherwise the ground point; otherwise nothing.
+            if (n > 0 && (!ground || c[0].along <= gt + 3.0f))
             {
-                gs::nearest::Candidate c[6];
-                // 60 units out, a beam 1.5 units wide at the player widening by
-                // 0.06 per unit, so 5 units wide at the far end.
-                const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y + 1.6f, pp.z, fx, fz,
-                                                60.0f, 1.5f, 0.06f, c, 6);
-                gs::camera::LogAtPress(2.0f * std::atan2(pp.q[1], pp.q[3]), pp.x, pp.y, pp.z, fx, fz);
-                GS_LOG("[mark] ray from (%.1f, %.1f, %.1f) along (%.3f, %.3f) over %d entities: %d hit(s)",
-                       pp.x, pp.y, pp.z, fx, fz, gs::actors::Count(), n);
-                for (int i = 0; i < n; ++i)
-                    GS_LOG("[mark]   %d. %s%s eid %08X at %.1f along, %.2f off, %+.1f up, (%.1f, %.1f, %.1f)",
-                           i + 1, c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy, c[i].x, c[i].y, c[i].z);
-                if (n > 0)
-                {
-                    have = true; tx = c[0].x; ty = c[0].y; tz = c[0].z;
-                    how = "first object on the ray";
-                }
+                have = true; tx = c[0].x; ty = c[0].y; tz = c[0].z;
+                how = "first object on the view ray";
+            }
+            else if (ground)
+            {
+                have = true; tx = gx; ty = gy; tz = gz;
+                how = "the ground under the view ray";
             }
         }
 
-        // The detect component's +0x3EC is not a target distance: session
-        // twenty-two read 1.5 with the flash on and nothing aimed at, and a
-        // press pinned the player's own feet. Logged above, not used.
-        (void)detectDist;
-        // The actor-pointer route found a fixed reference 104 units away at every
-        // press in session nineteen. It is not an aim and it places nothing.
-
-        // The detect component's scalars that moved when the flash was aimed
-        // in session seventeen, next to the ray's candidates, so the one that
-        // is the distance to the glint can be picked out. +0x580 went from
-        // 12.6 to 3.0 between an unaimed and an aimed press.
+        // The detect component's scalars, kept in the log for the record.
         {
             const uintptr_t d = gs::player::DetectComponent();
             if (d && gs::rtti::Readable(reinterpret_cast<const void*>(d), 0x650))
             {
                 const auto* q = reinterpret_cast<const uint8_t*>(d);
-                float f3e8, f3ec, f580, f5e8, f640, f2ec, f300, f368;
+                float f3ec, f580, f300;
                 uint32_t u410, u42c;
-                memcpy(&f3e8, q + 0x3E8, 4); memcpy(&f3ec, q + 0x3EC, 4); memcpy(&f580, q + 0x580, 4);
-                memcpy(&f5e8, q + 0x5E8, 4); memcpy(&f640, q + 0x640, 4);
-                memcpy(&f2ec, q + 0x2EC, 4); memcpy(&f300, q + 0x300, 4); memcpy(&f368, q + 0x368, 4);
+                memcpy(&f3ec, q + 0x3EC, 4); memcpy(&f580, q + 0x580, 4); memcpy(&f300, q + 0x300, 4);
                 memcpy(&u410, q + 0x410, 4); memcpy(&u42c, q + 0x42C, 4);
-                GS_LOG("[mark] detect scalars: +2EC %.3f +300 %.3f +368 %.3f +3E8 %.3f +3EC %.3f +580 %.3f +5E8 %.3f +640 %.3f +410 0x%X +42C 0x%X",
-                       f2ec, f300, f368, f3e8, f3ec, f580, f5e8, f640, u410, u42c);
+                GS_LOG("[mark] detect scalars: +300 %.3f +3EC %.3f +580 %.3f +410 0x%X +42C 0x%X", f300, f3ec, f580, u410, u42c);
             }
         }
 
         if (have) PlaceAt(tx, ty, tz, how, "Mark", pp, 2.0f);
-        else
-        {
-            GS_LOG("[mark] no target resolved, nothing placed");
-        }
+        else GS_LOG("[mark] no target resolved, nothing placed");
         (void)g_markX; (void)g_markZ; (void)g_markLabel;
     }
 }

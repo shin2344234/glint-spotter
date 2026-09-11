@@ -8,6 +8,7 @@
 
 #include "core/log.h"
 #include "game/rtti.h"
+#include "game/signatures.h"
 #include "game/typescan.h"
 
 namespace
@@ -28,7 +29,10 @@ namespace
     constexpr int       kBufMax              = 16384;
 
     std::atomic<uintptr_t> g_vtable{0};
+    std::atomic<uintptr_t> g_gimmickVt{0};
     std::atomic<uintptr_t> g_slot{0};      // the global that holds the manager pointer
+    int g_gimmicks = 0;
+    int g_glints = 0;
     std::atomic<uintptr_t> g_mgr{0};
     uint32_t g_checkedAt = 0;
     uintptr_t g_slots[16];
@@ -214,24 +218,45 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
     }
 
-    // Does the entity's component block hold a ClientGimmickActorComponent?
-    // A gimmick is what Master Looter reads identity from, and the glint effect
-    // is named for it. Read once when the entity joins the set.
-    bool HasGimmick(uintptr_t e)
+    // The entity's ClientGimmickActorComponent, or 0. It sits at slot +0x30
+    // of the block; with the vtable known that is one compare, otherwise the
+    // slots are named through RTTI. Read once when the entity joins the set.
+    uintptr_t GimmickComponent(uintptr_t e)
     {
         __try
         {
             const uintptr_t comps = Deref(e + kOff_Ent_Comps);
-            if (!comps || !gs::rtti::Readable(reinterpret_cast<const void*>(comps), kComps_SlotsEnd)) return false;
+            if (!comps || !gs::rtti::Readable(reinterpret_cast<const void*>(comps), kComps_SlotsEnd)) return 0;
+            const uintptr_t known = g_gimmickVt.load();
+            if (known)
+            {
+                const uintptr_t c = *reinterpret_cast<const uintptr_t*>(comps + gs::sig::kOff_Comps_Gimmick);
+                if (PtrLike(c) && Deref(c) == known) return c;
+            }
             for (uintptr_t off = 0; off < kComps_SlotsEnd; off += 8)
             {
                 const uintptr_t c = *reinterpret_cast<const uintptr_t*>(comps + off);
-                if (c < 0x10000 || (c & 7) != 0) continue;
+                if (!PtrLike(c)) continue;
                 const uintptr_t vt = Deref(c);
+                if (known && vt == known) return c;
                 const char* n = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
-                if (n && strstr(n, "ClientGimmickActorComponent")) return true;
+                if (n && strstr(n, "ClientGimmickActorComponent")) return c;
             }
-            return false;
+            return 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
+    // The detect mode target byte on a gimmick component.
+    bool GlintByte(uintptr_t comp, bool* out)
+    {
+        __try
+        {
+            *out = *reinterpret_cast<const uint8_t*>(comp + gs::sig::kOff_Gimmick_DetectTgt) != 0;
+            return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -250,6 +275,7 @@ namespace
 namespace gs::actors
 {
     void SetManagerVtable(uintptr_t vtable) { g_vtable.store(vtable); }
+    void SetGimmickVtable(uintptr_t vtable) { g_gimmickVt.store(vtable); }
 
     bool Locate(uint32_t nowMs)
     {
@@ -328,23 +354,50 @@ namespace gs::actors
             if (j == g_setN)
             {
                 if (g_setN >= kSetMax) continue;
-                g_set[g_setN].ptr = e;
-                g_set[g_setN].eid = EidOf(e);
-                g_set[g_setN].gimmick = HasGimmick(e);
+                Entity& ne = g_set[g_setN];
+                ne = Entity{};
+                ne.ptr = e;
+                ne.eid = EidOf(e);
+                ne.gimmickComp = GimmickComponent(e);
+                ne.gimmick = ne.gimmickComp != 0;
                 ++g_setN;
             }
-            g_set[j].x = pos[0]; g_set[j].y = pos[1]; g_set[j].z = pos[2];
-            g_set[j].lastSeenMs = nowMs;
+            Entity& en = g_set[j];
+            en.x = pos[0]; en.y = pos[1]; en.z = pos[2];
+            en.lastSeenMs = nowMs;
+            // The glint byte, every pass: the event that sets it can fire any time.
+            bool g = false;
+            if (en.gimmickComp && GlintByte(en.gimmickComp, &g)) en.glint = g;
         }
-        for (int i = 0; i < g_setN; ++i) if (g_set[i].gimmick) ++gimmicks;
+        int glints = 0;
+        for (int i = 0; i < g_setN; ++i)
+        {
+            if (g_set[i].gimmick) ++gimmicks;
+            if (g_set[i].glint) ++glints;
+        }
+        g_gimmicks = gimmicks;
+        g_glints = glints;
 
         // A line every thirty seconds so the log says what the ray has to work with.
         if (nowMs - g_lastSaidMs > 30000)
         {
             g_lastSaidMs = nowMs;
-            GS_LOG("[actors] pools offered %d this pass; set holds %d entities, %d with a gimmick component", n, g_setN, gimmicks);
+            GS_LOG("[actors] pools offered %d this pass; set holds %d entities, %d with a gimmick component, %d glinting",
+                   n, g_setN, gimmicks, glints);
         }
         return static_cast<uint32_t>(n);
+    }
+
+    int GimmickCount()
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        return g_gimmicks;
+    }
+
+    int GlintCount()
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        return g_glints;
     }
 
     int Snapshot(Entity* out, int n)
