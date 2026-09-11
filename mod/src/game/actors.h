@@ -31,6 +31,7 @@ namespace gs::actors
         bool glint = false;          // its detect mode target byte is set
         bool lit = false;            // the reveal effect is on it right now
         bool pickup = false;         // a gimmick carrying item or gather data
+        bool knowledge = false;      // carries a ClientKnowledgeActorComponent
         bool locked = false;
         bool parented = false;       // its position came from the parent chain
         char name[48]{};             // the gimmick's node name, when it has one

@@ -33,6 +33,7 @@ namespace gs::nearest
         bool glint = false;          // that component's detect mode target byte is set
         bool lit = false;            // the reveal effect is on it right now
         bool pickup = false;         // a gimmick that yields an item
+        bool knowledge = false;      // carries a knowledge component
         bool locked = false;
         bool parented = false;
         char name[48]{};             // the gimmick's node name

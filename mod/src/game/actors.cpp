@@ -379,6 +379,25 @@ namespace
         }
     }
 
+    // A component named by RTTI at a known slot of the block.
+    uintptr_t ComponentAt(uintptr_t e, uintptr_t slot, const char* nameFragment)
+    {
+        __try
+        {
+            const uintptr_t comps = Deref(e + kOff_Ent_Comps);
+            if (!comps) return 0;
+            const uintptr_t c = Deref(comps + slot);
+            if (!PtrLike(c)) return 0;
+            const uintptr_t vt = Deref(c);
+            const char* n = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+            return (n && strstr(n, nameFragment)) ? c : 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
     // A string the engine keeps as a pointer to an object whose first field
     // is the characters. Master Looter's ReadEngineString.
     bool EngineString(uintptr_t slot, char* out, size_t n)
@@ -406,18 +425,74 @@ namespace
         }
     }
 
-    // Does this gimmick yield something: item data or gather data present.
-    // The flash reveals pickups, and this is how Master Looter knows one.
+    // The last path element without its extension: the whole path is too
+    // long for a log line and the leaf is the part that names the thing.
+    void Leaf(const char* path, char* out, size_t n)
+    {
+        const char* slash = strrchr(path, '/');
+        const char* start = slash ? slash + 1 : path;
+        strncpy_s(out, n, start, _TRUNCATE);
+        char* dot = strstr(out, ".prefab");
+        if (dot) *dot = 0;
+    }
+
+    // What this gimmick is, and whether the player can take something from
+    // it. Master Looter identifies a node by its prefab path, and its log
+    // was still naming nodes correctly on 2850 while this mod's item data
+    // test found nothing near the player: "/object/cd_gimmick/00_common/
+    // item/gimmick_item_trade_salt_02.prefab" is an item, ".../gather/..."
+    // or a path with "gather" in it is a gather node. The item and gather
+    // data pointers are read too, but a node is a pickup if either the path
+    // or a pointer says so, since the pointers are only filled once the node
+    // is armed.
     bool Pickup(uintptr_t comp, bool* locked, char* name, size_t nameBytes)
     {
         __try
         {
+            char path[256];
+            const uintptr_t pf = Deref(comp + gs::sig::kOff_Gimmick_Prefab);
+            bool havePath = pf && EngineString(pf + gs::sig::kOff_Prefab_Path, path, sizeof(path));
+            if (!havePath)
+            {
+                const uintptr_t alt = Deref(comp + gs::sig::kOff_Gimmick_PrefabAlt);
+                havePath = alt && EngineString(alt + gs::sig::kOff_PrefabAlt_Path, path, sizeof(path));
+            }
+
             const uintptr_t item = *reinterpret_cast<const uintptr_t*>(comp + gs::sig::kOff_Gimmick_ItemData);
             const uintptr_t gather = *reinterpret_cast<const uintptr_t*>(comp + gs::sig::kOff_Gimmick_GatherData);
-            if (!PtrLike(item) && !PtrLike(gather)) return false;
+            const bool byData = PtrLike(item) || PtrLike(gather);
+
+            bool byPath = false;
+            if (havePath)
+            {
+                byPath = strstr(path, "/item/") || strstr(path, "gimmick_item") ||
+                         strstr(path, "gather") || strstr(path, "/plant/") || strstr(path, "/ore/");
+                Leaf(path, name, nameBytes);
+            }
+            else if (!EngineString(comp + gs::sig::kOff_Gimmick_NodeName, name, nameBytes))
+                name[0] = 0;
+
+            if (!byData && !byPath) return false;
             *locked = *reinterpret_cast<const uint8_t*>(comp + gs::sig::kOff_Gimmick_Locked) != 0;
-            if (!EngineString(comp + gs::sig::kOff_Gimmick_NodeName, name, nameBytes)) name[0] = 0;
             return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // The prefab leaf of any gimmick, pickup or not, for the log.
+    bool GimmickName(uintptr_t comp, char* out, size_t n)
+    {
+        __try
+        {
+            char path[256];
+            const uintptr_t pf = Deref(comp + gs::sig::kOff_Gimmick_Prefab);
+            if (pf && EngineString(pf + gs::sig::kOff_Prefab_Path, path, sizeof(path))) { Leaf(path, out, n); return true; }
+            const uintptr_t alt = Deref(comp + gs::sig::kOff_Gimmick_PrefabAlt);
+            if (alt && EngineString(alt + gs::sig::kOff_PrefabAlt_Path, path, sizeof(path))) { Leaf(path, out, n); return true; }
+            return EngineString(comp + gs::sig::kOff_Gimmick_NodeName, out, n);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -611,11 +686,13 @@ namespace gs::actors
                 ne.gimmick = ne.gimmickComp != 0;
                 ne.detectComp = DetectComponent(e);
                 ne.effectComp = EffectComponent(e);
+                ne.knowledge = ComponentAt(e, gs::sig::kOff_Comps_Knowledge, "Knowledge") != 0;
                 if (ne.gimmickComp)
                 {
                     bool locked = false;
                     ne.pickup = Pickup(ne.gimmickComp, &locked, ne.name, sizeof(ne.name));
                     ne.locked = locked;
+                    if (!ne.name[0]) GimmickName(ne.gimmickComp, ne.name, sizeof(ne.name));
                 }
                 ++g_setN;
             }
@@ -694,9 +771,9 @@ namespace gs::actors
             for (int k = 0; k < named; ++k)
             {
                 const Entity& en = g_set[order[k]];
-                GS_LOG("[actors]   pickup eid %08X \"%s\"%s%s at (%.1f, %.1f, %.1f), %.0f away", en.eid,
-                       en.name[0] ? en.name : "?", en.locked ? ", locked" : "", en.parented ? ", via its parent" : "",
-                       en.x, en.y, en.z, dist[k]);
+                GS_LOG("[actors]   pickup eid %08X \"%s\"%s%s%s at (%.1f, %.1f, %.1f), %.0f away", en.eid,
+                       en.name[0] ? en.name : "?", en.knowledge ? ", knowledge" : "", en.locked ? ", locked" : "",
+                       en.parented ? ", via its parent" : "", en.x, en.y, en.z, dist[k]);
             }
             int shown = 0;
             for (int i = 0; i < g_setN && shown < 3; ++i)

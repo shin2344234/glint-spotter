@@ -83,6 +83,24 @@ namespace gs::sig
     constexpr uintptr_t kOff_Gimmick_NodeName   = 0x68;
     constexpr uintptr_t kOff_Gimmick_Locked     = 0x3E2;
 
+    // Knowledge. The reveal effect the flash plays is named for it
+    // (fx_detectmode_knowledge_gimmick), and the audit traced
+    // ClientKnowledgeActorComponent to block slot +0x150 (slot index 0x2A).
+    // Session 36: the gimmick under the crosshair had no item or gather
+    // data, which is what an object that yields something only after a
+    // puzzle looks like, so knowledge is the better test.
+    constexpr uintptr_t kOff_Comps_Knowledge    = 0x150;
+
+    // The node's prefab path, which is what Master Looter identifies a node
+    // by and what its log was still printing correctly on 2850 while this
+    // mod saw nothing: "/object/cd_gimmick/00_common/item/gimmick_item_
+    // trade_salt_02.prefab". Two routes to the same string; the first is the
+    // one every node answered on in Master Looter's 6 September probe.
+    constexpr uintptr_t kOff_Gimmick_Prefab     = 0x18;
+    constexpr uintptr_t kOff_Prefab_Path        = 0x38;
+    constexpr uintptr_t kOff_Gimmick_PrefabAlt  = 0x58;
+    constexpr uintptr_t kOff_PrefabAlt_Path     = 0x18;
+
     // The game's ray cast wrapper (start, direction, distance in; hit distance
     // and normal out) and what it uses. Found at runtime by byte pattern, with
     // the facade and the frame offset decoded from its own RIP-relative

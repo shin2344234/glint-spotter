@@ -423,6 +423,20 @@ namespace
                 GS_LOG("[auto]   %s%s\"%s\" eid %08X at %.1f along, %.1f deg, %+.1f up%s", i == pick ? "PICK " : "",
                        c[i].lit ? "LIT " : "", c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, c[i].along,
                        std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy, c[i].locked ? ", locked" : "");
+            // Every gimmick near the view, named, whether or not it counted
+            // as a pickup. Master Looter names nodes by this same path and
+            // was still naming them on 2850 while this mod saw nothing.
+            {
+                gs::nearest::Candidate all[6];
+                const int an = CastView(v, 400.0f, 4.0f, 0.14f, false, all, 6, nullptr, 0);
+                for (int i = 0; i < an; ++i)
+                    if (all[i].gimmick)
+                        GS_LOG("[auto]   gimmick near the view: \"%s\" eid %08X at %.1f along, %.1f deg%s%s%s",
+                               all[i].name[0] ? all[i].name : "?", all[i].eid, all[i].along,
+                               std::atan2(all[i].off, all[i].along) * 57.2958f,
+                               all[i].pickup ? ", a pickup" : "", all[i].knowledge ? ", knowledge" : "",
+                               all[i].locked ? ", locked" : "");
+            }
             if (n == 0)
             {
                 // No pickup near the view: say what is there, and dump the

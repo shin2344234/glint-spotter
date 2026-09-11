@@ -28,6 +28,7 @@ namespace
         cand.glint = e.glint;
         cand.lit = e.lit;
         cand.pickup = e.pickup;
+        cand.knowledge = e.knowledge;
         cand.locked = e.locked;
         cand.parented = e.parented;
         memcpy(cand.name, e.name, sizeof(cand.name));
@@ -84,7 +85,10 @@ namespace gs::nearest
         {
             const gs::actors::Entity& e = set[i];
             if (!e.ptr || e.ptr == playerActor) continue;
-            if (glintOnly && !e.pickup) continue;   // "only": only what the flash reveals
+            // "only": only what the flash reveals. A pickup, or a gimmick
+            // that carries knowledge, which is what an object that yields
+            // something after a puzzle looks like before the puzzle is done.
+            if (glintOnly && !(e.pickup || (e.gimmick && e.knowledge))) continue;
 
             const float dx = e.x - px, dz = e.z - pz, dy = e.y - py;
             const float along = dx * fx + dz * fz;
@@ -224,7 +228,10 @@ namespace gs::nearest
         {
             const gs::actors::Entity& e = set[i];
             if (!e.ptr || e.ptr == playerActor) continue;
-            if (glintOnly && !e.pickup) continue;   // "only": only what the flash reveals
+            // "only": only what the flash reveals. A pickup, or a gimmick
+            // that carries knowledge, which is what an object that yields
+            // something after a puzzle looks like before the puzzle is done.
+            if (glintOnly && !(e.pickup || (e.gimmick && e.knowledge))) continue;
 
             const float dx = e.x - ox, dy = e.y - oy, dz = e.z - oz;
             const float along = dx * fx + dy * fy + dz * fz;
