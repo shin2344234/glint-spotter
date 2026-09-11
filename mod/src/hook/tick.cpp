@@ -378,6 +378,7 @@ namespace
     bool g_flashWas = false;
     uint32_t g_heldEid = 0;
     uint32_t g_heldSinceMs = 0;
+    float g_heldX = 0, g_heldZ = 0;
     uint32_t g_cooldownUntil = 0;
     int g_autoLogsLeft = 60;
     uint32_t g_autoLastLogMs = 0;
@@ -448,7 +449,7 @@ namespace
             if (flen > 1e-3f)
             {
                 const float ux = v.fx / flen, uz = v.fz / flen;
-                float best = 0.175f;   // ten degrees
+                float best = 0.26f;   // fifteen degrees
                 for (int i = 0; i < n; ++i)
                 {
                     const float px = around[i].x - pp.x, pz = around[i].z - pp.z;
@@ -479,22 +480,34 @@ namespace
                        around[i].name[0] ? around[i].name : "?", around[i].eid, std::sqrt(dx * dx + dz * dz),
                        around[i].x, around[i].y, around[i].z, gs::dump::EffectActivity(around[i].ptr, 0x400));
             }
-            if (pick < 0) GS_LOG("[auto]   nothing marked within ten degrees of the crosshair");
+            if (pick < 0) GS_LOG("[auto]   nothing marked within fifteen degrees of the crosshair");
+            else
+                GS_LOG("[auto]   the crosshair has held that place for %u ms; a second earns a pin%s",
+                       g_heldSinceMs ? now - g_heldSinceMs : 0,
+                       gs::mapicon::PinNear(around[pick].x, around[pick].z, 8.0f) ? ", but it is pinned already" : "");
         }
 
-        // One pin, on the node the crosshair held for a second.
+        // One pin, on the place the crosshair held for a second. The hold
+        // is by position and not by object: session forty-six aimed at a
+        // patch of berry bushes and the nearest by bearing swapped between
+        // neighbours every pass, so a hold keyed on the object's id never
+        // reached a second.
         if (pick < 0)
         {
             g_heldEid = 0;
             g_heldSinceMs = 0;
         }
-        else if (around[pick].eid != g_heldEid)
+        else
         {
+            const float hx = around[pick].x - g_heldX, hz = around[pick].z - g_heldZ;
+            const bool samePlace = g_heldSinceMs && std::sqrt(hx * hx + hz * hz) <= 6.0f;
+            if (!samePlace) g_heldSinceMs = now;
             g_heldEid = around[pick].eid;
-            g_heldSinceMs = now;
+            g_heldX = around[pick].x;
+            g_heldZ = around[pick].z;
         }
-        else if (now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&
-                 !gs::mapicon::PinNear(around[pick].x, around[pick].z, 8.0f))
+        if (pick >= 0 && g_heldSinceMs && now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&
+            !gs::mapicon::PinNear(around[pick].x, around[pick].z, 8.0f))
         {
             g_cooldownUntil = now + 3000;
             const float dx = around[pick].x - pp.x, dz = around[pick].z - pp.z;
