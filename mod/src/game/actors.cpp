@@ -286,6 +286,25 @@ namespace
         }
     }
 
+    // The entity's ClientEffectActorComponent at block slot +0x60.
+    uintptr_t EffectComponent(uintptr_t e)
+    {
+        __try
+        {
+            const uintptr_t comps = Deref(e + kOff_Ent_Comps);
+            if (!comps) return 0;
+            const uintptr_t c = Deref(comps + 0x60);
+            if (!PtrLike(c)) return 0;
+            const uintptr_t vt = Deref(c);
+            const char* n = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+            return (n && strstr(n, "ClientEffectActorComponent")) ? c : 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
     // Is the reveal on this entity right now: the detect component's byte,
     // or for a gimmick without one, active custom render values.
     bool ReadLit(uintptr_t detectComp, uintptr_t gimmickComp, bool* out)
@@ -496,6 +515,7 @@ namespace gs::actors
                 ne.gimmickComp = GimmickComponent(e);
                 ne.gimmick = ne.gimmickComp != 0;
                 ne.detectComp = DetectComponent(e);
+                ne.effectComp = EffectComponent(e);
                 ++g_setN;
             }
             Entity& en = g_set[j];
@@ -580,6 +600,29 @@ namespace gs::actors
     {
         std::lock_guard<std::mutex> lock(g_setMutex);
         return g_lits;
+    }
+
+    int LitNear(float px, float py, float pz, Entity* out, int n)
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        int found = 0;
+        for (int i = 0; i < g_setN; ++i)
+        {
+            if (!g_set[i].lit) continue;
+            const float dx = g_set[i].x - px, dy = g_set[i].y - py, dz = g_set[i].z - pz;
+            const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+            int pos = found;
+            while (pos > 0)
+            {
+                const float ax = out[pos - 1].x - px, ay = out[pos - 1].y - py, az = out[pos - 1].z - pz;
+                if (std::sqrt(ax * ax + ay * ay + az * az) <= d) break;
+                if (pos < n) out[pos] = out[pos - 1];
+                --pos;
+            }
+            if (pos < n) out[pos] = g_set[i];
+            if (found < n) ++found;
+        }
+        return found;
     }
 
     int Snapshot(Entity* out, int n)

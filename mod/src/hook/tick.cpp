@@ -352,8 +352,9 @@ namespace
     uint32_t g_autoCooldownUntil = 0;
     int g_autoLogsLeft = 60;
     uint32_t g_autoLastLogMs = 0;
-    uintptr_t g_autoDumpEntity = 0;   // dumped again once the flash is off
-    uint32_t g_autoDumpEid = 0;
+    uintptr_t g_autoDumpEnts[3] = {0, 0, 0};   // dumped again once the flash is off
+    uint32_t g_autoDumpEids[3] = {0, 0, 0};
+    int g_autoDumpN = 0;
     uint32_t g_autoFlashOffMs = 0;
     int g_autoDumpsLeft = 4;
 
@@ -376,14 +377,19 @@ namespace
             g_autoEid = 0;
             g_autoSinceMs = 0;
             // The second dump, two seconds after the flash ended.
-            if (g_autoDumpEntity)
+            if (g_autoDumpN)
             {
                 if (!g_autoFlashOffMs) g_autoFlashOffMs = now;
                 else if (now - g_autoFlashOffMs > 2000)
                 {
-                    GS_LOG("[auto] flash off for two seconds; dumping eid %08X again", g_autoDumpEid);
-                    gs::dump::EntityComponents("off", g_autoDumpEntity, 0x200);
-                    g_autoDumpEntity = 0;
+                    for (int i = 0; i < g_autoDumpN; ++i)
+                    {
+                        char tag[24];
+                        _snprintf_s(tag, sizeof(tag), _TRUNCATE, "off%d", i + 1);
+                        GS_LOG("[auto] flash off for two seconds; dumping eid %08X again", g_autoDumpEids[i]);
+                        gs::dump::EntityComponents(tag, g_autoDumpEnts[i], 0x300);
+                    }
+                    g_autoDumpN = 0;
                     g_autoFlashOffMs = 0;
                 }
             }
@@ -414,24 +420,44 @@ namespace
                        std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy, c[i].x, c[i].y, c[i].z);
             if (n == 0)
             {
-                // Nothing lit near the view: what is there at all, for the record.
+                // Nothing lit near the view. Say what is there, say what is
+                // lit anywhere, and dump the effect components of the three
+                // nearest to the view; the flash-off pass dumps the same
+                // three, so the field that means "revealed" shows up in the
+                // diff. Session thirty-four: only the detect component's
+                // position and three effect-component floats moved, and none
+                // of them was the byte the static pass named.
                 gs::nearest::Candidate any[3];
                 const int m = CastView(v, 400.0f, 4.0f, 0.14f, false, any, 3, nullptr, 0);
                 for (int i = 0; i < m; ++i)
                     GS_LOG("[auto]   near the view, not lit: %s%s eid %08X at %.1f along, %.1f deg",
                            any[i].gimmick ? "gimmick " : "", any[i].cls, any[i].eid, any[i].along,
                            std::atan2(any[i].off, any[i].along) * 57.2958f);
-                // And a dump of the nearest, so the reveal state can be diffed
-                // against the flash-off dump if the byte turns out wrong.
+                gs::actors::Entity lit[4];
+                const int ln = gs::actors::LitNear(pp.x, pp.y, pp.z, lit, 4);
+                for (int i = 0; i < ln; ++i)
+                {
+                    const float dx = lit[i].x - pp.x, dz = lit[i].z - pp.z;
+                    GS_LOG("[auto]   lit anywhere: eid %08X %s at (%.1f, %.1f, %.1f), %.0f away",
+                           lit[i].eid, lit[i].gimmick ? "gimmick" : "actor", lit[i].x, lit[i].y, lit[i].z,
+                           std::sqrt(dx * dx + dz * dz));
+                }
                 static uint32_t lastDumpMs = 0;
-                if (m > 0 && g_autoDumpsLeft > 0 && now - lastDumpMs > 6000 && !g_autoDumpEntity)
+                if (m > 0 && g_autoDumpsLeft > 0 && now - lastDumpMs > 6000 && !g_autoDumpN)
                 {
                     lastDumpMs = now;
                     --g_autoDumpsLeft;
-                    GS_LOG("[auto] dumping eid %08X (%s) with the flash on", any[0].eid, any[0].cls);
-                    gs::dump::EntityComponents("on", any[0].entity, 0x200);
-                    g_autoDumpEntity = any[0].entity;
-                    g_autoDumpEid = any[0].eid;
+                    g_autoDumpN = m < 3 ? m : 3;
+                    for (int i = 0; i < g_autoDumpN; ++i)
+                    {
+                        g_autoDumpEnts[i] = any[i].entity;
+                        g_autoDumpEids[i] = any[i].eid;
+                        char tag[24];
+                        _snprintf_s(tag, sizeof(tag), _TRUNCATE, "on%d", i + 1);
+                        GS_LOG("[auto] dumping eid %08X (%s), %.1f deg off the view, with the flash on",
+                               any[i].eid, any[i].cls, std::atan2(any[i].off, any[i].along) * 57.2958f);
+                        gs::dump::EntityComponents(tag, any[i].entity, 0x300);
+                    }
                 }
             }
         }
