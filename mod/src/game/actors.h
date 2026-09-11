@@ -90,6 +90,11 @@ namespace gs::actors
                         float radius, float maxAngle, float minFromPlayer,
                         Entity* out, float* angles, int n, int* marked);
 
+    // How far the farthest marked node in the set stands from a point, flat.
+    // The log says it on every press so that a pin landing short can be told
+    // apart from a glint the game never put in the pools at all.
+    float MarkedReach(float px, float pz);
+
     // The entity carrying this id, from the set, or 0.
     uintptr_t ByEid(uint32_t eid);
 

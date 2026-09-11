@@ -43,6 +43,10 @@ namespace gs::aim
     // The FindDetectTargetTask hanging off the detect component, or 0.
     uintptr_t DetectTask();
 
+    // The two components themselves, for the probe that dumps them.
+    uintptr_t DetectComponent();
+    uintptr_t SpecialComponent();
+
     // The aim point the character control component keeps at +0x318, in the
     // sub-level's local space. Session seventeen: it moved when the flash was
     // aimed at a glint and sat 10.7 units from the player. Valid only when it

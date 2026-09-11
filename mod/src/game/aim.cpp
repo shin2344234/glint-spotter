@@ -161,6 +161,8 @@ namespace gs::aim
     void SetPlayerActor(uintptr_t actor) { g_player.store(actor); }
     void SetDetectComponent(uintptr_t comp) { g_detect.store(comp); }
     void SetSpecialComponent(uintptr_t comp) { g_special.store(comp); }
+    uintptr_t DetectComponent() { return g_detect.load(); }
+    uintptr_t SpecialComponent() { return g_special.load(); }
 
     bool FlashActive()
     {

@@ -44,6 +44,42 @@ namespace gs::dump
         }
     }
 
+    void Pointers(const char* tag, uintptr_t obj, size_t bytes)
+    {
+        __try
+        {
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), bytes)) return;
+            const auto* q = reinterpret_cast<const uintptr_t*>(obj);
+            const auto* u = reinterpret_cast<const uint32_t*>(obj);
+            for (size_t i = 0; (i + 1) * 8 <= bytes; ++i)
+            {
+                const uintptr_t v = q[i];
+                const size_t off = i * 8;
+                // An entity id is a dword whose top byte is 0xA0 for the player
+                // and 0xB0 for the world, so both halves of the qword are worth
+                // a look before it is judged as a pointer.
+                for (int half = 0; half < 2; ++half)
+                {
+                    const uint32_t e = u[i * 2 + half];
+                    const uint32_t top = e >> 24;
+                    if (top == 0xA0 || top == 0xB0)
+                        GS_LOG("[%s +%03zX] entity id %08X", tag, off + half * 4, e);
+                }
+                if (v < 0x10000 || (v & 7) != 0) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(v), 8)) continue;
+                const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(v);
+                const char* n = (vt >= 0x10000 && gs::rtti::Readable(reinterpret_cast<const void*>(vt), 8))
+                                    ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt))
+                                    : nullptr;
+                if (n) GS_LOG("[%s +%03zX] 0x%p is %s", tag, off, reinterpret_cast<void*>(v), n);
+                else GS_LOG("[%s +%03zX] 0x%p, no class", tag, off, reinterpret_cast<void*>(v));
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
     int EffectActivity(uintptr_t entity, size_t bytes)
     {
         __try

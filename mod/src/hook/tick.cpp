@@ -376,6 +376,8 @@ namespace
     // node and stayed put on the other three.
     uint32_t g_flashOnMs = 0;
     bool g_flashWas = false;
+    bool g_probedThisPress = false;
+    int g_flashProbesLeft = 3;
     uint32_t g_heldEid = 0;
     uint32_t g_heldSinceMs = 0;
     float g_heldX = 0, g_heldZ = 0;
@@ -423,6 +425,35 @@ namespace
         {
             g_flashWas = true;
             g_flashOnMs = now;
+            g_probedThisPress = false;
+        }
+
+        // What the game itself decided the flash lit. The detect component
+        // keeps a FindDetectTargetTask at +0x1D0, named by RTTI and never once
+        // read in fifty sessions, and the special mode component fills three
+        // pointer fields the moment the flash fires. The mod is still guessing
+        // which node is glinting from a bearing; one of these objects knows.
+        // Half a second after the press, so the task has run, three presses a
+        // session, read only.
+        if (!g_probedThisPress && g_flashProbesLeft > 0 && now - g_flashOnMs > 500)
+        {
+            g_probedThisPress = true;
+            --g_flashProbesLeft;
+            const uintptr_t task = gs::aim::DetectTask();
+            if (task)
+            {
+                GS_LOG("[flash] FindDetectTargetTask at 0x%p", reinterpret_cast<void*>(task));
+                gs::dump::Pointers("task", task, 0x200);
+                gs::dump::Object("taskhex", task, 0x200);
+            }
+            else
+            {
+                GS_LOG("[flash] no FindDetectTargetTask on the detect component");
+            }
+            if (const uintptr_t special = gs::aim::SpecialComponent())
+                gs::dump::Pointers("special", special, 0x200);
+            if (const uintptr_t detect = gs::aim::DetectComponent())
+                gs::dump::Pointers("detectp", detect, 0x400);
         }
         const gs::player::Pos pp = gs::player::Read();
         if (!pp.valid) return;
@@ -467,8 +498,9 @@ namespace
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
             GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked nodes loaded, %d of them in radius, "
-                   "%d within fifteen degrees of the crosshair",
-                   pp.x, pp.y, pp.z, gs::actors::PickupCount(), marked, n);
+                   "%d within fifteen degrees of the crosshair; the farthest marked node is %.0f metres out",
+                   pp.x, pp.y, pp.z, gs::actors::PickupCount(), marked, n,
+                   gs::actors::MarkedReach(pp.x, pp.z));
             for (int i = 0; i < n && i < 5; ++i)
             {
                 const float dx = around[i].x - pp.x, dz = around[i].z - pp.z;

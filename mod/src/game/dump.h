@@ -28,4 +28,15 @@ namespace gs::dump
     // attached to it, so this should rise when the flash lights it and fall
     // when the flash ends, and not move on its neighbours.
     int EffectActivity(uintptr_t entity, size_t bytes);
+
+    // Every pointer-like qword in `bytes` at `obj`, named by RTTI where the
+    // target carries a vtable, and every dword that reads as an entity id.
+    //
+    // For the question the mod still cannot answer: which object is glinting.
+    // Session fifty caught the player's special mode component filling three
+    // pointer fields the moment the flash fired, +0x98, +0xA8 and +0xE0, the
+    // last of them an IRefCounted, and its +0x40 taking the player's own
+    // entity id. Something there knows what the flash lit. This says what
+    // those fields point at instead of leaving them as truncated hex.
+    void Pointers(const char* tag, uintptr_t obj, size_t bytes);
 }

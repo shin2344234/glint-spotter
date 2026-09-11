@@ -883,6 +883,20 @@ namespace gs::actors
         return found;
     }
 
+    float MarkedReach(float px, float pz)
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        float far_ = 0.0f;
+        for (int i = 0; i < g_setN; ++i)
+        {
+            if (!g_set[i].pickup && !(g_set[i].gimmick && g_set[i].knowledge)) continue;
+            const float dx = g_set[i].x - px, dz = g_set[i].z - pz;
+            const float d = std::sqrt(dx * dx + dz * dz);
+            if (d > far_) far_ = d;
+        }
+        return far_;
+    }
+
     int MarkedOnBearing(float px, float pz, float ox, float oz, float ux, float uz,
                         float radius, float maxAngle, float minFromPlayer,
                         Entity* out, float* angles, int n, int* marked)
