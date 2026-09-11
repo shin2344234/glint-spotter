@@ -79,6 +79,35 @@ namespace
                         pl.x = p[0]; pl.y = p[1]; pl.z = p[2];
                         pl.record = static_cast<uint16_t>(i);
                         pl.element = static_cast<uint16_t>(e);
+                        pl.name[0] = 0;
+                        // The name. A pointer near the head of an element
+                        // leads to string descriptors, each a character
+                        // pointer, a length and a hash, repeating every 0x20
+                        // bytes. Session sixty-six read
+                        // "Mission_PororinVillage_Bell_All_Calphade" and
+                        // "Hernand_Bell" out of record 0 that way.
+                        for (uintptr_t k = 0; k + 8 <= 0x40 && !pl.name[0]; k += 8)
+                        {
+                            const uintptr_t pv = *reinterpret_cast<const uintptr_t*>(el + k);
+                            if (pv < 0x10000 || (pv & 7) != 0) continue;
+                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(pv), 16)) continue;
+                            const uintptr_t cs = *reinterpret_cast<const uintptr_t*>(pv);
+                            const uint32_t len = *reinterpret_cast<const uint32_t*>(pv + 8);
+                            if (cs < 0x10000 || len == 0 || len > 200) continue;
+                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(cs), len)) continue;
+                            size_t w = 0;
+                            bool ok = true;
+                            for (; w < len && w + 1 < sizeof(pl.name); ++w)
+                            {
+                                const char ch = *reinterpret_cast<const volatile char*>(cs + w);
+                                if (ch == 0) break;
+                                if (static_cast<unsigned char>(ch) < 0x20 ||
+                                    static_cast<unsigned char>(ch) > 0x7E) { ok = false; break; }
+                                pl.name[w] = ch;
+                            }
+                            pl.name[w] = 0;
+                            if (!ok || w < 2) pl.name[0] = 0;
+                        }
                     }
                 }
             }
@@ -144,6 +173,37 @@ namespace gs::lgso
             if (found < n) ++found;
         }
         return found;
+    }
+
+    void LogKinds()
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        // Distinct names, counted. Held in a small fixed table because this
+        // runs on the worker thread and should not allocate.
+        struct Kind { char name[56]; int count; uint16_t record; };
+        static Kind kinds[256];
+        int kn = 0;
+        int unnamed = 0;
+        for (int i = 0; i < g_n; ++i)
+        {
+            if (!g_places[i].name[0]) { ++unnamed; continue; }
+            int k = 0;
+            for (; k < kn; ++k) if (strcmp(kinds[k].name, g_places[i].name) == 0) break;
+            if (k == kn)
+            {
+                if (kn >= 256) continue;
+                strncpy_s(kinds[kn].name, sizeof(kinds[kn].name), g_places[i].name, _TRUNCATE);
+                kinds[kn].count = 0;
+                kinds[kn].record = g_places[i].record;
+                ++kn;
+            }
+            ++kinds[k].count;
+        }
+        GS_LOG("[lgso] %d distinct name(s) across %d placement(s), %d with no name at all",
+               kn, g_n, unnamed);
+        for (int k = 0; k < kn && k < 60; ++k)
+            GS_LOG("[lgso]   %5d  record %3u  %s", kinds[k].count, kinds[k].record, kinds[k].name);
+        if (kn > 60) GS_LOG("[lgso]   ... and %d more", kn - 60);
     }
 
     int Near(float px, float pz, Place* out, int n)

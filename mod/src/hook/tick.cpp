@@ -679,9 +679,10 @@ namespace
             --g_tableLogsLeft;
             const float dx = table[0].x - pp.x, dz = table[0].z - pp.z;
             GS_LOG("[auto] the table has %d placement(s) within four metres of the line; the nearest "
-                   "is record %u element %u at (%.1f, %.1f, %.1f), %.0f metres away",
-                   tableN, table[0].record, table[0].element, table[0].x, table[0].y, table[0].z,
-                   std::sqrt(dx * dx + dz * dz));
+                   "is record %u element %u \"%s\" at (%.1f, %.1f, %.1f), %.0f metres away",
+                   tableN, table[0].record, table[0].element,
+                   table[0].name[0] ? table[0].name : "unnamed",
+                   table[0].x, table[0].y, table[0].z, std::sqrt(dx * dx + dz * dz));
             for (int k = 1; k < tableN && k < 4; ++k)
                 GS_LOG("[auto]   then record %u element %u at (%.1f, %.1f, %.1f), %.0f metres",
                        table[k].record, table[k].element, table[k].x, table[k].y, table[k].z,
@@ -772,7 +773,7 @@ namespace
             chosen.eid = 0;
             chosen.how = "the game's own level gimmick table";
             _snprintf_s(chosen.name, sizeof(chosen.name), _TRUNCATE,
-                        "level gimmick %u.%u", table[0].record, table[0].element);
+                        "%s", table[0].name[0] ? table[0].name : "unnamed level gimmick");
             chosen.valid = true;
         }
         else if (byGlint)

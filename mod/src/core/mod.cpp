@@ -999,7 +999,7 @@ namespace
             {
                 lgsoProbed = true;
                 ProbeLevelGimmicks();
-                gs::lgso::Load();
+                if (gs::lgso::Load() > 0) gs::lgso::LogKinds();
             }
 
             // How long to wait before the next sweep. A sweep reads gigabytes

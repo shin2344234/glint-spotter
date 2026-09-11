@@ -44,7 +44,13 @@ namespace gs::lgso
         float x = 0, y = 0, z = 0;
         uint16_t record = 0;
         uint16_t element = 0;
+        char name[56]{};   // the element's own name, empty when it has none
     };
+
+    // Every distinct name in the table, with how many placements carry it.
+    // Printed once so the log says what kinds are in there and a filter can be
+    // written against real names rather than guesses.
+    void LogKinds();
 
     // Read the table. Cheap to call again: it returns what it has unless the
     // manager pointer has changed, which happens on a level transition.
