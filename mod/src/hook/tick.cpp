@@ -410,6 +410,7 @@ namespace
     int g_targetLogsLeft = 12;
     uint32_t g_targetLastMs = 0;
     int g_heldWinsLeft = 40;   // how many times the log says the target took the pick
+    int g_loadingLogsLeft = 4;
     uint32_t g_heldEid = 0;
     uint32_t g_heldSinceMs = 0;
     float g_heldX = 0, g_heldZ = 0;
@@ -498,6 +499,26 @@ namespace
         }
         const gs::player::Pos pp = gs::player::Read();
         if (!pp.valid) return;
+
+        // Not while the world is loading. Session fifty-three teleported
+        // between two glints and the player read (0.0, 0.6, -1.6) on the way
+        // through, with the entity set still holding the place he had left:
+        // "the farthest marked node is 11524 metres out". Two pins went onto
+        // the map at (15.2, 1.0, -5.6) and (2.4, 1.9, -5.7), which is nowhere.
+        // Real play coordinates in this game run to thousands of units, so a
+        // player within a hundred of the absolute origin is a placeholder.
+        if (std::fabs(pp.x) + std::fabs(pp.z) < 100.0f)
+        {
+            if (g_loadingLogsLeft > 0)
+            {
+                --g_loadingLogsLeft;
+                GS_LOG("[auto] the player reads (%.1f, %.1f, %.1f), which is the placeholder the game "
+                       "uses while a world loads; nothing is pinned until he is somewhere",
+                       pp.x, pp.y, pp.z);
+            }
+            g_heldSinceMs = 0;
+            return;
+        }
 
         // The node the crosshair is on: of every marked node the game has
         // loaded, the one whose bearing from the camera is nearest the view's,
@@ -665,6 +686,17 @@ namespace
             g_heldEid = chosen.eid;
             g_heldX = chosen.x;
             g_heldZ = chosen.z;
+        }
+        // Half a kilometre is past anything the crosshair can pick out, and a
+        // node that resolves farther than that resolved in the wrong frame.
+        const float chosenDist = chosen.valid
+            ? std::sqrt((chosen.x - pp.x) * (chosen.x - pp.x) + (chosen.z - pp.z) * (chosen.z - pp.z))
+            : 0.0f;
+        if (chosen.valid && chosenDist > 500.0f)
+        {
+            GS_LOG("[auto] \"%s\" resolved %0.f metres away, which is too far to be what the crosshair "
+                   "is on; not pinned", chosen.name, chosenDist);
+            chosen.valid = false;
         }
         if (chosen.valid && g_heldSinceMs && now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&
             !gs::mapicon::PinNear(chosen.x, chosen.z, 8.0f))
