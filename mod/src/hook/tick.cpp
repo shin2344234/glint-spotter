@@ -260,12 +260,25 @@ namespace
     // These can. If "N200" appears two hundred metres north and "E100" a
     // hundred metres east, the coordinate path is sound and the fault is the
     // pick. If all three land on the player, the fault is the call.
+    // Once per place. Session fifty-three calibrated at the first glint and
+    // then teleported, so the second half of the test had no pins of known
+    // offset to read the map against. Two hundred metres from the last one
+    // counts as somewhere else.
     bool g_calibrated = false;
+    float g_calX = 0, g_calZ = 0;
+
+    bool FarFrom(float x, float z, float fromX, float fromZ, float metres)
+    {
+        const float dx = x - fromX, dz = z - fromZ;
+        return std::sqrt(dx * dx + dz * dz) > metres;
+    }
 
     void Calibrate(const gs::player::Pos& pp)
     {
-        if (g_calibrated) return;
+        if (g_calibrated && !FarFrom(pp.x, pp.z, g_calX, g_calZ, 200.0f)) return;
         g_calibrated = true;
+        g_calX = pp.x;
+        g_calZ = pp.z;
         GS_LOG("[cal] placing three pins at known offsets from (%.1f, %.1f, %.1f): "
                "\"Me\" on you, \"N200\" 200 metres north, \"E100\" 100 metres east. "
                "Where they land says whether a pin goes where it is asked to.",
@@ -406,7 +419,9 @@ namespace
     bool g_flashWas = false;
     bool g_probedThisPress = false;
     int g_flashProbesLeft = 3;
-    int g_setListingsLeft = 2;
+    int g_setListingsLeft = 6;
+    bool g_setListedOnce = false;
+    float g_setListedX = 0, g_setListedZ = 0;
     int g_targetLogsLeft = 12;
     uint32_t g_targetLastMs = 0;
     int g_heldWinsLeft = 40;   // how many times the log says the target took the pick
@@ -553,11 +568,17 @@ namespace
                 n = gs::actors::MarkedOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
                                                 cap > 0.0f ? cap : 1.0e9f, 0.26f, 3.0f,
                                                 around, angles, 8, &marked);
-                // Once a session, on the first press: the whole gimmick set,
-                // named, so the log says whether the glint was in it.
-                if (g_setListingsLeft > 0 && now - g_flashOnMs > 700)
+                // The whole gimmick set, named, so the log says whether the
+                // glint was in it. Once per place: session fifty-three spent
+                // both its listings on the first glint and had none left for
+                // the one it teleported to.
+                if (g_setListingsLeft > 0 && now - g_flashOnMs > 700 &&
+                    (!g_setListedOnce || FarFrom(pp.x, pp.z, g_setListedX, g_setListedZ, 100.0f)))
                 {
                     --g_setListingsLeft;
+                    g_setListedOnce = true;
+                    g_setListedX = pp.x;
+                    g_setListedZ = pp.z;
                     gs::actors::LogGimmicks(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen);
                 }
                 if (now - g_flashOnMs > 700) Calibrate(pp);
