@@ -32,6 +32,11 @@ namespace gs::camera
     // The most recent this, or 0 before the first update.
     uintptr_t This();
 
+    // How many times the update has run. More than once per frame means
+    // more than one mode object is being updated, and the last one to run
+    // is the one This() holds, live or not.
+    uint64_t Calls();
+
     struct Pose
     {
         float pivot[3]{};

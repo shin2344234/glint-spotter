@@ -134,6 +134,44 @@ namespace gs::nearest
         return found;
     }
 
+    // The terrain height under a point, estimated from the entities around
+    // it: the four nearest within forty units in the ground plane, weighted
+    // by the inverse square of their distance. Session twenty-eight's walk
+    // wanted a sample within six units of the path and found none for two
+    // hundred units, then took the first thing below the ray. Objects far
+    // above the ray are not the ground under it and are left out.
+    bool TerrainHeight(const gs::actors::Entity* set, int total, float px, float py, float pz,
+                       float* h, int* used, uint32_t* eid)
+    {
+        struct S { float d2; float y; uint32_t eid; };
+        S best[4];
+        int n = 0;
+        for (int i = 0; i < total; ++i)
+        {
+            const float dx = set[i].x - px, dz = set[i].z - pz;
+            const float d2 = dx * dx + dz * dz;
+            if (d2 > 1600.0f) continue;
+            if (set[i].y > py + 12.0f || py - set[i].y > 80.0f) continue;
+            if (n == 4 && d2 >= best[3].d2) continue;
+            int pos = n < 4 ? n : 3;
+            while (pos > 0 && best[pos - 1].d2 > d2) { best[pos] = best[pos - 1]; --pos; }
+            best[pos] = {d2, set[i].y, set[i].eid};
+            if (n < 4) ++n;
+        }
+        if (n == 0) return false;
+        float wsum = 0, hsum = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            const float w = 1.0f / (best[i].d2 + 1.0f);
+            wsum += w;
+            hsum += w * best[i].y;
+        }
+        *h = hsum / wsum;
+        *used = n;
+        *eid = best[0].eid;
+        return true;
+    }
+
     bool GroundAlong(float ox, float oy, float oz, float fx, float fy, float fz, float maxT,
                      float* gx, float* gy, float* gz, float* t, uint32_t* sampleEid)
     {
@@ -142,33 +180,23 @@ namespace gs::nearest
         const int total = gs::actors::Snapshot(set, 4096);
         if (total == 0) return false;
 
-        float h = 0;
-        bool haveH = false;
-        uint32_t hEid = 0;
+        float nextLog = 25.0f;
         for (float tt = 1.0f; tt <= maxT; tt += 0.5f)
         {
             const float px = ox + fx * tt, py = oy + fy * tt, pz = oz + fz * tt;
-            // The nearest entity in the ground plane within six units.
-            float bestD2 = 36.0f;
-            for (int i = 0; i < total; ++i)
+            float h = 0;
+            int used = 0;
+            uint32_t eid = 0;
+            if (!TerrainHeight(set, total, px, py, pz, &h, &used, &eid)) continue;
+            if (tt >= nextLog)
             {
-                const float dx = set[i].x - px, dz = set[i].z - pz;
-                const float d2 = dx * dx + dz * dz;
-                // Below the ray and not far below: session twenty-seven took
-                // a height from something thirty units up a cliff.
-                if (d2 < bestD2 && set[i].y <= py + 1.0f && py - set[i].y < 40.0f)
-                {
-                    bestD2 = d2;
-                    h = set[i].y;
-                    hEid = set[i].eid;
-                    haveH = true;
-                }
+                nextLog += 25.0f;
+                GS_LOG("[mark]     terrain profile: %.0f out, ray at %.1f, ground about %.1f from %d sample(s)", tt, py, h, used);
             }
-            if (!haveH) continue;
-            if (py <= h + 0.2f)
+            if (py <= h + 0.3f)
             {
                 *gx = px; *gy = h; *gz = pz; *t = tt;
-                *sampleEid = hEid;
+                *sampleEid = eid;
                 return true;
             }
         }

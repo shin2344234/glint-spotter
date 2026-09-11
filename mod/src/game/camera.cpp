@@ -14,6 +14,7 @@
 // Shared with thunk.asm. The thunk writes gs_cameraThis on every call.
 extern "C" void* gs_cameraOriginal = nullptr;
 extern "C" void* volatile gs_cameraThis = nullptr;
+extern "C" volatile uint64_t gs_cameraCalls = 0;
 extern "C" void gs_CameraThunk();
 
 namespace
@@ -99,6 +100,7 @@ namespace gs::camera
     }
 
     uintptr_t This() { return reinterpret_cast<uintptr_t>(gs_cameraThis); }
+    uint64_t Calls() { return gs_cameraCalls; }
 
     Pose Read()
     {

@@ -24,6 +24,7 @@ EXTERN gs_OnMinimapTick:PROC
 EXTERN gs_minimapOriginal:QWORD
 EXTERN gs_cameraOriginal:QWORD
 EXTERN gs_cameraThis:QWORD
+EXTERN gs_cameraCalls:QWORD
 
 .code
 
@@ -52,6 +53,7 @@ gs_MinimapTickThunk ENDP
 
 gs_CameraThunk PROC
     mov     qword ptr [gs_cameraThis], rcx
+    inc     qword ptr [gs_cameraCalls]
     jmp     qword ptr [gs_cameraOriginal]
 gs_CameraThunk ENDP
 

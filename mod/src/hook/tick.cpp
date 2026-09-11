@@ -159,6 +159,15 @@ namespace
         if (pp.valid) GS_LOG("[player %llu] (%.3f, %.3f, %.3f)",
                              static_cast<unsigned long long>(g_samples), pp.x, pp.y, pp.z);
         gs::camera::LogSample(g_samples);
+        {
+            static uint64_t lastCalls = 0, lastTicks = 0;
+            const uint64_t calls = gs::camera::Calls(), ticks = g_count.load();
+            if (lastTicks && ticks > lastTicks)
+                GS_LOG("[cam %llu] update ran %.2f times per tick, this 0x%p", static_cast<unsigned long long>(g_samples),
+                       static_cast<double>(calls - lastCalls) / static_cast<double>(ticks - lastTicks),
+                       reinterpret_cast<void*>(gs::camera::This()));
+            lastCalls = calls; lastTicks = ticks;
+        }
 
         for (Extra& e : g_extras)
         {
@@ -253,6 +262,17 @@ namespace
         {
             v->fx = cam.fwd[0]; v->fy = cam.fwd[1]; v->fz = cam.fwd[2];
             v->camera = true;
+            // The crosshair ray leaves the camera, which sits `dist` behind
+            // the pivot and a little above it, not the player's eye. At a
+            // grazing pitch that height is tens of units on the ground.
+            // The pivot is in the sub-level's frame; the player's world
+            // minus local offset moves it to the map's.
+            if (cam.dist > 0.5f && cam.dist < 30.0f)
+            {
+                v->ox = cam.pivot[0] + (pp.x - pp.lx) - cam.fwd[0] * cam.dist;
+                v->oy = cam.pivot[1] + (pp.y - pp.ly) - cam.fwd[1] * cam.dist + 0.6f;
+                v->oz = cam.pivot[2] + (pp.z - pp.lz) - cam.fwd[2] * cam.dist;
+            }
             return true;
         }
         float fx = 0, fz = 0;
