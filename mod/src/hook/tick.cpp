@@ -584,7 +584,7 @@ namespace
                     g_setListedOnce = true;
                     g_setListedX = pp.x;
                     g_setListedZ = pp.z;
-                    gs::actors::LogGimmicks(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen);
+                    gs::actors::LogEntities(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen);
                 }
                 if (now - g_flashOnMs > 700) Survey(pp, around, angles, n);
                 // And what the game's own detect system is holding. This is

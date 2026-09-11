@@ -91,15 +91,19 @@ namespace gs::actors
                         float radius, float maxAngle, float minFromPlayer,
                         Entity* out, float* angles, int n, int* marked);
 
-    // Every gimmick in the set, named, with its distance and how far off the
-    // given bearing it sits, and whether the name filter counts it as marked.
+    // Every entity in the set, by how far off the given bearing it sits, with
+    // its class, its distance, and what the mod makes of it.
     //
-    // Session fifty-two is why: seven marked nodes out of ninety-six gimmicks,
-    // and the two that fell within fifteen degrees of the crosshair were both
-    // berry bushes twenty metres away, so the pin went to a berry bush. The
-    // log cannot say whether the glint was in the set under a name the filter
-    // throws away, or was never in the pools at all. This says which.
-    void LogGimmicks(float px, float pz, float ox, float oz, float ux, float uz);
+    // Session fifty-five is why it is every entity and not only the gimmicks.
+    // Seth marked the glint on the map: a hundred and nineteen metres north of
+    // him, the same one session forty-seven measured at a hundred and
+    // eighteen. The gimmick listing for that press reached seventy degrees off
+    // the crosshair and out to two hundred and sixty metres and held nothing
+    // between ninety and a hundred and fifty. The set had two hundred and
+    // fifty entities and eighty-eight of them were gimmicks, so the glint is
+    // either one of the other hundred and sixty-two or it is not in the pools
+    // at all. Those need different answers and this says which.
+    void LogEntities(float px, float pz, float ox, float oz, float ux, float uz);
 
     // How far the farthest marked node in the set stands from a point, flat.
     // The log says it on every press so that a pin landing short can be told

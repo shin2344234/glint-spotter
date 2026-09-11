@@ -896,20 +896,19 @@ namespace gs::actors
         return found;
     }
 
-    void LogGimmicks(float px, float pz, float ox, float oz, float ux, float uz)
+    void LogEntities(float px, float pz, float ox, float oz, float ux, float uz)
     {
         std::lock_guard<std::mutex> lock(g_setMutex);
         int shown = 0;
-        GS_LOG("[set] every gimmick the pools hold, by how far off the crosshair it sits:");
+        GS_LOG("[set] every entity the pools hold, by how far off the crosshair it sits:");
         // Smallest bearing error first, so the ones the crosshair could
         // plausibly be on come first and a long tail can be read or ignored.
-        for (int rank = 0; rank < 60; ++rank)
+        for (int rank = 0; rank < 120; ++rank)
         {
             int best = -1;
             float bestAngle = 0;
             for (int i = 0; i < g_setN; ++i)
             {
-                if (!g_set[i].gimmick) continue;
                 if (g_set[i].shown) continue;
                 const float dx = g_set[i].x - ox, dz = g_set[i].z - oz;
                 const float flat = std::sqrt(dx * dx + dz * dz);
@@ -923,15 +922,23 @@ namespace gs::actors
             Entity& e = g_set[best];
             e.shown = true;
             const float dx = e.x - px, dz = e.z - pz;
-            const bool candidate = e.pickup || !Machinery(e.name);
-            GS_LOG("[set]   %6.1f deg  %6.1f m  %-46s eid %08X  %s%s%s", bestAngle * 57.2958f,
-                   std::sqrt(dx * dx + dz * dz), e.name[0] ? e.name : "(no name)", e.eid,
-                   candidate ? "candidate" : "machinery", e.pickup ? ", on the name list" : "",
-                   e.knowledge ? ", knowledge" : "");
+            const char* cls = "?";
+            const uintptr_t vt = Deref(e.ptr);
+            if (vt)
+            {
+                const char* n = gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt));
+                if (n) cls = (n[0] == '.') ? n + 4 : n;
+            }
+            const char* what = !e.gimmick ? "not a gimmick"
+                               : (e.pickup ? "candidate, on the name list"
+                                           : (Machinery(e.name) ? "machinery" : "candidate"));
+            GS_LOG("[set]   %6.1f deg  %6.1f m  %-42s %-34s eid %08X  %s%s", bestAngle * 57.2958f,
+                   std::sqrt(dx * dx + dz * dz), e.name[0] ? e.name : "(no name)", cls, e.eid,
+                   what, e.knowledge ? ", knowledge" : "");
             ++shown;
         }
         for (int i = 0; i < g_setN; ++i) g_set[i].shown = false;
-        GS_LOG("[set] %d gimmick(s) listed of %d entities in the set", shown, g_setN);
+        GS_LOG("[set] %d entity(s) listed of %d in the set", shown, g_setN);
     }
 
     bool InSet(uintptr_t ptr)
