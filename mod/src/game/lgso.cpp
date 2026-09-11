@@ -189,6 +189,29 @@ namespace gs::lgso
         return found;
     }
 
+    bool NearestToLine(float ox, float oz, float ux, float uz, float maxRange,
+                       Place* out, float* along, float* perp, bool* refused)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        int best = -1;
+        float bestPerp = 0, bestAlong = 0;
+        for (int i = 0; i < g_n; ++i)
+        {
+            const float dx = g_places[i].x - ox, dz = g_places[i].z - oz;
+            const float a = dx * ux + dz * uz;
+            if (a < 1.0f || a > maxRange) continue;
+            const float p = std::fabs(dx * uz - dz * ux);
+            if (best >= 0 && p >= bestPerp) continue;
+            best = i; bestPerp = p; bestAlong = a;
+        }
+        if (best < 0) return false;
+        *out = g_places[best];
+        *along = bestAlong;
+        *perp = bestPerp;
+        *refused = !Worth(g_places[best].name);
+        return true;
+    }
+
     bool Worth(const char* name)
     {
         if (!name || !name[0]) return false;

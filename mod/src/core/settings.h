@@ -16,9 +16,10 @@
 //                 ; before the level gimmick table; off by default now.
 //   Guess=0       ; pin the node nearest the crosshair when the game has not
 //                 ; marked anything. Off: only what the game marks is pinned.
-//   Chord=LS+RS   ; controller buttons that place a mark, held together.
+//   Chord=RB+LB+A ; controller buttons that place a mark, held together.
 //                 ; Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START
-//   Hold=300      ; milliseconds the chord must be held before it fires
+//   Hold=0        ; milliseconds the chord must be held before it fires
+//   MiniPin=0     ; also copy each pin onto the minimap
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
 //                 ; may be and still count. Zero, the default, means none.
 //   Radius=0      ; optional cap in metres on how far a node can be. Zero,
@@ -71,17 +72,32 @@ namespace gs::Settings
         //
         // It stays as a key for anyone who wants their pins kept local.
         float reach = 0.0f;
-        // Both stick clicks, held for a third of a second.
+        // RB plus LB plus A, firing the moment all three are down.
         //
-        // The chord was RB plus LB plus A and it fired the instant all three
-        // were down. Those are three buttons the game itself uses, so a mark
-        // could land in the middle of a fight without anyone asking for one.
-        // Clicking both sticks together is not something combat asks for, and
-        // the hold means even that has to be deliberate.
+        // Build 0.35.0 moved this to both stick clicks with a third of a
+        // second's hold, on the reasoning that three buttons the game uses
+        // could fire a mark during a fight. Seth asked for it back the same
+        // evening, so back it goes: this is the chord his hands know.
         //
-        // XINPUT_GAMEPAD_LEFT_THUMB 0x0040, RIGHT_THUMB 0x0080.
-        uint16_t chord = 0x00C0;
-        uint32_t holdMs = 300;
+        // Both halves are still keys. Hold is what the sticks bought and it
+        // costs nothing to leave at zero; set it to 300 and the chord has to
+        // be deliberate.
+        //
+        // XINPUT_GAMEPAD_LEFT_SHOULDER 0x0100, RIGHT_SHOULDER 0x0200, A 0x1000.
+        uint16_t chord = 0x1300;
+        uint32_t holdMs = 0;
+
+        // A copy of each pin on the minimap, off by default.
+        //
+        // The idea was immediate feedback: a mark you can see without opening
+        // the map. It went in untested and the first session with it is the
+        // session Seth says the marking stopped working, which is enough to
+        // put it behind a key. The two surfaces share nothing the mod can see
+        // except the key id, and the world map call returns 1 every time while
+        // the minimap call returned a live object pointer once and 1 the next,
+        // so the two are not doing the same thing. Until that is understood
+        // the proven path is the only one on by default.
+        bool miniPin = false;
         // One press at each place pins every candidate inside the cone,
         // labelled with its distance, so the glint can be named by reading
         // one number off the map. Set Survey=0 once that is settled.

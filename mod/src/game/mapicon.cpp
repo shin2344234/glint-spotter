@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "core/settings.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
 #include "hook/vtable.h"
@@ -382,20 +383,27 @@ namespace gs::mapicon
                             nullptr, nullptr, nullptr);
         GS_LOG_OK("[pin #%llu] returned 0x%p", static_cast<unsigned long long>(n), r);
 
-        // And the same icon on the minimap, which is already on screen. Same
-        // arguments, same key, the other surface's own original slot.
+        // The same icon on the minimap, only when the ini asks.
+        //
+        // Its own key id, a hundred thousand above the world map's. The two
+        // calls shared one id in 0.36.0, and if the game keys icons by id
+        // alone then the second call was not adding a copy but moving the
+        // first one onto the other surface, which would take the pin off the
+        // map Seth was looking at. That is a guess about why a working
+        // feature stopped working, and a guess is reason enough to give the
+        // copy its own id and leave it switched off.
         void* mini = g_lastMiniRoot.load();
-        if (mini && g_orig[1])
+        if (gs::Settings::Get().miniPin && mini && g_orig[1])
         {
-            void* rm = g_orig[1](mini, &type, &key, &dword4, &float5, pos, label, name,
+            struct { int64_t id; uint8_t kind; uint8_t pad[7]; } miniKey{
+                100000 + static_cast<int64_t>(n), 0x15, {}};
+            void* rm = g_orig[1](mini, &type, &miniKey, &dword4, &float5, pos, label, name,
                                  reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
                                  reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
                                  nullptr, nullptr, nullptr);
-            GS_LOG("[pin #%llu] minimap copy returned 0x%p",
-                   static_cast<unsigned long long>(n), rm);
+            GS_LOG("[pin #%llu] minimap copy key=%lld returned 0x%p",
+                   static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
         }
-        else GS_LOG("[pin #%llu] no minimap root seen yet, world map only",
-                    static_cast<unsigned long long>(n));
         const int i = g_placedN.load();
         if (i < kMaxPins) { g_placed[i] = {x, z}; g_placedN.store(i + 1); }
         return r;

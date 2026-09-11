@@ -83,6 +83,23 @@ namespace gs::lgso
                   float maxPerp, float minFromPlayer, float maxRange,
                   Place* out, float* dists, int n, bool anyKind = false);
 
+    // The single placement closest to the view line, whatever it is called
+    // and however far off the line it sits.
+    //
+    // OnBearing answers "what is the crosshair on" and refuses everything
+    // else, which is right for placing a pin and useless for explaining why
+    // no pin was placed. Seth aimed at a glint, got nothing, and the log had
+    // nothing to say about it: no line for a table that found nothing, and
+    // the only message on offer talked about the old actor search. This is
+    // the near miss, so the next time it happens the log can say whether the
+    // aim was off, the filter refused it, or the table really has nothing
+    // there.
+    //
+    // Returns false when the table is empty. `perp` is metres off the line,
+    // `along` metres down it, `refused` whether the Kinds list turned it away.
+    bool NearestToLine(float ox, float oz, float ux, float uz, float maxRange,
+                       Place* out, float* along, float* perp, bool* refused);
+
     // The placements nearest a point, for the log.
     int Near(float px, float pz, Place* out, int n);
 

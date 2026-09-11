@@ -433,8 +433,10 @@ namespace
     int g_targetLogsLeft = 12;
     uint32_t g_targetLastMs = 0;
     int g_glintWinsLeft = 40;
-    int g_tableLogsLeft = 30;
+    int g_tableLogsLeft = 120;
     int g_quietLogsLeft = 20;
+    int g_dupLogsLeft = 20;
+    uint32_t g_dupLastMs = 0;
     uint32_t g_quietLastMs = 0;
     int g_lastGlintN = -1;
     int g_heldWinsLeft = 40;   // how many times the log says the target took the pick
@@ -712,13 +714,21 @@ namespace
             {
                 --g_quietLogsLeft;
                 g_quietLastMs = now;
-                GS_LOG("[auto] the game has marked nothing as a detect mode target, so nothing is "
-                       "pinned. The node the crosshair is nearest is \"%s\" %.1f metres away, and "
-                       "that is a guess; set Guess=1 in the ini to pin it anyway.",
-                       pick >= 0 ? (around[pick].name[0] ? around[pick].name : "?") : "nothing",
-                       pick >= 0 ? std::sqrt((around[pick].x - pp.x) * (around[pick].x - pp.x) +
-                                             (around[pick].z - pp.z) * (around[pick].z - pp.z))
-                                 : 0.0f);
+                // What the table nearly had, which is the part worth knowing.
+                gs::lgso::Place miss;
+                float missAlong = 0, missPerp = 0;
+                bool missRefused = false;
+                const float qlen = std::sqrt(v.fx * v.fx + v.fz * v.fz);
+                if (qlen > 1.0e-3f &&
+                    gs::lgso::NearestToLine(v.ox, v.oz, v.fx / qlen, v.fz / qlen, 1.0e9f,
+                                            &miss, &missAlong, &missPerp, &missRefused))
+                    GS_LOG("[auto] nothing pinned. The table's closest to the line is record %u "
+                           "element %u \"%s\", %.0f metres out and %.1f metres off the line%s",
+                           miss.record, miss.element, miss.name[0] ? miss.name : "unnamed",
+                           missAlong, missPerp,
+                           missRefused ? ", and the Kinds list refuses it" : "");
+                else
+                    GS_LOG("[auto] nothing pinned, and the table has nothing on this bearing at all");
             }
             pick = -1;
         }
@@ -889,7 +899,20 @@ namespace
                    chosen.name, chosenDist, ceiling);
             chosen.valid = false;
         }
-        if (chosen.valid && g_heldSinceMs && now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&
+        // A pin already within eight metres suppresses this one, and until
+        // now it did so in silence. That silence is indistinguishable from a
+        // broken feature: aim at a glint you pinned ten minutes ago, hold it,
+        // and the mod does nothing and says nothing.
+        const bool matured = chosen.valid && g_heldSinceMs && now - g_heldSinceMs >= 1000;
+        if (matured && now >= g_cooldownUntil && gs::mapicon::PinNear(chosen.x, chosen.z, 8.0f) &&
+            g_dupLogsLeft > 0 && now - g_dupLastMs > 3000)
+        {
+            --g_dupLogsLeft;
+            g_dupLastMs = now;
+            GS_LOG("[auto] \"%s\" is already pinned; the map has it from earlier this session",
+                   chosen.name);
+        }
+        if (matured && now >= g_cooldownUntil &&
             !gs::mapicon::PinNear(chosen.x, chosen.z, 8.0f))
         {
             g_cooldownUntil = now + 3000;
