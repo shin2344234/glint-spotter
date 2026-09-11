@@ -234,6 +234,17 @@ def quat_at(d, o):
     return q
 
 
+def quat_pos_at(d, o):
+    """A unit quaternion followed by a position, with no scale after it."""
+    q = quat_at(d, o)
+    if q is None or o + 28 > len(d):
+        return None
+    p = struct.unpack_from("<fff", d, o + 16)
+    if any(v != v or abs(v) > 1e7 for v in p):
+        return None
+    return p
+
+
 def transform_at(d, o):
     """quaternion, position, scale, or None."""
     q = quat_at(d, o)
@@ -284,38 +295,129 @@ def transform_runs(d, start=0):
     return out
 
 
-def placements(d):
-    """(prefab, world position, tile origin) by pairing in file order.
+def documents(d):
+    """Each PARC sub-document: its schema blocks and where its values start.
 
-    The identity string of an object comes BEFORE its field list, not after:
-    a level's first SceneObject block reads header, prefab path, field count,
-    fields. An earlier version of this file had the association off by one
-    because the prefab sits between one object's fields and the next object's
-    count and can be read either way.
+    A .palevel is a run of PARC documents. Each opens with the magic, then a
+    block header whose u16 at +18 says how many schema blocks follow, then
+    that many blocks of `identity string, field count, field list`. The
+    identity is a type name for a plain object and a prefab path for a placed
+    one, and it comes BEFORE the field list. Whatever follows the last block
+    is that document's values.
 
-    Pairing is by order, which is an assumption and not a proof. The counts
-    are printed so the assumption can be judged.
+    Counts verified: abyssruins_cd_0002 declares 10 and yields 10,
+    cd_waterfall_cave_0002 declares 40 and yields 40, and
+    graymane_camp_lv02_after declares 241 and yields 241.
     """
-    names = []
-    o = 0
-    n = len(d)
-    while o + 4 < n:
-        g = pstring(d, o)
-        if g:
-            if g[0].lower().endswith(".prefab"):
-                names.append((o, g[0]))
-            o = g[1]
-        else:
-            o += 1
-    runs = transform_runs(d)
     out = []
-    for i, (off, pos, sc, tiled) in enumerate(runs):
-        name = names[i][1] if i < len(names) else None
-        org = None
-        if tiled:
-            org = (pos[0] - tiled[0], pos[1] - tiled[1], pos[2] - tiled[2])
-        out.append((name, pos, org, off))
-    return out, len(names), len(runs)
+    at = 0
+    n = len(d)
+    while True:
+        k = d.find(b"PARC", at)
+        if k < 0:
+            break
+        h = d.find(MARKER, k, k + 64)
+        if h < 0:
+            at = k + 4
+            continue
+        count = u16(d, h + 18)
+        o = h + 20
+        blocks = []
+        ok = True
+        for _ in range(count):
+            g = pstring(d, o)
+            if not g:
+                ok = False
+                break
+            got = read_fields(d, g[1])
+            if not got:
+                ok = False
+                break
+            blk = Block(o, g[0], 0)
+            blk.fields = got[0]
+            blocks.append(blk)
+            o = got[1]
+        if ok and blocks:
+            out.append((k, blocks, o))
+        at = o if ok and blocks else k + 4
+    return out
+
+
+def string_table(d, o):
+    """The value region opens with an indexed string table, which is what an
+    IndexedStringA field indexes into and why it occupies one byte rather than
+    holding text. Returns where the table ends."""
+    n = len(d)
+    while o + 8 <= n:
+        g = pstring(d, o + 4)
+        if not g:
+            break
+        o = g[1]
+    return o
+
+
+def placements(d):
+    """(prefab, world position, tile origin, offset), in document order.
+
+    Association is by order and anchored on the data rather than computed from
+    field offsets. The value records are laid out in schema order, so walking
+    the blocks that declare a `_worldTransform` and taking the next Transform
+    that actually validates keeps names and positions in step without needing
+    every record's exact width, which the field sizes do not give: a
+    SceneObject's fields sum to 119 bytes while its records are wider, because
+    strings are indices into the table and some fields carry data the sizes do
+    not describe.
+
+    A block whose transform does not turn up inside `window` bytes is reported
+    as unplaced rather than paired with the next one along.
+    """
+    rows = []
+    unplaced = 0
+    for _, blocks, vstart in documents(d):
+        # The value region opens with the string table, whose end is not
+        # written down. Rather than guess it, the first block's transform is
+        # looked for across the whole region and the rest follow it in step.
+        o = vstart
+        first = True
+        for blk in blocks:
+            if not blk.field("_worldTransform"):
+                continue
+            found = None
+            # Objects sit far apart in the value region, each followed by its
+            # components, so the scan is not windowed. Blocks and transforms are
+            # both in file order, so taking the next one keeps them in step.
+            limit = len(d)
+            # A world transform is the one with a tiled twin forty bytes on
+            # whose position is the same point with the level's tile origin
+            # taken off. Components carry `_offsetTransform`s of their own that
+            # are the same shape, so without that test the walk picks up a
+            # mesh's local offset and calls it a placement.
+            p = o
+            while p + 80 <= limit:
+                t = transform_at(d, p)
+                if t:
+                    # TiledTransform is 44 bytes and does not end in a scale
+                    # the way Transform does, so the twin is checked on its
+                    # quaternion and position only.
+                    tiled = quat_pos_at(d, p + 40)
+                    if tiled:
+                        dx = t[1][0] - tiled[0] if False else t[1][0] - tiled[0]
+                        dz = t[1][2] - tiled[2]
+                        if abs(dx) > 1.0 or abs(dz) > 1.0:
+                            found = (p, t[1], tiled)
+                            break
+                p += 4
+            if not found:
+                unplaced += 1
+                continue
+            off, pos, tpos = found
+            org = None
+            if tpos:
+                org = (pos[0] - tpos[0], pos[1] - tpos[1], pos[2] - tpos[2])
+            rows.append((blk.type, pos, org, off))
+            o = off + (80 if tpos else 40)
+            first = False
+    return rows, unplaced
 
 
 def main():
@@ -361,8 +463,8 @@ def main():
         print("%d prefab(s)" % n)
 
     if a.positions:
-        rows, nnames, nruns = placements(d)
-        print("%d prefab path(s), %d transform(s)" % (nnames, nruns))
+        rows, unplaced = placements(d)
+        print("%d placement(s), %d block(s) whose transform was not found" % (len(rows), unplaced))
         for name, pos, org, off in rows:
             if a.grep and (not name or a.grep.lower() not in name.lower()):
                 continue
@@ -370,8 +472,7 @@ def main():
                   % (off, pos[0], pos[1], pos[2],
                      (name or "(unpaired)").rsplit("/", 1)[-1],
                      ("   tile origin (%.0f, %.0f, %.0f)" % org) if org else ""))
-        if nnames != nruns:
-            print("counts differ, so the order pairing is not trustworthy here")
+
     return 0
 
 
