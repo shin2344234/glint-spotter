@@ -1002,7 +1002,13 @@ extern "C" void gs_OnMinimapTick(void* self)
         // and that thing is as likely to be a bridge or a camp as a glint.
         {
             View sv;
-            if (gs::lgso::Count() == 0) gs::lgso::Load();
+            // Never loaded from here. Reading the table walks seventeen
+            // thousand records and takes about a second and a half, and this
+            // runs on the thread drawing the frame. The worker does it once
+            // at startup; a press before that says so and falls through.
+            if (gs::lgso::Count() == 0)
+                GS_LOG("[mark] the level gimmick table has not been read yet; wait for the line "
+                       "saying how many placements it holds");
             if (gs::lgso::Count() > 0 && ViewRay(pp, &sv))
             {
                 const float flen = std::sqrt(sv.fx * sv.fx + sv.fz * sv.fz);
