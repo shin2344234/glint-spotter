@@ -95,12 +95,14 @@ namespace
 
     // An entity: readable, with an id whose top byte says player or world
     // object. Master Looter's EntityLike.
+    //
+    // No VirtualQuery per entry: a thousand of those every pass made the game
+    // stutter in session twenty-one. The handler around the read is the guard.
     bool EntityLike(uintptr_t e)
     {
         __try
         {
-            if (e < 0x10000 || (e & 7) != 0) return false;
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(e), 0x100)) return false;
+            if (e < 0x10000 || (e & 7) != 0 || e > 0x00007FFFFFFFFFFFull) return false;
             const uint32_t id = *reinterpret_cast<const uint32_t*>(e + kOff_Ent_Eid);
             if (!id) return false;
             const uint8_t tag = static_cast<uint8_t>(id >> 24);
@@ -167,7 +169,6 @@ namespace
                 int misses = 0;
                 for (uint32_t i = 0; i < 8000 && n < cap; ++i, at += 8)
                 {
-                    if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 8)) break;
                     const uintptr_t e = *reinterpret_cast<const uintptr_t*>(at);
                     if (!EntityLike(e)) { if (++misses >= 16) break; continue; }
                     misses = 0;
@@ -182,14 +183,16 @@ namespace
         return n;
     }
 
+    bool PtrLike(uintptr_t p) { return p >= 0x10000 && (p & 7) == 0 && p <= 0x00007FFFFFFFFFFFull; }
+
     bool WorldPos(uintptr_t e, float* out)
     {
         __try
         {
-            const uintptr_t comps = Deref(e + kOff_Ent_Comps);
-            if (!comps) return false;
-            const uintptr_t tf = Deref(comps + kOff_Comps_Transform);
-            if (!tf || !gs::rtti::Readable(reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12)) return false;
+            const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(e + kOff_Ent_Comps);
+            if (!PtrLike(comps)) return false;
+            const uintptr_t tf = *reinterpret_cast<const uintptr_t*>(comps + kOff_Comps_Transform);
+            if (!PtrLike(tf)) return false;
             memcpy(out, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
             if (!std::isfinite(out[0]) || !std::isfinite(out[1]) || !std::isfinite(out[2])) return false;
             if (std::fabs(out[0]) + std::fabs(out[1]) + std::fabs(out[2]) > 1.0e6f) return false;
@@ -205,7 +208,7 @@ namespace
     {
         __try
         {
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(e + kOff_Ent_Eid), 4)) return 0;
+            if (!PtrLike(e)) return 0;
             return *reinterpret_cast<const uint32_t*>(e + kOff_Ent_Eid);
         }
         __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }

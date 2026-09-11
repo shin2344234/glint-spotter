@@ -50,10 +50,12 @@ namespace gs::nearest
             const float dx = e.x - px, dz = e.z - pz, dy = e.y - py;
             const float along = dx * fx + dz * fz;
             if (along < 0.5f || along > maxAlong) continue;
+            // Off the ray in all three axes. The ray is level at the height the
+            // caller gave, so an object a floor below is out of the beam even
+            // when it sits right under the line; session twenty-one pinned one.
             const float ox = dx - along * fx, oz = dz - along * fz;
-            const float off = std::sqrt(ox * ox + oz * oz);
+            const float off = std::sqrt(ox * ox + oz * oz + dy * dy);
             if (off > radius + spread * along) continue;
-            if (std::fabs(dy) > 20.0f) continue;
 
             Candidate cand;
             cand.entity = e.ptr;

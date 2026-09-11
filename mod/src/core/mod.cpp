@@ -12,6 +12,7 @@
 #include "game/player.h"
 #include "game/aim.h"
 #include "game/actors.h"
+#include "game/camera.h"
 #include "hook/pad.h"
 #include "hook/tick.h"
 #include "game/rtti.h"
@@ -62,8 +63,9 @@ namespace
     const char* const kKeywords[] = {
         "MapIcon", "MiniMap", "Minimap", "WorldMap", "DetectMode", "SpecialMode",
         "ClientDetectActorComponent", "ClientTransformSyncActorComponent",
-        "ClientActorManager",
+        "ClientActorManager", "PlayerCameraTPSMode",
     };
+    uintptr_t g_cameraVt = 0;
     uintptr_t g_managerVt = 0;
 
     const char* ShortName(const char* decorated)
@@ -168,6 +170,11 @@ namespace
             // still logged, because the argument lists in their names are how the
             // map icon event signature was read in the first place.
             t.hunt = ShortName(found[i].name)[0] != '?';
+            if (strcmp(found[i].name, ".?AVPlayerCameraTPSMode@pa@@") == 0)
+            {
+                g_cameraVt = found[i].vtableVa;
+                t.hunt = false;   // held through its update, not found by scan
+            }
             if (strcmp(found[i].name, ".?AVClientActorManager@pa@@") == 0)
             {
                 g_managerVt = found[i].vtableVa;
@@ -552,6 +559,11 @@ namespace
             wasDown = down;
             // RB + LB + A. XINPUT_GAMEPAD_LEFT_SHOULDER 0x0100, RIGHT_SHOULDER 0x0200, A 0x1000.
             if (gs::pad::ChordPressed(0x0100 | 0x0200 | 0x1000)) OnTrigger("RB+LB+A");
+            // The entity set, off the game's thread. Twice a second is plenty:
+            // an entity stays in the set twelve seconds after it was last seen.
+            static uint32_t lastRefresh = 0;
+            const uint32_t now = GetTickCount();
+            if (now - lastRefresh >= 500) { lastRefresh = now; gs::actors::Refresh(now); }
             Sleep(50);
         }
         return 0;
@@ -596,6 +608,8 @@ namespace
             GS_LOG("[tick] probe on: root fields that change are logged every 3 s");
         }
 
+        if (g_cameraVt) gs::camera::Install(g_cameraVt);
+        else GS_LOG_ERR("PlayerCameraTPSMode vtable not found; no camera this session");
         gs::pad::Init();
         g_key = cfg.key;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);

@@ -236,7 +236,7 @@ namespace gs::aim
         float v;
         __try { memcpy(&v, reinterpret_cast<const void*>(at), 4); }
         __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
-        if (!std::isfinite(v) || v > 1.0e6f || v < 0.0f) return false;
+        if (!std::isfinite(v) || v > 1.0e6f || v <= 0.0f) return false;
         *out = v;
         return true;
     }

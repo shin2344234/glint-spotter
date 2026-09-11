@@ -15,6 +15,7 @@
 #include "game/snapshot.h"
 #include "game/nearest.h"
 #include "game/actors.h"
+#include "game/camera.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
 extern "C" void* gs_minimapOriginal = nullptr;
@@ -177,11 +178,11 @@ namespace
     uint32_t g_autoSinceMs = 0;
     uint64_t g_lastRefreshTick = 0;
 
-    void PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp)
+    void PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp, float dedupe)
     {
-        if (gs::mapicon::PinNear(tx, tz, 8.0f))
+        if (gs::mapicon::PinNear(tx, tz, dedupe))
         {
-            GS_LOG("[mark] a pin already sits within 8 units of (%.1f, %.1f); not placing another", tx, tz);
+            GS_LOG("[mark] a pin already sits within %.0f units of (%.1f, %.1f); not placing another", dedupe, tx, tz);
             return;
         }
         void* root = g_worldRoot.load();
@@ -214,7 +215,7 @@ namespace
         float fx = 0, fz = 0;
         if (!pp.valid || !gs::nearest::ForwardFromQuat(pp.q, &fx, &fz)) return;
         gs::nearest::Candidate c[8];
-        const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y, pp.z, fx, fz, 40.0f, 1.5f, 0.08f, c, 8);
+        const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y + 1.6f, pp.z, fx, fz, 40.0f, 1.5f, 0.08f, c, 8);
 
         // While the flash is on, a line every two seconds saying what sits in
         // the beam, so the glint's class and flags can be read off the log.
@@ -246,7 +247,7 @@ namespace
         if (now - g_autoSinceMs < 1000 || now < g_autoCooldownUntil) return;
         g_autoCooldownUntil = now + 5000;
         GS_LOG("[auto] %s eid %08X held in the beam for a second at %.1f units", c[pick].cls, c[pick].eid, c[pick].along);
-        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, gimmick held in the beam", "Glint", pp);
+        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, gimmick held in the beam", "Glint", pp, 8.0f);
     }
 }
 
@@ -263,14 +264,23 @@ extern "C" void gs_OnMinimapTick(void* self)
     }
     if (g_probe.load() && (n % kSampleTicks) == 0) Probe(self);
 
-    // Every quarter second, merge what the manager is handing over now and
-    // give the automatic marker a look.
+    // Every quarter second, give the automatic marker a look. The entity
+    // set is refreshed on the key thread; session twenty-one's stutter was
+    // that walk running here.
     if (n - g_lastRefreshTick >= 15)
     {
         g_lastRefreshTick = n;
-        const uint32_t now = GetTickCount();
-        gs::actors::Refresh(now);
-        AutoMark(now);
+        AutoMark(GetTickCount());
+
+        // The camera object moves; the probe follows it.
+        static uintptr_t watchedCam = 0;
+        const uintptr_t cam = gs::camera::This();
+        if (cam != watchedCam)
+        {
+            if (watchedCam) gs::tick::DropProbe(reinterpret_cast<void*>(watchedCam));
+            if (cam) gs::tick::AddProbe("camera", reinterpret_cast<void*>(cam), 0x400);
+            watchedCam = cam;
+        }
     }
 
     // A mark asked for elsewhere lands here, on the thread that owns icons.
@@ -325,8 +335,9 @@ extern "C" void gs_OnMinimapTick(void* self)
                 gs::nearest::Candidate c[6];
                 // 60 units out, a beam 1.5 units wide at the player widening by
                 // 0.06 per unit, so 5 units wide at the far end.
-                const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y, pp.z, fx, fz,
+                const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y + 1.6f, pp.z, fx, fz,
                                                 60.0f, 1.5f, 0.06f, c, 6);
+                gs::camera::LogAtPress(2.0f * std::atan2(pp.q[1], pp.q[3]), pp.x, pp.y, pp.z, fx, fz);
                 GS_LOG("[mark] ray from (%.1f, %.1f, %.1f) along (%.3f, %.3f) over %d entities: %d hit(s)",
                        pp.x, pp.y, pp.z, fx, fz, gs::actors::Count(), n);
                 for (int i = 0; i < n; ++i)
@@ -375,7 +386,7 @@ extern "C" void gs_OnMinimapTick(void* self)
             }
         }
 
-        if (have) PlaceAt(tx, ty, tz, how, "Mark", pp);
+        if (have) PlaceAt(tx, ty, tz, how, "Mark", pp, 2.0f);
         else
         {
             GS_LOG("[mark] no target resolved, nothing placed");
