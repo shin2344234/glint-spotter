@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <atomic>
 #include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -679,7 +680,7 @@ namespace
                 {
                     gs::player::SetSpecialComponent(reinterpret_cast<void*>(special));
                     const gs::player::Pos probe = gs::player::Read();
-                    if (probe.valid)
+                    if (probe.valid && std::fabs(probe.x) + std::fabs(probe.z) > 1.0f)
                     {
                         done = true;
                         gs::tick::AddProbe("special", reinterpret_cast<void*>(special), 0x400);
@@ -717,10 +718,12 @@ namespace
                 t.object = h.object;
                 if (!Describe(t)) { t.object = nullptr; continue; }
                 // Every character has one of these. The player's is the one
-                // whose owner is the played body.
+                // whose owner is the played body. A player standing at the
+                // origin is the menu's placeholder, not the world's.
                 gs::player::SetSpecialComponent(t.object);
                 const gs::player::Pos probe = gs::player::Read();
-                if (!probe.valid || !gs::player::OwnerIsPlayedBody())
+                if (!probe.valid || !gs::player::OwnerIsPlayedBody() ||
+                    std::fabs(probe.x) + std::fabs(probe.z) <= 1.0f)
                 {
                     GS_LOG("  0x%p is a special mode component but not the player's, skipped", t.object);
                     gs::player::SetSpecialComponent(nullptr);

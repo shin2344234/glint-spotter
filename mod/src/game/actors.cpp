@@ -46,6 +46,7 @@ namespace
     uintptr_t g_slots[16];
     int g_slotN = 0;
     bool g_slotsScanned = false;
+    uint32_t g_lastScanMs = 0;
 
     std::mutex g_setMutex;
     gs::actors::Entity g_set[kSetMax];
@@ -647,11 +648,18 @@ namespace gs::actors
             GS_LOG("[actors] manager 0x%p offers no entities; looking at the other globals", reinterpret_cast<void*>(cur));
         }
 
-        if (!g_slotsScanned)
+        // The first look can come before the game has built a manager, and
+        // session forty-nine did exactly that: zero globals at startup, the
+        // answer latched, and the entity set stayed empty for the whole
+        // session. An empty answer is not an answer, so it is asked again.
+        if (!g_slotsScanned || (g_slotN == 0 && nowMs - g_lastScanMs > 3000))
         {
             g_slotsScanned = true;
+            g_lastScanMs = nowMs;
+            const int before = g_slotN;
             g_slotN = FindGlobals(vt, g_slots, 16);
-            GS_LOG("[actors] %d global(s) in the image hold a ClientActorManager", g_slotN);
+            if (g_slotN != before || g_slotN > 0)
+                GS_LOG("[actors] %d global(s) in the image hold a ClientActorManager", g_slotN);
         }
         if (g_slotN == 0) return false;
 
