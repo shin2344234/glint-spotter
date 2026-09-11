@@ -167,21 +167,32 @@ namespace
                 while (j > 0 && runs[j - 1] > v) { runs[j] = runs[j - 1]; --j; }
                 runs[j] = v;
             }
+            // Sixteen misses in a row ended a run in Master Looter, which only
+            // wanted what was near. Sessions twenty-six to thirty-one never
+            // had the far glint in the set, so a run now survives five hundred
+            // empty slots and the first two passes report what each yields.
+            static int statsLeft = 2;
             uintptr_t coveredTo = 0;
             for (int r = 0; r < runN && n < cap; ++r)
             {
                 if (runs[r] < coveredTo) continue;
                 uintptr_t at = runs[r];
                 int misses = 0;
-                for (uint32_t i = 0; i < 8000 && n < cap; ++i, at += 8)
+                uint32_t scanned = 0;
+                const int before = n;
+                for (uint32_t i = 0; i < 20000 && n < cap; ++i, at += 8)
                 {
+                    scanned = i + 1;
                     const uintptr_t e = *reinterpret_cast<const uintptr_t*>(at);
-                    if (!EntityLike(e)) { if (++misses >= 16) break; continue; }
+                    if (!EntityLike(e)) { if (++misses >= 512) break; continue; }
                     misses = 0;
                     out[n++] = e;
                 }
                 coveredTo = at;
+                if (statsLeft > 0)
+                    GS_LOG("[actors]   pool %d at 0x%p: %u slots walked, %d entities", r, reinterpret_cast<void*>(runs[r]), scanned, n - before);
             }
+            if (statsLeft > 0) --statsLeft;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -473,6 +484,14 @@ namespace gs::actors
             g_lastSaidMs = nowMs;
             GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d with a gimmick component, %d glinting",
                    n, dupes, noPos, g_setN, gimmicks, glints);
+            int shown = 0;
+            for (int i = 0; i < g_setN && shown < 3; ++i)
+                if (g_set[i].glint)
+                {
+                    ++shown;
+                    const float dx = g_set[i].x - pp.x, dz = g_set[i].z - pp.z;
+                    GS_LOG("[actors]   byte set on eid %08X at (%.1f, %.1f, %.1f), %.0f away", g_set[i].eid, g_set[i].x, g_set[i].y, g_set[i].z, std::sqrt(dx * dx + dz * dz));
+                }
         }
         return static_cast<uint32_t>(n);
     }

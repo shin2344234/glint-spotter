@@ -358,7 +358,7 @@ namespace
     uintptr_t g_autoDumpEntity = 0;   // dumped again once the flash is off
     uint32_t g_autoDumpEid = 0;
     uint32_t g_autoFlashOffMs = 0;
-    int g_autoDumpsLeft = 3;
+    int g_autoDumpsLeft = 8;
 
     int PickByAngle(const gs::nearest::Candidate* c, int n, float maxAngle)
     {
@@ -413,6 +413,31 @@ namespace
                 GS_LOG("[auto]   %s%s%s%s eid %08X at %.1f along, %.2f off, %.1f deg, %+.1f up", i == pick ? "PICK " : "",
                        c[i].glint ? "BYTE " : "", c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along, c[i].off,
                        std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy);
+            // Wider and farther: what sits within about eight degrees of the
+            // view out to four hundred units, nearest the view first. If the
+            // glint is an entity at all, it is in this list or the set lacks it.
+            gs::nearest::Candidate wide[6];
+            const int wn = CastView(v, 400.0f, 4.0f, 0.14f, false, wide, 6, nullptr, 0);
+            const int wbest = PickByAngle(wide, wn, 1.0f);
+            GS_LOG("[auto]   near the view, any range: %d", wn);
+            for (int i = 0; i < wn && i < 3; ++i)
+                GS_LOG("[auto]     %s%s%s eid %08X at %.1f along, %.1f deg, %+.1f up, (%.1f, %.1f, %.1f)",
+                       wide[i].glint ? "BYTE " : "", wide[i].gimmick ? "gimmick " : "", wide[i].cls, wide[i].eid, wide[i].along,
+                       std::atan2(wide[i].off, wide[i].along) * 57.2958f, wide[i].dy, wide[i].x, wide[i].y, wide[i].z);
+            // Dump the components of whatever is nearest the view, with the
+            // flash on, and remember it for the dump after the flash ends.
+            const gs::nearest::Candidate* watch = pick >= 0 ? &c[pick] : (wbest >= 0 ? &wide[wbest] : nullptr);
+            static uint32_t lastDumpMs = 0;
+            if (watch && g_autoDumpsLeft > 0 && now - lastDumpMs > 4000)
+            {
+                lastDumpMs = now;
+                --g_autoDumpsLeft;
+                GS_LOG("[auto] dumping eid %08X (%s) with the flash on, %.1f deg off the view", watch->eid, watch->cls,
+                       std::atan2(watch->off, watch->along) * 57.2958f);
+                gs::dump::EntityComponents("on", watch->entity, 0x200);
+                g_autoDumpEntity = watch->entity;
+                g_autoDumpEid = watch->eid;
+            }
         }
 
         if (pick < 0 || c[pick].eid == 0)
