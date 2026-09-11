@@ -13,6 +13,7 @@
 #include "game/player.h"
 #include "game/aim.h"
 #include "game/actors.h"
+#include "game/dump.h"
 #include "game/camera.h"
 #include "hook/pad.h"
 #include "hook/tick.h"
@@ -53,7 +54,22 @@ namespace
     const char* const essential[] = {
         "UIGamePlayControlRootWorldMap", "UIGamePlayControlRootMiniMap",
         "ClientSpecialModeActorComponent", "ClientMinimapActorComponent",
-        "ClientActorManager"};
+        "ClientActorManager",
+        // The game's own reflection tables declare
+        // pa::LevelGimmickSceneObjectData with _prefabPath and
+        // _worldTransform, held in a list on pa::LevelGimmickSceneObjectInfo
+        // and managed by pa::LevelGimmickSceneObjectInfoManager, whose vtable
+        // sits at RVA 0x056A35D8 on 1.0.0.2850. A database of every level
+        // gimmick's prefab and world position is exactly what the feature
+        // needs, and nothing else found on disk or in memory carries it.
+        //
+        // Static analysis could not reach it: that vtable has no code or data
+        // reference anywhere in the image, so the object is built through a
+        // template whose construction is inlined. That says nothing about
+        // whether the object exists at runtime, and the sweep finds objects by
+        // their vtable rather than by who points at them, which is how the
+        // actor manager was found in the first place.
+        "LevelGimmickSceneObject"};
 
     // Anything in the map icon and detect mode families. Both spellings of
     // minimap appear in this binary, so both are listed.
@@ -65,6 +81,7 @@ namespace
         "MapIcon", "MiniMap", "Minimap", "WorldMap", "DetectMode", "SpecialMode",
         "ClientDetectActorComponent", "ClientTransformSyncActorComponent",
         "ClientActorManager", "PlayerCameraTPSMode", "ClientGimmickActorComponent",
+        "LevelGimmickSceneObject", "DiscoveredLevelGimmick",
     };
     uintptr_t g_cameraVt = 0;
     uintptr_t g_managerVt = 0;
@@ -474,6 +491,7 @@ namespace
             const bool isCamera = strstr(t.info.name, "Camera") != nullptr &&
                                   ShortName(t.info.name)[0] != '?';
             const bool isManager = strcmp(t.info.name, ".?AVClientActorManager@pa@@") == 0;
+            const bool isLevelGimmick = strstr(t.info.name, "LevelGimmickSceneObject") != nullptr;
 
             size_t shown = 0;
             for (const gs::scan::Hit& h : hits)
@@ -490,6 +508,17 @@ namespace
                 {
                     gs::tick::AddProbe("special", t.object, 0x400);
                     gs::player::SetSpecialComponent(t.object);
+                }
+                else if (isLevelGimmick)
+                {
+                    // Whatever this turns out to be, the useful part is what it
+                    // points at. LevelGimmickSceneObjectInfo is supposed to own
+                    // a _levelGimmickSceneObjectDataList, and a list of
+                    // prefab-and-transform records is what to look for: a
+                    // pointer to an array, or a count beside one.
+                    GS_LOG("  [levelgimmick] %s at 0x%p", ShortName(t.info.name), t.object);
+                    gs::dump::Pointers("lgso", reinterpret_cast<uintptr_t>(t.object), 0x200);
+                    gs::dump::Object("lgsohex", reinterpret_cast<uintptr_t>(t.object), 0x200);
                 }
                 else if (isManager)
                 {
