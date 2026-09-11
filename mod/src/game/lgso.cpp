@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "core/settings.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
 #include "game/typescan.h"
@@ -160,6 +161,7 @@ namespace gs::lgso
             if (along < minFromPlayer || along > maxRange) continue;
             const float perp = std::fabs(dx * uz - dz * ux);
             if (perp > maxPerp) continue;
+            if (!Worth(g_places[i].name)) continue;
             const float fx = g_places[i].x - px, fz = g_places[i].z - pz;
             const float fromPlayer = std::sqrt(fx * fx + fz * fz);
             if (fromPlayer < minFromPlayer) continue;
@@ -173,6 +175,32 @@ namespace gs::lgso
             if (found < n) ++found;
         }
         return found;
+    }
+
+    bool Worth(const char* name)
+    {
+        if (!name || !name[0]) return false;
+        if (_strnicmp(name, "sector_", 7) == 0) return false;
+        const char* list = gs::Settings::Get().kinds;
+        if (!list[0]) return true;
+        char lower[64];
+        size_t i = 0;
+        for (; name[i] && i + 1 < sizeof(lower); ++i)
+            lower[i] = static_cast<char>(tolower(static_cast<unsigned char>(name[i])));
+        lower[i] = 0;
+        char want[64];
+        const char* p = list;
+        while (*p)
+        {
+            while (*p == ' ' || *p == ',') ++p;
+            size_t w = 0;
+            while (*p && *p != ',' && w + 1 < sizeof(want))
+                want[w++] = static_cast<char>(tolower(static_cast<unsigned char>(*p++)));
+            while (*p && *p != ',') ++p;
+            want[w] = 0;
+            if (w && strstr(lower, want)) return true;
+        }
+        return false;
     }
 
     void LogKinds()
@@ -199,11 +227,13 @@ namespace gs::lgso
             }
             ++kinds[k].count;
         }
-        GS_LOG("[lgso] %d distinct name(s) across %d placement(s), %d with no name at all",
-               kn, g_n, unnamed);
-        for (int k = 0; k < kn && k < 60; ++k)
-            GS_LOG("[lgso]   %5d  record %3u  %s", kinds[k].count, kinds[k].record, kinds[k].name);
-        if (kn > 60) GS_LOG("[lgso]   ... and %d more", kn - 60);
+        int worth = 0;
+        for (int i = 0; i < g_n; ++i) if (Worth(g_places[i].name)) ++worth;
+        GS_LOG("[lgso] %d distinct name(s) across %d placement(s), %d with no name at all; "
+               "%d placement(s) are worth a pin", kn, g_n, unnamed, worth);
+        for (int k = 0; k < kn; ++k)
+            GS_LOG("[lgso]   %5d  record %3u  %-46s %s", kinds[k].count, kinds[k].record,
+                   kinds[k].name, Worth(kinds[k].name) ? "" : "(refused)");
     }
 
     int Near(float px, float pz, Place* out, int n)

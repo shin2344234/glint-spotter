@@ -8,6 +8,9 @@
 //   Spy=1         ; log every map icon the game creates, through slot 170
 //   Mark=clue,artifact,...   ; node names worth a pin, matched anywhere in
 //                            ; the prefab path
+//   Kinds=        ; comma list of name fragments a level gimmick must match
+//                 ; to earn a pin. Empty, the default, accepts anything that
+//                 ; is not a bare level chunk.
 //   Survey=0      ; one press per place pins every candidate the old actor
 //                 ; search found, labelled by distance. A diagnostic from
 //                 ; before the level gimmick table; off by default now.
@@ -52,6 +55,17 @@ namespace gs::Settings
         // is how a bottle four metres away came to be marked as a glint a
         // hundred and nineteen metres off.
         bool guess = false;
+        // What a level gimmick must be called to earn a pin, as a comma list
+        // of fragments matched anywhere in the name, case insensitive. Empty
+        // means anything goes except the level chunks, which are rejected
+        // whatever this says.
+        //
+        // Session seventy-two named the glint Seth has been chasing since
+        // session forty-seven: "Challenge_Sealed_Artifact_Her". The two pins
+        // that landed on the wrong things that session were called
+        // "sector_-39_-17_sub_1_2" and "sector_-39_-17_sub_2_12", which are
+        // not objects at all but the level chunks the world is cut into.
+        char kinds[512] = "";
     };
 
     // True when `path` contains any of the Mark list's entries.

@@ -80,4 +80,13 @@ namespace gs::lgso
 
     // The placements nearest a point, for the log.
     int Near(float px, float pz, Place* out, int n);
+
+    // Is this name something worth a pin?
+    //
+    // A name beginning "sector_" is one of the chunks the world is cut into
+    // rather than an object, and pinning one puts a marker in the middle of a
+    // field. Those are always refused. Past that, the ini's Kinds list decides:
+    // empty accepts everything, otherwise the name has to contain one of its
+    // fragments.
+    bool Worth(const char* name);
 }
