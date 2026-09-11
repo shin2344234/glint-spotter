@@ -93,4 +93,10 @@ namespace gs::mapicon
     // The world map root the spy last saw a call on, or null. The tick uses
     // this when the scan has not located the object yet.
     void* LastWorldRoot();
+
+    // The minimap root, same idea. A pin goes on both surfaces: the world map
+    // because that is where a marker belongs, and the minimap because that is
+    // the one already on screen, so a mark is visible the moment it lands
+    // instead of the next time the player opens the map.
+    void* LastMiniRoot();
 }

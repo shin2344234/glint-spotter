@@ -16,8 +16,11 @@
 //                 ; before the level gimmick table; off by default now.
 //   Guess=0       ; pin the node nearest the crosshair when the game has not
 //                 ; marked anything. Off: only what the game marks is pinned.
-//   Reach=1200    ; how far out a level gimmick may be and still count as
-//                 ; the thing the crosshair is on.
+//   Chord=LS+RS   ; controller buttons that place a mark, held together.
+//                 ; Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START
+//   Hold=300      ; milliseconds the chord must be held before it fires
+//   Reach=0       ; optional ceiling in metres on how far out a level gimmick
+//                 ; may be and still count. Zero, the default, means none.
 //   Radius=0      ; optional cap in metres on how far a node can be. Zero,
 //                 ; the default, means everything the game has loaded, which
 //                 ; is already a few hundred metres and no more.
@@ -58,10 +61,27 @@ namespace gs::Settings
         // placement to within a fifth of a degree, so the pick was right and
         // only the ceiling was wrong.
         //
-        // Seth's requirement is the range a glint is visible at, four or
-        // five times a hundred and nineteen. Twelve hundred leaves room
-        // above that without letting the far side of the map in.
-        float reach = 1200.0f;
+        // Twelve hundred was the replacement and it lasted one build. The
+        // ceiling is gone: zero means the search runs as far as the table
+        // does, and the table is the whole map. Nothing about a placement
+        // nine kilometres away makes it a worse answer than one at nine
+        // hundred, because the test that picks it is distance from the line
+        // and the nearest one on the line still wins. A number here only
+        // ever waits to refuse something real.
+        //
+        // It stays as a key for anyone who wants their pins kept local.
+        float reach = 0.0f;
+        // Both stick clicks, held for a third of a second.
+        //
+        // The chord was RB plus LB plus A and it fired the instant all three
+        // were down. Those are three buttons the game itself uses, so a mark
+        // could land in the middle of a fight without anyone asking for one.
+        // Clicking both sticks together is not something combat asks for, and
+        // the hold means even that has to be deliberate.
+        //
+        // XINPUT_GAMEPAD_LEFT_THUMB 0x0040, RIGHT_THUMB 0x0080.
+        uint16_t chord = 0x00C0;
+        uint32_t holdMs = 300;
         // One press at each place pins every candidate inside the cone,
         // labelled with its distance, so the glint can be named by reading
         // one number off the map. Set Survey=0 once that is settled.

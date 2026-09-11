@@ -29,6 +29,26 @@ namespace gs::sig
     constexpr int kSlotUpdate     = 35;   // void __fastcall(this, float) on the world map
     constexpr int kSlotCreateIcon = 170;  // the map icon dispatcher
 
+    // The alert system root, which owns every on-screen message the game
+    // shows: toasts, region changes, item pickups, level ups.
+    //
+    // Slot 144 is the one that matters. It is 974 bytes at RVA 0x00F36100 and
+    // it names three strings outright, "Toast", "BountyHunter" and
+    // "TimerGauge", comparing each against a string it pulls out of its fourth
+    // argument. That argument is a list: a tag byte, a data pointer at +8, a
+    // count at +0x10, and entries of 0x18 bytes, walked until one has 0x0F in
+    // its first byte. So it is the entry point that turns "show an alert
+    // called X" into an actual widget, and a call with "Toast" in that list is
+    // a popup.
+    //
+    // What the list looks like filled in is what this build is for. The spy
+    // forwards every call unchanged and writes down what went past, which is
+    // exactly how slot 170 and the map pin were solved in sessions seven to
+    // ten.
+    constexpr uintptr_t kAlertRootVtable = 0x055B8AA8;
+    constexpr const char* kAlertRootClass = ".?AVUIGamePlayControlRootAlertSystem@uiCommonScript@pa@@";
+    constexpr int kSlotAlertCall = 144;   // of 168
+
     // Size the factory allocates for a root control (2760); a sanity bound.
     constexpr size_t kRootControlSize = 0xC48;
 

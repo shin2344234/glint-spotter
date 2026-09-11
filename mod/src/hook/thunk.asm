@@ -25,6 +25,8 @@ EXTERN gs_minimapOriginal:QWORD
 EXTERN gs_cameraOriginal:QWORD
 EXTERN gs_cameraThis:QWORD
 EXTERN gs_cameraCalls:QWORD
+EXTERN gs_OnAlert:PROC
+EXTERN gs_alertOriginal:QWORD
 
 .code
 
@@ -50,6 +52,43 @@ gs_MinimapTickThunk PROC
     pop     rcx
     jmp     qword ptr [gs_minimapOriginal]
 gs_MinimapTickThunk ENDP
+
+; The alert system's slot 144. Same idea as the minimap thunk and the same
+; reason: the signature is not known, so nothing is assumed about it. Every
+; register the ABI lets the game pass is saved, the notifier is called with the
+; four in registers plus a pointer to the caller's fifth argument, everything is
+; put back, and the original runs with its stack untouched.
+;
+; The fifth argument's address: on entry RSP points at the return address and
+; the first stack argument sits at RSP+40. Push RCX and subtract 176 and that
+; same slot is at RSP+224.
+;
+; Stack layout of the 176 bytes: the callee's shadow space at 0 to 31, the
+; notifier's fifth argument at 32, the saved registers from 40.
+gs_AlertThunk PROC
+    push    rcx
+    sub     rsp, 176
+    mov     [rsp+40], rdx
+    mov     [rsp+48], r8
+    mov     [rsp+56], r9
+    movups  [rsp+64], xmm0
+    movups  [rsp+80], xmm1
+    movups  [rsp+96], xmm2
+    movups  [rsp+112], xmm3
+    lea     rax, [rsp+224]
+    mov     [rsp+32], rax
+    call    gs_OnAlert
+    movups  xmm3, [rsp+112]
+    movups  xmm2, [rsp+96]
+    movups  xmm1, [rsp+80]
+    movups  xmm0, [rsp+64]
+    mov     r9, [rsp+56]
+    mov     r8, [rsp+48]
+    mov     rdx, [rsp+40]
+    add     rsp, 176
+    pop     rcx
+    jmp     qword ptr [gs_alertOriginal]
+gs_AlertThunk ENDP
 
 gs_CameraThunk PROC
     mov     qword ptr [gs_cameraThis], rcx

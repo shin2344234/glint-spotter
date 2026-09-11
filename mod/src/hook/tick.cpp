@@ -625,8 +625,9 @@ namespace
                 // second a pin needs never came. Three per cent is twelve
                 // metres at four hundred and twenty-seven at nine hundred,
                 // which is roughly how steady a crosshair is at those ranges.
+                const float reach = gs::Settings::Get().reach;
                 tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             8.0f, 5.0f, gs::Settings::Get().reach,
+                                             8.0f, 5.0f, reach > 0.0f ? reach : 1.0e9f,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
@@ -871,19 +872,21 @@ namespace
             g_heldX = chosen.x;
             g_heldZ = chosen.z;
         }
-        // The ceiling is the ini's Reach now, and it had to move. Half a
-        // kilometre was written down when the only glint anyone had measured
-        // sat a hundred and nineteen metres away, and session seventy-five
-        // caught it refusing the feature: the table found one placement on
-        // the line, the right kind of object, and the gate binned it eighty
-        // times because it was five hundred and ninety-eight metres out.
+        // There is no ceiling unless the ini asks for one. Half a kilometre
+        // was written down when the only glint anyone had measured sat a
+        // hundred and nineteen metres away, session seventy-five caught it
+        // refusing a correct pick at five hundred and ninety-eight, and the
+        // twelve hundred that replaced it was the same mistake with a bigger
+        // number. The pick is already decided by distance from the line, so
+        // a limit here does nothing but throw away right answers.
         const float chosenDist = chosen.valid
             ? std::sqrt((chosen.x - pp.x) * (chosen.x - pp.x) + (chosen.z - pp.z) * (chosen.z - pp.z))
             : 0.0f;
-        if (chosen.valid && chosenDist > gs::Settings::Get().reach)
+        const float ceiling = gs::Settings::Get().reach;
+        if (chosen.valid && ceiling > 0.0f && chosenDist > ceiling)
         {
             GS_LOG("[auto] \"%s\" resolved %0.f metres away, past the ini's Reach of %.0f; not pinned",
-                   chosen.name, chosenDist, gs::Settings::Get().reach);
+                   chosen.name, chosenDist, ceiling);
             chosen.valid = false;
         }
         if (chosen.valid && g_heldSinceMs && now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&
@@ -981,6 +984,60 @@ extern "C" void gs_OnMinimapTick(void* self)
         float tx = 0, ty = 0, tz = 0;
         bool have = false;
         const char* how = "";
+        char markLabel[16] = "Mark";
+
+        // The table answers first, and it answers at any range.
+        //
+        // Everything below this block reads the collision world, which the
+        // engine only keeps loaded in a box about a hundred and sixty metres
+        // across. That is why a press used to mark whatever was underfoot.
+        // The level gimmick table has no such limit: seventeen thousand
+        // placements over the whole map, read once from a fixed global.
+        // Session seventy-five proved the aim holds up out there, matching
+        // the camera yaw to a fifth of a degree against a placement five
+        // hundred and ninety-eight metres away.
+        //
+        // The Kinds filter is off here on purpose. Glint hunting needs it.
+        // A deliberate press is the player saying "that thing over there",
+        // and that thing is as likely to be a bridge or a camp as a glint.
+        {
+            View sv;
+            if (gs::lgso::Count() == 0) gs::lgso::Load();
+            if (gs::lgso::Count() > 0 && ViewRay(pp, &sv))
+            {
+                const float flen = std::sqrt(sv.fx * sv.fx + sv.fz * sv.fz);
+                if (flen > 1.0e-4f)
+                {
+                    gs::lgso::Place sight[4];
+                    float sightDist[4];
+                    const float reach = gs::Settings::Get().reach;
+                    const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oz,
+                                                       sv.fx / flen, sv.fz / flen,
+                                                       8.0f, 3.0f, reach > 0.0f ? reach : 1.0e9f,
+                                                       sight, sightDist, 4, true);
+                    if (sn > 0)
+                    {
+                        tx = sight[0].x; ty = sight[0].y; tz = sight[0].z;
+                        have = true;
+                        how = "the game's own level gimmick table";
+                        _snprintf_s(markLabel, sizeof(markLabel), _TRUNCATE, "%.0fm", sightDist[0]);
+                        GS_LOG("[mark] the table has %d placement(s) on the line; the nearest is "
+                               "record %u element %u \"%s\" at (%.1f, %.1f, %.1f), %.0f metres out",
+                               sn, sight[0].record, sight[0].element,
+                               sight[0].name[0] ? sight[0].name : "unnamed",
+                               tx, ty, tz, sightDist[0]);
+                        for (int k = 1; k < sn; ++k)
+                            GS_LOG("[mark]   behind it, record %u element %u at %.0f metres",
+                                   sight[k].record, sight[k].element, sightDist[k]);
+                    }
+                    else
+                    {
+                        GS_LOG("[mark] nothing in the whole table sits on the line; falling back "
+                               "to the collision world, which reaches about eighty metres");
+                    }
+                }
+            }
+        }
 
         // The game's own aim field, logged when present. Populated in session
         // seventeen and zero in eighteen and nineteen, so it is a hint, not
@@ -993,7 +1050,9 @@ extern "C" void gs_OnMinimapTick(void* self)
         gs::camera::LogAtPress(2.0f * std::atan2(pp.q[1], pp.q[3]));
 
         View v;
-        if (!gs::actors::Ready())
+        if (have)
+            GS_LOG("[mark] the table answered, so the world ray is not cast");
+        else if (!gs::actors::Ready())
             GS_LOG("[mark] actor manager not located yet, no ray");
         else if (gs::actors::Count() == 0)
             GS_LOG("[mark] actor set is empty, no ray");
@@ -1151,7 +1210,7 @@ extern "C" void gs_OnMinimapTick(void* self)
             }
         }
 
-        if (have) PlaceAt(tx, ty, tz, how, "Mark", pp, 2.0f);
+        if (have) PlaceAt(tx, ty, tz, how, markLabel, pp, 2.0f);
         else GS_LOG("[mark] no target resolved, nothing placed");
         (void)g_markX; (void)g_markZ; (void)g_markLabel;
     }

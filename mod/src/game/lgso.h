@@ -74,9 +74,14 @@ namespace gs::lgso
     //
     // `px, pz` is the player, `ox, oz` the eye, `ux, uz` the unit view bearing.
     // `dists` receives each kept placement's distance along the ray.
+    //
+    // `anyKind` turns the Kinds filter off. Glint hunting wants the filter:
+    // the flash names one thing and a bonfire is not it. A deliberate press
+    // wants the opposite, because the player is pointing at a ruin or a camp
+    // or a bridge and asking for that, and the table holds all of it.
     int OnBearing(float px, float pz, float ox, float oz, float ux, float uz,
                   float maxPerp, float minFromPlayer, float maxRange,
-                  Place* out, float* dists, int n);
+                  Place* out, float* dists, int n, bool anyKind = false);
 
     // The placements nearest a point, for the log.
     int Near(float px, float pz, Place* out, int n);

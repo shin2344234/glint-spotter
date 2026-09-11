@@ -149,7 +149,7 @@ namespace gs::lgso
 
     int OnBearing(float px, float pz, float ox, float oz, float ux, float uz,
                   float maxPerp, float minFromPlayer, float maxRange,
-                  Place* out, float* dists, int n)
+                  Place* out, float* dists, int n, bool anyKind)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         int found = 0;
@@ -162,10 +162,18 @@ namespace gs::lgso
             // Scaled, not flat. A fixed tolerance is generous up close and
             // impossible at range, and the crosshair's own steadiness works
             // the other way round.
+            // The cone widens with range because a crosshair is steady in
+            // degrees, not metres, but it stops widening at thirty. Without a
+            // distance ceiling three per cent would be a hundred and fifty
+            // metres across at five kilometres, which is wide enough to catch
+            // something the player cannot see and call it the answer. Thirty
+            // metres is reached at a kilometre and holds from there.
             const float perp = std::fabs(dx * uz - dz * ux);
-            const float allow = along * 0.03f > maxPerp ? along * 0.03f : maxPerp;
+            float allow = along * 0.03f;
+            if (allow < maxPerp) allow = maxPerp;
+            if (allow > 30.0f) allow = 30.0f;
             if (perp > allow) continue;
-            if (!Worth(g_places[i].name)) continue;
+            if (!anyKind && !Worth(g_places[i].name)) continue;
             const float fx = g_places[i].x - px, fz = g_places[i].z - pz;
             const float fromPlayer = std::sqrt(fx * fx + fz * fz);
             if (fromPlayer < minFromPlayer) continue;

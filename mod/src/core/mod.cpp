@@ -9,6 +9,7 @@
 
 #include "core/log.h"
 #include "core/settings.h"
+#include "game/alert.h"
 #include "game/mapicon.h"
 #include "game/player.h"
 #include "game/aim.h"
@@ -30,6 +31,8 @@ namespace
     HANDLE g_thread = nullptr;
     HANDLE g_keyThread = nullptr;
     uint32_t g_key = 0x91;
+    uint16_t g_chord = 0x00C0;
+    uint32_t g_chordHold = 300;
     void* g_self = nullptr;
 
     // The keyword sweep finds 104 classes on build 2.01.00, so a cap of 48 was
@@ -339,6 +342,7 @@ namespace
 
     uintptr_t g_worldVt = 0;
     uintptr_t g_miniVt = 0;
+    uintptr_t g_alertVt = 0;
 
     void Discover()
     {
@@ -409,6 +413,7 @@ namespace
         const Expect expected[] = {
             {gs::sig::kWorldMapVtable, gs::sig::kWorldMapClass},
             {gs::sig::kMiniMapVtable,  gs::sig::kMiniMapClass},
+            {gs::sig::kAlertRootVtable, gs::sig::kAlertRootClass},
         };
         for (const Expect& e : expected)
         {
@@ -436,6 +441,7 @@ namespace
             // Only a vtable the running game has just named gets hooked.
             if (vt && e.rva == gs::sig::kWorldMapVtable) g_worldVt = vt;
             if (vt && e.rva == gs::sig::kMiniMapVtable)  g_miniVt = vt;
+            if (vt && e.rva == gs::sig::kAlertRootVtable) g_alertVt = vt;
         }
 
         // The gimmick component's vtable, so the entity set can find the
@@ -808,8 +814,8 @@ namespace
             const bool down = (GetAsyncKeyState(static_cast<int>(g_key)) & 0x8000) != 0;
             if (down && !wasDown) OnTrigger("key");
             wasDown = down;
-            // RB + LB + A. XINPUT_GAMEPAD_LEFT_SHOULDER 0x0100, RIGHT_SHOULDER 0x0200, A 0x1000.
-            if (gs::pad::ChordPressed(0x0100 | 0x0200 | 0x1000)) OnTrigger("RB+LB+A");
+            // Whatever the ini's Chord names, held for Hold milliseconds.
+            if (gs::pad::ChordHeld(g_chord, g_chordHold)) OnTrigger("the pad chord");
             // The entity set, off the game's thread. Twice a second is plenty:
             // an entity stays in the set twelve seconds after it was last seen.
             static uint32_t lastRefresh = 0;
@@ -854,6 +860,12 @@ namespace
         {
             GS_LOG("spy: off in the ini, the vtables are untouched");
         }
+        // The alert system, watched on the same terms. Seth wants a popup
+        // saying a glint has been marked; the game already shows popups and
+        // this is where they come from. One session of them going past says
+        // what a call of our own has to look like.
+        if (cfg.spy && g_alertVt) gs::alert::InstallSpy(g_alertVt);
+        else if (cfg.spy) GS_LOG_ERR("[alert] the alert root vtable was not found; no popup groundwork this session");
         // The per-frame tick on the game's thread, stacked on the minimap root's
         // update, with the diff probe on for this discovery session.
         if (gs::tick::Install(g_miniVt))
@@ -866,8 +878,12 @@ namespace
         else GS_LOG_ERR("PlayerCameraTPSMode vtable not found; no camera this session");
         gs::pad::Init();
         g_key = cfg.key;
+        g_chord = cfg.chord;
+        g_chordHold = cfg.holdMs;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
-        GS_LOG("press %s (VK %02X) or RB+LB+A with the flash aimed at a glint to pin the glint", gs::Settings::KeyName(cfg.key), cfg.key);
+        GS_LOG("press %s (VK %02X), or hold the pad chord 0x%04X for %lu ms, to mark whatever the "
+               "crosshair is on", gs::Settings::KeyName(cfg.key), cfg.key, cfg.chord,
+               static_cast<unsigned long>(cfg.holdMs));
 
         // Early passes hunt for something that may not exist yet, so they come
         // quickly. Once everything is in hand a tick is one pointer read each and

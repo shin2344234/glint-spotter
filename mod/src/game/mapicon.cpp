@@ -45,6 +45,7 @@ namespace
     char g_names[kMaxNames][64];
     size_t g_nameCount = 0;
     std::atomic<void*> g_lastWorldRoot{nullptr};
+    std::atomic<void*> g_lastMiniRoot{nullptr};
 
     bool NewName(const char* name)
     {
@@ -140,6 +141,7 @@ namespace
             if (c.ok) fresh = NewName(c.name8);
         }
         if (surface == 0) g_lastWorldRoot.store(c.self);
+        else g_lastMiniRoot.store(c.self);
         if (n == 1) GS_LOG("[spy %s] calls arrive on thread %lu", surface == 0 ? "world" : "mini", GetCurrentThreadId());
 
         const char* label = surface == 0 ? "world" : "mini";
@@ -379,6 +381,21 @@ namespace gs::mapicon
                             reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
                             nullptr, nullptr, nullptr);
         GS_LOG_OK("[pin #%llu] returned 0x%p", static_cast<unsigned long long>(n), r);
+
+        // And the same icon on the minimap, which is already on screen. Same
+        // arguments, same key, the other surface's own original slot.
+        void* mini = g_lastMiniRoot.load();
+        if (mini && g_orig[1])
+        {
+            void* rm = g_orig[1](mini, &type, &key, &dword4, &float5, pos, label, name,
+                                 reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
+                                 reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
+                                 nullptr, nullptr, nullptr);
+            GS_LOG("[pin #%llu] minimap copy returned 0x%p",
+                   static_cast<unsigned long long>(n), rm);
+        }
+        else GS_LOG("[pin #%llu] no minimap root seen yet, world map only",
+                    static_cast<unsigned long long>(n));
         const int i = g_placedN.load();
         if (i < kMaxPins) { g_placed[i] = {x, z}; g_placedN.store(i + 1); }
         return r;
@@ -398,6 +415,7 @@ namespace gs::mapicon
     int PinCount() { return g_placedN.load(); }
 
     void* LastWorldRoot() { return g_lastWorldRoot.load(); }
+    void* LastMiniRoot() { return g_lastMiniRoot.load(); }
 
     bool RequestReplay()
     {

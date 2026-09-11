@@ -33,6 +33,38 @@ namespace
         if (b != s) memmove(s, b, strlen(b) + 1);
     }
 
+    // Controller buttons by name, joined with + or a comma. Case does not
+    // matter and anything unrecognised is ignored, which is logged by the
+    // caller when the whole string names nothing.
+    uint16_t ChordBits(const char* s)
+    {
+        struct Named { const char* name; uint16_t bit; };
+        static const Named kButtons[] = {
+            {"UP", 0x0001}, {"DOWN", 0x0002}, {"LEFT", 0x0004}, {"RIGHT", 0x0008},
+            {"START", 0x0010}, {"BACK", 0x0020}, {"LS", 0x0040}, {"RS", 0x0080},
+            {"LB", 0x0100}, {"RB", 0x0200}, {"A", 0x1000}, {"B", 0x2000},
+            {"X", 0x4000}, {"Y", 0x8000},
+        };
+        uint16_t bits = 0;
+        char word[16];
+        size_t w = 0;
+        for (const char* p = s;; ++p)
+        {
+            if (*p && *p != '+' && *p != ',' && *p != ' ')
+            {
+                if (w + 1 < sizeof(word)) word[w++] = static_cast<char>(toupper(static_cast<unsigned char>(*p)));
+                continue;
+            }
+            word[w] = 0;
+            if (w)
+                for (const Named& b : kButtons)
+                    if (strcmp(word, b.name) == 0) { bits |= b.bit; break; }
+            w = 0;
+            if (!*p) break;
+        }
+        return bits;
+    }
+
     void WriteDefaults(const std::wstring& path)
     {
         FILE* f = nullptr;
@@ -52,7 +84,13 @@ namespace
         fputs("gather,ore,herb,flower,mushroom,useartifact,puzzle_attach,dial,crank,lever\n", f);
         fputs("; An optional cap in metres on how far a node can be. Zero means\n", f);
         fputs("; everything the game has loaded around you, which is the natural limit.\n", f);
-        fputs("Reach=1200\n", f);
+        fputs("; The controller buttons that place a mark, held together for Hold\n", f);
+        fputs("; milliseconds. Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START.\n", f);
+        fputs("Chord=LS+RS\n", f);
+        fputs("Hold=300\n", f);
+        fputs("; An optional ceiling in metres on how far out a level gimmick may be\n", f);
+        fputs("; and still count as the thing the crosshair is on. Zero means none.\n", f);
+        fputs("Reach=0\n", f);
         fputs("Radius=0\n", f);
         fclose(f);
     }
@@ -114,10 +152,23 @@ namespace gs::Settings
             {
                 g_values.survey = atoi(val) != 0;
             }
+            else if (_stricmp(key, "Chord") == 0)
+            {
+                const uint16_t bits = ChordBits(val);
+                if (bits) g_values.chord = bits;
+                else GS_LOG_ERR("settings: Chord=%s named no button I know, keeping the default", val);
+            }
+            else if (_stricmp(key, "Hold") == 0)
+            {
+                const long h = atol(val);
+                if (h >= 0 && h <= 5000) g_values.holdMs = static_cast<uint32_t>(h);
+                else GS_LOG_ERR("settings: Hold=%s is out of range, keeping %lu", val,
+                                static_cast<unsigned long>(g_values.holdMs));
+            }
             else if (_stricmp(key, "Reach") == 0)
             {
                 const float r = static_cast<float>(atof(val));
-                if (r >= 50.0f && r <= 5000.0f) g_values.reach = r;
+                if (r == 0.0f || (r >= 50.0f && r <= 20000.0f)) g_values.reach = r;
                 else GS_LOG_ERR("settings: Reach=%s is out of range, keeping %.0f", val, g_values.reach);
             }
             else if (_stricmp(key, "Radius") == 0)
@@ -139,7 +190,13 @@ namespace gs::Settings
         else
             GS_LOG("settings: Key=%02X (%s), Spy=%d, no radius cap: everything the game has loaded",
                    g_values.key, KeyName(g_values.key), g_values.spy ? 1 : 0);
-        GS_LOG("settings: Reach=%.0f metres, Kinds=%s", g_values.reach, g_values.kinds);
+        if (g_values.reach > 0.0f)
+            GS_LOG("settings: Reach=%.0f metres, Chord=0x%04X held %lu ms", g_values.reach,
+                   g_values.chord, static_cast<unsigned long>(g_values.holdMs));
+        else
+            GS_LOG("settings: no reach ceiling, Chord=0x%04X held %lu ms", g_values.chord,
+                   static_cast<unsigned long>(g_values.holdMs));
+        GS_LOG("settings: Kinds=%s", g_values.kinds);
         GS_LOG("settings: Mark=%s", g_values.mark);
         return g_values;
     }

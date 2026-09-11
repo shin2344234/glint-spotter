@@ -12,9 +12,16 @@ namespace gs::pad
 {
     bool Init();
 
-    // True on the frame the chord goes from not-all-held to all-held. A held
-    // chord fires once. Buttons are XINPUT_GAMEPAD_* bits.
-    bool ChordPressed(uint16_t buttons);
+    // True once, after the chord has been held unbroken for `holdMs`.
+    //
+    // The old version fired the instant every button went down, on RB, LB and
+    // A, which are three buttons the game itself uses. Any moment those three
+    // overlapped during play was a mark nobody asked for. A hold costs the
+    // player a third of a second and costs the game nothing, because no combat
+    // input lasts that long by accident.
+    //
+    // Buttons are XINPUT_GAMEPAD_* bits.
+    bool ChordHeld(uint16_t buttons, uint32_t holdMs);
 
     bool Connected();
 }
