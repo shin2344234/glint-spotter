@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "core/log.h"
