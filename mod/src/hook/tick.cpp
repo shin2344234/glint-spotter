@@ -178,17 +178,61 @@ namespace
     uint32_t g_autoSinceMs = 0;
     uint64_t g_lastRefreshTick = 0;
 
+    // The world map root control does not exist until the map is opened
+    // once. Session twenty-two placed a pin on what the sweep offered
+    // instead, a registry entry, and the game went down. Pins asked for
+    // before the spy has seen the real root wait here.
+    struct Pending { float x, z; char label[16]; };
+    constexpr int kPendingMax = 32;
+    Pending g_pending[kPendingMax];
+    int g_pendingN = 0;
+
+    bool PendingNear(float x, float z, float radius)
+    {
+        for (int i = 0; i < g_pendingN; ++i)
+        {
+            const float dx = g_pending[i].x - x, dz = g_pending[i].z - z;
+            if (dx * dx + dz * dz <= radius * radius) return true;
+        }
+        return false;
+    }
+
+    void FlushPending()
+    {
+        if (g_pendingN == 0) return;
+        void* root = gs::mapicon::LastWorldRoot();
+        if (!root) return;
+        GS_LOG("[mark] the world map root exists now; placing %d queued pin(s)", g_pendingN);
+        for (int i = 0; i < g_pendingN; ++i)
+            gs::mapicon::PlacePinNow(root, g_pending[i].x, g_pending[i].z, g_pending[i].label);
+        g_pendingN = 0;
+    }
+
     void PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp, float dedupe)
     {
-        if (gs::mapicon::PinNear(tx, tz, dedupe))
+        if (gs::mapicon::PinNear(tx, tz, dedupe) || PendingNear(tx, tz, dedupe))
         {
             GS_LOG("[mark] a pin already sits within %.0f units of (%.1f, %.1f); not placing another", dedupe, tx, tz);
             return;
         }
-        void* root = g_worldRoot.load();
-        if (!root) root = gs::mapicon::LastWorldRoot();
         const float dx = tx - pp.x, dz = tz - pp.z;
         GS_LOG("[mark] target %.1f units away via %s; placing a %s pin there", std::sqrt(dx * dx + dz * dz), how, label);
+        // Only a root the spy has seen the game call slot 170 on. The
+        // sweep's candidate is never used for a call.
+        void* root = gs::mapicon::LastWorldRoot();
+        if (!root)
+        {
+            if (g_pendingN < kPendingMax)
+            {
+                Pending& p = g_pending[g_pendingN++];
+                p.x = tx; p.z = tz;
+                strncpy_s(p.label, sizeof(p.label), label, _TRUNCATE);
+                GS_LOG("[mark] the world map has not been opened this session, so its root does not exist yet; "
+                       "pin queued (%d waiting). Open the map once and it appears.", g_pendingN);
+            }
+            else GS_LOG_ERR("[mark] %d pins already waiting for the map to be opened; this one is dropped", g_pendingN);
+            return;
+        }
         gs::mapicon::PlacePinNow(root, tx, tz, label);
         (void)ty;
     }
@@ -270,6 +314,7 @@ extern "C" void gs_OnMinimapTick(void* self)
     if (n - g_lastRefreshTick >= 15)
     {
         g_lastRefreshTick = n;
+        FlushPending();
         AutoMark(GetTickCount());
 
         // The camera object moves; the probe follows it.
@@ -351,18 +396,10 @@ extern "C" void gs_OnMinimapTick(void* self)
             }
         }
 
-        // Fallback: the detect distance along the facing, which is where the
-        // game says its target is even when the ray saw nothing there.
-        if (!have && hasDetect && detectDist > 0.5f && detectDist < 80.0f)
-        {
-            float fx = 0, fz = 0;
-            if (gs::nearest::ForwardFromQuat(pp.q, &fx, &fz))
-            {
-                tx = pp.x + fx * detectDist; ty = pp.y; tz = pp.z + fz * detectDist;
-                have = true;
-                how = "detect distance along the facing";
-            }
-        }
+        // The detect component's +0x3EC is not a target distance: session
+        // twenty-two read 1.5 with the flash on and nothing aimed at, and a
+        // press pinned the player's own feet. Logged above, not used.
+        (void)detectDist;
         // The actor-pointer route found a fixed reference 104 units away at every
         // press in session nineteen. It is not an aim and it places nothing.
 
@@ -457,5 +494,9 @@ namespace gs::tick
         g_markPending.store(true);
     }
 
-    void SetWorldRoot(void* root) { g_worldRoot.store(root); }
+    void SetWorldRoot(void* root)
+    {
+        // Kept for the log. No call is ever made on it; see PlaceAt.
+        g_worldRoot.store(root);
+    }
 }

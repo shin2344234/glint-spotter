@@ -170,7 +170,9 @@ namespace
             // still logged, because the argument lists in their names are how the
             // map icon event signature was read in the first place.
             t.hunt = ShortName(found[i].name)[0] != '?';
-            if (strcmp(found[i].name, ".?AVPlayerCameraTPSMode@pa@@") == 0)
+            // Decorated as PlayerCameraTPSMode@gameClientScript@pa@@; session
+            // twenty-two compared against the wrong namespace and had no camera.
+            if (strstr(found[i].name, "PlayerCameraTPSMode@"))
             {
                 g_cameraVt = found[i].vtableVa;
                 t.hunt = false;   // held through its update, not found by scan
@@ -400,6 +402,10 @@ namespace
         // of the heap was never looked at. This runs only while something is
         // still missing, so a long pass costs a pause and not a stutter.
         opt.timeBudgetMs = 25000;
+        // Session twenty-two: a 132 KB registry region offered a "world root"
+        // whose +08 was a vtable RVA and a name string, and slot 170 on it
+        // took the game down. Objects live in the big heap regions.
+        opt.minRegionBytes = 1024 * 1024;
         // Session six skipped one 275 MB region as too large. With residency
         // filtering the size cap buys little, so it is generous now.
         opt.maxRegionBytes = 1024ull * 1024 * 1024;
