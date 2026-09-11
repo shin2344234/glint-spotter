@@ -603,8 +603,11 @@ namespace
         return 0;
     }
 
+    uint32_t g_startedMs = 0;
+
     DWORD WorkerBody()
     {
+        g_startedMs = GetTickCount();
         GS_LOG("Glint Spotter %s probe", GS_VERSION_STRING);
         LogBuildStamp(g_self);
         GS_LOG("Read-only. It reads the game's own RTTI, looks for those objects in");
@@ -661,6 +664,34 @@ namespace
         for (int attempt = 0; attempt < 40 && !g_stop.load(); ++attempt)
         {
             bool done = false;
+
+            // The manager knows where the player is, and it costs nothing to
+            // ask. Session forty-seven spent forty-seven seconds before the
+            // first pin was possible, nearly all of it in two heap scans of
+            // fourteen seconds each, looking for an object the manager was
+            // already handing over. The scan below stays as the fallback.
+            gs::actors::Locate(GetTickCount());
+            if (gs::actors::Ready())
+            {
+                uintptr_t special = 0;
+                const uintptr_t ent = gs::actors::PlayerEntity(&special);
+                if (ent && special)
+                {
+                    gs::player::SetSpecialComponent(reinterpret_cast<void*>(special));
+                    const gs::player::Pos probe = gs::player::Read();
+                    if (probe.valid)
+                    {
+                        done = true;
+                        gs::tick::AddProbe("special", reinterpret_cast<void*>(special), 0x400);
+                        GS_LOG_OK("READY in %llu ms: the manager handed over the player at (%.1f, %.1f, %.1f), "
+                                  "origin (%.0f, %.0f, %.0f). Aim the flash at a glint.",
+                                  static_cast<unsigned long long>(GetTickCount() - g_startedMs),
+                                  probe.x, probe.y, probe.z, probe.ox, probe.oy, probe.oz);
+                        break;
+                    }
+                    gs::player::SetSpecialComponent(nullptr);
+                }
+            }
             for (size_t i = 0; i < g_count && !done; ++i)
             {
             Target& t = g_targets[i];
@@ -714,8 +745,8 @@ namespace
             }
             }
             if (done) break;
-            GS_LOG("player not in memory yet, trying again in five seconds");
-            for (int i = 0; i < 10 && !g_stop.load(); ++i) Sleep(500);
+            GS_LOG("no world yet, looking again in a second");
+            for (int i = 0; i < 2 && !g_stop.load(); ++i) Sleep(500);
         }
 
         int pass = 0;

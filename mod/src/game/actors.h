@@ -77,4 +77,10 @@ namespace gs::actors
 
     // The entity carrying this id, from the set, or 0.
     uintptr_t ByEid(uint32_t eid);
+
+    // The played character's own entity, from the pools: the one whose id
+    // begins 0xA0 and whose block carries a special mode component. The
+    // manager hands it over like any other, so there is no reason to scan
+    // the heap for the player. Zero until a world is loaded.
+    uintptr_t PlayerEntity(uintptr_t* specialComponent);
 }

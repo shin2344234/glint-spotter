@@ -912,6 +912,30 @@ namespace gs::actors
         return g_setN;
     }
 
+    uintptr_t PlayerEntity(uintptr_t* specialComponent)
+    {
+        const uintptr_t mgr = g_mgr.load();
+        if (!mgr) return 0;
+        static uintptr_t buf[kBufMax];
+        const int n = ReadPools(mgr, buf, kBufMax);
+        for (int i = 0; i < n; ++i)
+        {
+            const uint32_t eid = EidOf(buf[i]);
+            if ((eid >> 24) != 0xA0) continue;
+            // Every character carries a special mode component; the player's
+            // entity is the one the manager files under a player id.
+            const uintptr_t sp = ComponentAt(buf[i], 0x10, "ClientSpecialModeActorComponent");
+            uintptr_t found = sp;
+            if (!found)
+                for (uintptr_t off = 0; off < kComps_SlotsEnd && !found; off += 8)
+                    found = ComponentAt(buf[i], off, "ClientSpecialModeActorComponent");
+            if (!found) continue;
+            if (specialComponent) *specialComponent = found;
+            return buf[i];
+        }
+        return 0;
+    }
+
     uintptr_t ByEid(uint32_t eid)
     {
         if (!eid || eid == 0xFFFFFFFF) return 0;
