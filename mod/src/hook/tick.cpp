@@ -532,7 +532,8 @@ extern "C" void gs_OnMinimapTick(void* self)
             gs::physics::Hit best;
             int usedLayer = -1;
             float bestScore = -1e9f;
-            const int layers[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 0x3B, 0x3C, 0x3D, 0x3E};
+            const int layers[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 58,
+                                  0x3B, 0x3C, 0x3D, 0x3E, 0x40, 0x44, 0x48};
             for (int fl = 0; fl < 2; ++fl)
             for (int li = 0; li < static_cast<int>(sizeof(layers) / sizeof(layers[0])); ++li)
             {
@@ -555,6 +556,46 @@ extern "C" void gs_OnMinimapTick(void* self)
                 if (score > bestScore) { bestScore = score; best = h; usedLayer = layer; }
             }
             static int knownLayer = -1;
+
+            // Sessions thirty and thirty-one: the direct ray stops at a face
+            // square to it, at the same z plane both times, on every layer
+            // that hits at all. So the ground is found another way: probes
+            // straight down along the view, each from well above the ray,
+            // and the ground point is where the terrain first rises to meet
+            // the ray. A probe that finds nothing says collision is not
+            // loaded there, which is its own answer.
+            float probeT = -1, probeY = 0;
+            {
+                const float down[3] = {0, -1, 0};
+                int misses = 0, probes = 0;
+                float lastLoggedT = -100;
+                for (float t = 4.0f; t <= 400.0f && probeT < 0; t += (t < 60.0f ? 4.0f : 8.0f))
+                {
+                    const float px = v.ox + v.fx * t, pz = v.oz + v.fz * t, rayY = v.oy + v.fy * t;
+                    const float from[3] = {px, rayY + 150.0f, pz};
+                    const gs::physics::Hit h = gs::physics::Cast(from, down, 900.0f, 0, false);
+                    ++probes;
+                    if (!h.hit) { ++misses; if (t - lastLoggedT >= 40.0f) { lastLoggedT = t; GS_LOG("[mark]   probe %.0f out: nothing below", t); } continue; }
+                    const float groundY = from[1] - h.dist;
+                    if (t - lastLoggedT >= 40.0f || groundY >= rayY - 0.2f)
+                    {
+                        lastLoggedT = t;
+                        GS_LOG("[mark]   probe %.0f out: ground at %.1f, ray at %.1f, normal (%.2f, %.2f, %.2f)", t, groundY, rayY,
+                               h.normal[0], h.normal[1], h.normal[2]);
+                    }
+                    if (groundY >= rayY - 0.2f) { probeT = t; probeY = groundY; }
+                }
+                GS_LOG("[mark] %d probes, %d found nothing below; %s", probes, misses,
+                       probeT > 0 ? "the ground meets the view ray" : "the view ray never meets the ground within 400 units");
+            }
+            if (probeT > 0)
+            {
+                best.hit = true;
+                best.dist = probeT;
+                usedLayer = knownLayer >= 0 ? knownLayer : 0;
+                GS_LOG("[mark] the probes put the ground point %.0f units out at height %.1f; the direct ray said %s %.1f",
+                       probeT, probeY, bestScore > -1e8f ? "a hit at" : "nothing", bestScore > -1e8f ? best.dist : 0.0f);
+            }
             if (best.hit)
             {
                 knownLayer = usedLayer;
