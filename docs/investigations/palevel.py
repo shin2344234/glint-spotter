@@ -102,6 +102,7 @@ class Block(object):
         self.type = type_name
         self.value_size = value_size
         self.fields = []
+        self.children = []
         self.prefab = None
 
     def field(self, name):
@@ -114,104 +115,111 @@ class Block(object):
 MARKER = b"\xFF\xFF"
 
 
-def read_schema(d):
-    """Every declared block, in file order."""
-    blocks = []
-    o = 0x20
+def read_fields(d, o):
+    """u16 count, then count times (name, type, 8-byte trailer). None if it
+    does not read as a field list."""
     n = len(d)
+    if o + 2 > n:
+        return None
+    count = u16(d, o)
+    # Zero is legal. SceneObjectActorInfoContainer declares no fields at all
+    # and is followed straight by the prefab, which is what stopped the walk
+    # at eighteen objects of two hundred.
+    if count > 200:
+        return None
+    o += 2
+    fields = []
+    run = 0
+    for _ in range(count):
+        gf = pstring(d, o)
+        if not gf:
+            return None
+        fname, o = gf
+        gt = pstring(d, o)
+        if not gt:
+            return None
+        tname, o = gt
+        if o + 8 > n:
+            return None
+        size = u16(d, o + 2)
+        o += 8
+        fields.append(Field(fname, tname, size, run))
+        run += size
+    return fields, o
+
+
+def read_body(d, o, type_name, depth=0):
+    """One object: its field list, then whatever it nests, then its prefab.
+
+    `_components` and `_childSceneObjects` are declared as ReflectObjectPtr
+    with a size of zero, so what they hold is not described by the field list
+    at all. It sits inline right after it, as more blocks of the same shape as
+    this one but without the FFFF header: a type name, a field count, a field
+    list, and possibly nests of its own. An AudioComponent on the fourth
+    object of graymane_camp_lv02_after is what this was missing.
+    """
+    if depth > 16:
+        return None
+    got = read_fields(d, o)
+    if not got:
+        return None
+    blk = Block(o, type_name, 0)
+    blk.fields, o = got
+    while True:
+        g = pstring(d, o)
+        if not g:
+            break
+        s, nxt = g
+        if s.lower().endswith(".prefab"):
+            blk.prefab = s
+            o = nxt
+            break
+        sub = read_body(d, nxt, s, depth + 1)
+        if not sub:
+            break
+        blk.children.append(sub[0])
+        o = sub[1]
+    return blk, o
+
+
+def read_schema(d):
+    """Every top-level block, in file order.
+
+    Only the first object of a type carries the FFFF header and the type name.
+    The ones after it start straight in with a field count, so once a type is
+    known the walk keeps taking bodies for as long as they look like the same
+    thing: a field list whose first field has the same name.
+    """
+    blocks = []
+    n = len(d)
+    o = 0x20
     while o + 24 < n:
-        # A block opens with FFFF, then 18 bytes of header whose last u16 is
-        # the total width of the object's values.
         if d[o:o + 2] != MARKER:
             o += 1
             continue
         value_size = u16(d, o + 18)
         got = pstring(d, o + 20)
-        if not got:
+        if not got or not got[0][:1].isalpha():
             o += 1
             continue
         type_name, p = got
-        if not type_name[:1].isalpha():
+        first = read_body(d, p, type_name)
+        if not first or not first[0].fields:
             o += 1
             continue
-        if p + 2 > n:
-            break
-        count = u16(d, p)
-        p += 2
-        if count == 0 or count > 200:
-            o += 1
-            continue
-        blk = Block(o, type_name, value_size)
-        run = 0
-        ok = True
-        for _ in range(count):
-            gf = pstring(d, p)
-            if not gf:
-                ok = False
-                break
-            fname, p = gf
-            gt = pstring(d, p)
-            if not gt:
-                ok = False
-                break
-            tname, p = gt
-            if p + 8 > n:
-                ok = False
-                break
-            # u16 kind, u16 size, u32 flags. Transform reads 0x28 here, which
-            # is the 40 bytes its quaternion, position and scale occupy.
-            size = u16(d, p + 2)
-            p += 8
-            blk.fields.append(Field(fname, tname, size, run))
-            run += size
-        if not ok:
-            o += 1
-            continue
-        # The object's own prefab follows the field list, when it has one.
-        gp = pstring(d, p)
-        if gp and gp[0].lower().endswith(".prefab"):
-            blk.prefab = gp[0]
-            p = gp[1]
+        blk, o = first
+        blk.value_size = value_size
         blocks.append(blk)
-        # Only the first object of a type carries the FFFF header and the type
-        # name. The ones after it start straight in with a field count, so the
-        # walk keeps going here rather than hunting for another marker.
-        o = p
+        anchor = blk.fields[0].name
         while o + 2 < n:
-            count2 = u16(d, o)
-            # Objects of the same type can declare different field counts, so
-            # the count is only sanity-checked rather than required to match.
-            if count2 < 1 or count2 > 200:
+            more = read_body(d, o, type_name)
+            if not more or not more[0].fields:
                 break
-            q = o + 2
-            blk2 = Block(o, type_name, value_size)
-            good = True
-            run2 = 0
-            for _ in range(count2):
-                gf = pstring(d, q)
-                if not gf:
-                    good = False
-                    break
-                fname, q = gf
-                gt = pstring(d, q)
-                if not gt:
-                    good = False
-                    break
-                tname, q = gt
-                if q + 8 > n:
-                    good = False
-                    break
-                blk2.fields.append(Field(fname, tname, u16(d, q + 2), run2))
-                run2 += u16(d, q + 2)
-                q += 8
-            if not good or not blk2.fields or not blk2.fields[0].name.startswith("_"):
+            if more[0].fields[0].name != anchor:
                 break
-            gp2 = pstring(d, q)
-            if gp2 and gp2[0].lower().endswith(".prefab"):
-                blk2.prefab = gp2[0]
-                q = gp2[1]
-            blocks.append(blk2)
-            o = q
+            more[0].value_size = value_size
+            blocks.append(more[0])
+            o = more[1]
     return blocks
 
 
