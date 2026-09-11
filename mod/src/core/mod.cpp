@@ -237,14 +237,40 @@ namespace
                         // the image and one on the heap, and the heap one moves
                         // by 0x20 between neighbours. A prefab path is the thing
                         // to hope for.
+                        (void)t2;
+                        // The pointer at +0x18 leads to string descriptors:
+                        // session sixty-five's dump reads a char pointer, a
+                        // length of 40, and a hash, repeating every 0x20 bytes.
+                        // That is the engine's own string shape, the one the
+                        // node names already come out of elsewhere in this mod.
                         for (uintptr_t k = 0; k + 8 <= 0x40; k += 8)
                         {
                             const uintptr_t pv = *reinterpret_cast<const uintptr_t*>(el + k);
                             if (pv < 0x10000 || (pv & 7) != 0) continue;
-                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(pv), 0x40)) continue;
-                            GS_LOG("[lgso]     +%02llX -> 0x%p",
-                                   static_cast<unsigned long long>(k), reinterpret_cast<void*>(pv));
-                            gs::dump::Object(t2, pv, 0x40);
+                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(pv), 0x80)) continue;
+                            for (uintptr_t j = 0; j + 16 <= 0x80; j += 0x20)
+                            {
+                                const uintptr_t cs = *reinterpret_cast<const uintptr_t*>(pv + j);
+                                const uint32_t len = *reinterpret_cast<const uint32_t*>(pv + j + 8);
+                                if (cs < 0x10000 || len == 0 || len > 240) continue;
+                                if (!gs::rtti::Readable(reinterpret_cast<const void*>(cs), len)) continue;
+                                char text[248];
+                                uint32_t w = 0;
+                                bool ok = true;
+                                for (; w < len && w + 1 < sizeof(text); ++w)
+                                {
+                                    const char c = *reinterpret_cast<const volatile char*>(cs + w);
+                                    if (c == 0) break;
+                                    if (static_cast<unsigned char>(c) < 0x20 ||
+                                        static_cast<unsigned char>(c) > 0x7E) { ok = false; break; }
+                                    text[w] = c;
+                                }
+                                text[w] = 0;
+                                if (ok && w > 2)
+                                    GS_LOG("[lgso]     +%02llX string +%02llX \"%s\"",
+                                           static_cast<unsigned long long>(k),
+                                           static_cast<unsigned long long>(j), text);
+                            }
                         }
                     }
                 }
