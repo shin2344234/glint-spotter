@@ -436,6 +436,35 @@ namespace
         if (dot) *dot = 0;
     }
 
+    // Is this node one the player would want a pin on.
+    //
+    // Two sessions named what stands around Seth. At the first glint:
+    // gimmick_item_firewood_0001, gimmick_item_basic_visione_chip,
+    // gimmick_socket_collection_sophora_01, trees with scenecollection in
+    // the path. At the second, a puzzle glint with nothing to take yet:
+    // gimmick_standstone_01_challenge, beside gimmick_operator_gimmick
+    // complete_00, gimmick_func_puzzle_trigger_box and pointcontrol nodes,
+    // which are the puzzle's invisible machinery and must never be marked.
+    //
+    // So the name decides. The rejects win, because a trigger box sitting a
+    // metre from the standing stone would otherwise take the pin.
+    bool WorthMarking(const char* path)
+    {
+        static const char* const reject[] = {
+            "func_", "operator_", "trigger", "pointcontrol", "camera", "fit_height",
+            "volume", "sector", "spawn", "collision", "phase00", "_once"};
+        for (const char* r : reject)
+            if (strstr(path, r)) return false;
+
+        static const char* const accept[] = {
+            "item", "gather", "plant", "/ore", "socket_collection", "scenecolle",
+            "challenge", "standstone", "artifact", "treasure", "chest", "clue",
+            "knowledge", "relic", "puzzle_attach", "dial", "crank", "lever", "useartifact"};
+        for (const char* a : accept)
+            if (strstr(path, a)) return true;
+        return false;
+    }
+
     // What this gimmick is, and whether the player can take something from
     // it. Master Looter identifies a node by its prefab path, and its log
     // was still naming nodes correctly on 2850 while this mod's item data
@@ -465,13 +494,15 @@ namespace
             bool byPath = false;
             if (havePath)
             {
-                byPath = strstr(path, "/item/") || strstr(path, "gimmick_item") ||
-                         strstr(path, "gather") || strstr(path, "/plant/") || strstr(path, "/ore/");
+                byPath = WorthMarking(path);
                 Leaf(path, name, nameBytes);
             }
             else if (!EngineString(comp + gs::sig::kOff_Gimmick_NodeName, name, nameBytes))
                 name[0] = 0;
 
+            // A node whose path says it is machinery is machinery, whatever
+            // its data pointers hold.
+            if (havePath && !byPath) return false;
             if (!byData && !byPath) return false;
             *locked = *reinterpret_cast<const uint8_t*>(comp + gs::sig::kOff_Gimmick_Locked) != 0;
             return true;

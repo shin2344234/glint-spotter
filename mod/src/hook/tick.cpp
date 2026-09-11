@@ -426,8 +426,8 @@ namespace
 
         // Pickups near the view, any range.
         gs::nearest::Candidate c[8];
-        const int n = CastView(v, 400.0f, 4.0f, 0.14f, true, c, 8, nullptr, 0, 6.0f);
-        const int pick = PickByAngle(c, n, 0.14f);   // eight degrees
+        const int n = CastView(v, 400.0f, 6.0f, 0.30f, true, c, 8, nullptr, 0, 6.0f);
+        const int pick = PickByAngle(c, n, 0.27f);   // fifteen degrees
 
         // While the flash is on, a line every two seconds, sixty at most.
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
@@ -449,11 +449,10 @@ namespace
                 const int an = CastView(v, 400.0f, 4.0f, 0.14f, false, all, 6, nullptr, 0);
                 for (int i = 0; i < an; ++i)
                     if (all[i].gimmick)
-                        GS_LOG("[auto]   gimmick near the view: \"%s\" eid %08X at %.1f along, %.1f deg%s%s%s",
+                        GS_LOG("[auto]   near the view, not marked: \"%s\" eid %08X at %.1f along, %.1f deg%s%s",
                                all[i].name[0] ? all[i].name : "?", all[i].eid, all[i].along,
                                std::atan2(all[i].off, all[i].along) * 57.2958f,
-                               all[i].pickup ? ", a pickup" : "", all[i].knowledge ? ", knowledge" : "",
-                               all[i].locked ? ", locked" : "");
+                               all[i].knowledge ? ", knowledge" : "", all[i].locked ? ", locked" : "");
             }
             if (n == 0)
             {
