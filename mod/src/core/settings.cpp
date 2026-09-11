@@ -101,6 +101,10 @@ namespace gs::Settings
             {
                 strncpy_s(g_values.mark, sizeof(g_values.mark), val, _TRUNCATE);
             }
+            else if (_stricmp(key, "Guess") == 0)
+            {
+                g_values.guess = atoi(val) != 0;
+            }
             else if (_stricmp(key, "Survey") == 0)
             {
                 g_values.survey = atoi(val) != 0;

@@ -10,6 +10,8 @@
 //                            ; the prefab path
 //   Survey=1      ; one press per place pins every candidate, labelled by
 //                 ; distance, so the glint can be named off the map
+//   Guess=0       ; pin the node nearest the crosshair when the game has not
+//                 ; marked anything. Off: only what the game marks is pinned.
 //   Radius=0      ; optional cap in metres on how far a node can be. Zero,
 //                 ; the default, means everything the game has loaded, which
 //                 ; is already a few hundred metres and no more.
@@ -42,6 +44,13 @@ namespace gs::Settings
         // labelled with its distance, so the glint can be named by reading
         // one number off the map. Set Survey=0 once that is settled.
         bool survey = true;
+        // Seth's rule, and it took fifty-seven sessions to be able to keep
+        // it: only the glint gets a pin. With this off the mod places
+        // nothing unless the game has set a node's detect mode target
+        // byte. With it on, the old bearing guess fills the silence, which
+        // is how a bottle four metres away came to be marked as a glint a
+        // hundred and nineteen metres off.
+        bool guess = false;
     };
 
     // True when `path` contains any of the Mark list's entries.

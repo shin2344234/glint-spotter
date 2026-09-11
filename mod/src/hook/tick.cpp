@@ -432,6 +432,9 @@ namespace
     int g_targetLogsLeft = 12;
     uint32_t g_targetLastMs = 0;
     int g_glintWinsLeft = 40;
+    int g_quietLogsLeft = 20;
+    uint32_t g_quietLastMs = 0;
+    int g_lastGlintN = -1;
     int g_heldWinsLeft = 40;   // how many times the log says the target took the pick
     int g_loadingLogsLeft = 4;
     uint32_t g_heldEid = 0;
@@ -595,6 +598,21 @@ namespace
                                                 around, angles, 8, &marked);
                 glintN = gs::actors::GlintOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
                                                     glints, glintAngles, 8);
+                // Every node the game has marked, with its distance, so the log
+                // says how close the player has to get before the game creates
+                // the thing he is looking at.
+                if (glintN != g_lastGlintN)
+                {
+                    g_lastGlintN = glintN;
+                    GS_LOG("[auto] the game has marked %d node(s) as detect mode targets", glintN);
+                    for (int i = 0; i < glintN; ++i)
+                    {
+                        const float dx = glints[i].x - pp.x, dz = glints[i].z - pp.z;
+                        GS_LOG("[auto]   \"%s\" eid %08X, %.1f metres away, %.1f degrees off the crosshair",
+                               glints[i].name[0] ? glints[i].name : "?", glints[i].eid,
+                               std::sqrt(dx * dx + dz * dz), glintAngles[i] * 57.2958f);
+                    }
+                }
                 // The whole gimmick set, named, so the log says whether the
                 // glint was in it. Once per place: session fifty-three spent
                 // both its listings on the first glint and had none left for
@@ -630,6 +648,28 @@ namespace
         {
             byGlint = true;
             pickAngle = glintAngles[0];
+        }
+        // Only the glint gets a pin. Session fifty-eight pressed from the spot
+        // Seth has been testing from all along, a hundred and nineteen metres
+        // short of his glint, and the bearing picked a bottle four metres away
+        // at 1.3 degrees and pinned it. Nothing about that pin was information.
+        // The game marks the object it lights; when it has not marked
+        // anything, the honest answer is nothing.
+        if (!byGlint && !gs::Settings::Get().guess)
+        {
+            if (g_quietLogsLeft > 0 && now - g_quietLastMs > 3000)
+            {
+                --g_quietLogsLeft;
+                g_quietLastMs = now;
+                GS_LOG("[auto] the game has marked nothing as a detect mode target, so nothing is "
+                       "pinned. The node the crosshair is nearest is \"%s\" %.1f metres away, and "
+                       "that is a guess; set Guess=1 in the ini to pin it anyway.",
+                       pick >= 0 ? (around[pick].name[0] ? around[pick].name : "?") : "nothing",
+                       pick >= 0 ? std::sqrt((around[pick].x - pp.x) * (around[pick].x - pp.x) +
+                                             (around[pick].z - pp.z) * (around[pick].z - pp.z))
+                                 : 0.0f);
+            }
+            pick = -1;
         }
         if (byGlint && g_glintWinsLeft > 0)
         {
