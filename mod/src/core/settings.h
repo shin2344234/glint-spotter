@@ -8,6 +8,8 @@
 //   Spy=1         ; log every map icon the game creates, through slot 170
 //   Mark=clue,artifact,...   ; node names worth a pin, matched anywhere in
 //                            ; the prefab path
+//   Survey=1      ; one press per place pins every candidate, labelled by
+//                 ; distance, so the glint can be named off the map
 //   Radius=0      ; optional cap in metres on how far a node can be. Zero,
 //                 ; the default, means everything the game has loaded, which
 //                 ; is already a few hundred metres and no more.
@@ -36,6 +38,10 @@ namespace gs::Settings
         // nothing beyond it, so a radius is a second limit doing the first
         // one's job. It stays for anyone who wants fewer pins.
         float radius = 0.0f;
+        // One press at each place pins every candidate inside the cone,
+        // labelled with its distance, so the glint can be named by reading
+        // one number off the map. Set Survey=0 once that is settled.
+        bool survey = true;
     };
 
     // True when `path` contains any of the Mark list's entries.

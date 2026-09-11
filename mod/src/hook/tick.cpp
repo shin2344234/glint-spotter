@@ -247,25 +247,23 @@ namespace
         gs::mapicon::PlacePinNow(root, tx, ty, tz, label);
     }
 
-    // Three pins at known offsets from the player, once a session, the first
-    // time the flash is held.
+    // The calibration is finished, and it passed. Session fifty-four put "Me"
+    // on the player, "N200" two hundred metres north of him and "E100" a
+    // hundred east, and Seth's screenshot of the map shows exactly that
+    // geometry: the two offset pins sit north and east of his arrow at the
+    // right distances, and the session's own glint pin sits just north of him
+    // where its node stood, twenty-four metres away. A pin goes where it is
+    // asked to. Nothing about the coordinates, the frame, the height or the
+    // call needs looking at again.
     //
-    // Every pin the mod has ever placed went to something twenty-odd metres
-    // away, and Seth has reported every one of them as sitting next to his
-    // character. Two different faults predict exactly that: the mod picking a
-    // near object when it should pick a far one, or the map ignoring the
-    // position and drawing every pin on the player. Twenty metres is a few
-    // pixels of world map, so the reports cannot tell them apart.
-    //
-    // These can. If "N200" appears two hundred metres north and "E100" a
-    // hundred metres east, the coordinate path is sound and the fault is the
-    // pick. If all three land on the player, the fault is the call.
-    // Once per place. Session fifty-three calibrated at the first glint and
-    // then teleported, so the second half of the test had no pins of known
-    // offset to read the map against. Two hundred metres from the last one
-    // counts as somewhere else.
-    bool g_calibrated = false;
-    float g_calX = 0, g_calZ = 0;
+    // Which leaves the pick, and the pick cannot be judged from a log alone
+    // because only Seth can see which object is glowing. So the three pins
+    // that proved the coordinates go to the candidates instead: once per
+    // place, every node inside the cone gets a pin labelled with how far away
+    // it is, and the log lists the same nodes by name. He reads one number off
+    // the map and the mod knows what the glint is called.
+    bool g_surveyed = false;
+    float g_surveyX = 0, g_surveyZ = 0;
 
     bool FarFrom(float x, float z, float fromX, float fromZ, float metres)
     {
@@ -273,19 +271,26 @@ namespace
         return std::sqrt(dx * dx + dz * dz) > metres;
     }
 
-    void Calibrate(const gs::player::Pos& pp)
+    void Survey(const gs::player::Pos& pp, const gs::actors::Entity* around, const float* angles, int n)
     {
-        if (g_calibrated && !FarFrom(pp.x, pp.z, g_calX, g_calZ, 200.0f)) return;
-        g_calibrated = true;
-        g_calX = pp.x;
-        g_calZ = pp.z;
-        GS_LOG("[cal] placing three pins at known offsets from (%.1f, %.1f, %.1f): "
-               "\"Me\" on you, \"N200\" 200 metres north, \"E100\" 100 metres east. "
-               "Where they land says whether a pin goes where it is asked to.",
-               pp.x, pp.y, pp.z);
-        PlaceAt(pp.x, pp.y, pp.z, "calibration, your own position", "Me", pp, 0.0f);
-        PlaceAt(pp.x, pp.y, pp.z + 200.0f, "calibration, 200 north", "N200", pp, 0.0f);
-        PlaceAt(pp.x + 100.0f, pp.y, pp.z, "calibration, 100 east", "E100", pp, 0.0f);
+        if (n <= 0) return;
+        if (!gs::Settings::Get().survey) return;
+        if (g_surveyed && !FarFrom(pp.x, pp.z, g_surveyX, g_surveyZ, 150.0f)) return;
+        g_surveyed = true;
+        g_surveyX = pp.x;
+        g_surveyZ = pp.z;
+        GS_LOG("[survey] every node inside the cone gets a pin labelled with its distance. "
+               "Open the map, find the one sitting on the glint, and its number names it below.");
+        for (int i = 0; i < n && i < 5; ++i)
+        {
+            const float dx = around[i].x - pp.x, dz = around[i].z - pp.z;
+            const float d = std::sqrt(dx * dx + dz * dz);
+            char label[16];
+            _snprintf_s(label, sizeof(label), _TRUNCATE, "%.0fm", d);
+            GS_LOG("[survey]   \"%s\" is \"%s\" eid %08X, %.1f degrees off the crosshair",
+                   label, around[i].name[0] ? around[i].name : "?", around[i].eid, angles[i] * 57.2958f);
+            PlaceAt(around[i].x, around[i].y, around[i].z, "survey", label, pp, 0.0f);
+        }
     }
 
     // The view ray. The camera's own forward when its object is in hand,
@@ -581,7 +586,7 @@ namespace
                     g_setListedZ = pp.z;
                     gs::actors::LogGimmicks(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen);
                 }
-                if (now - g_flashOnMs > 700) Calibrate(pp);
+                if (now - g_flashOnMs > 700) Survey(pp, around, angles, n);
                 // And what the game's own detect system is holding. This is
                 // the game's own answer to the question the bearing can only
                 // guess at, so it is asked on every press and it outranks the

@@ -101,6 +101,10 @@ namespace gs::Settings
             {
                 strncpy_s(g_values.mark, sizeof(g_values.mark), val, _TRUNCATE);
             }
+            else if (_stricmp(key, "Survey") == 0)
+            {
+                g_values.survey = atoi(val) != 0;
+            }
             else if (_stricmp(key, "Radius") == 0)
             {
                 const float r = static_cast<float>(atof(val));
