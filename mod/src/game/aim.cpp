@@ -17,7 +17,31 @@ namespace
     constexpr uintptr_t kOff_Tf_ParentEid    = 0xC8;
     constexpr uintptr_t kOff_Tf_ParentPos    = 0xEC;
     constexpr uintptr_t kOff_Special_Active  = 0x40;   // player id while the flash is on
-    constexpr size_t    kSearchBytes         = 0x800;  // how far into a component to look
+
+    // How far into each object it is safe to look, from the disassembly of
+    // their allocation sites and their own code:
+    //
+    //   FindDetectTargetTask          0x70 bytes, proven. The literal size at
+    //                                 its one allocation site, inside
+    //                                 ClientDetectActorComponent's constructor
+    //                                 at 0x00992A7D1.
+    //   ClientSpecialModeActorComponent
+    //                                 0xF8 bytes, proven the same way at
+    //                                 0x008350B8, and its own code never
+    //                                 touches past +0xF1.
+    //   ClientDetectActorComponent    allocation site not found, but its
+    //                                 constructor and every non-stub vtable
+    //                                 slot stop at +0x250, two functions
+    //                                 agreeing on the same boundary.
+    //
+    // The scan used to run to 0x800 on all three, so most of what it ever
+    // found belonged to whatever allocation sat next in the heap. That is
+    // where session nineteen's frozen actor at +0x540 came from, and session
+    // fifty-three's wandering actor at detect+0x508, and the detect scalars
+    // that read a world coordinate where a distance was supposed to be.
+    constexpr size_t kBytes_Detect  = 0x260;
+    constexpr size_t kBytes_Special = 0x100;
+    constexpr size_t kBytes_Task    = 0x70;
 
     std::atomic<uintptr_t> g_player{0};
     std::atomic<uintptr_t> g_detect{0};
@@ -118,7 +142,10 @@ namespace
         __try
         {
             if (!obj || !gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x40)) return false;
-            size_t bytes = kSearchBytes;
+            // Bounded like the walk above, and for the same reason: this
+            // function is what read past the end of these objects for the whole
+            // project. It has no callers left.
+            size_t bytes = kBytes_Detect;
             while (bytes > 0x40 && !gs::rtti::Readable(reinterpret_cast<const void*>(obj), bytes)) bytes /= 2;
 
             for (uintptr_t off = 0x08; off + 8 <= bytes; off += 8)
@@ -275,13 +302,13 @@ namespace gs::aim
 
         // Every actor pointer in one object, one level down into a task.
         int Walk(const char* base, uintptr_t obj, uintptr_t player, int depth,
-                 const gs::aim::Eye& eye, bool log, gs::aim::Held* out)
+                 size_t limit, const gs::aim::Eye& eye, bool log, gs::aim::Held* out)
         {
             int found = 0;
             __try
             {
                 if (!obj || !gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x40)) return 0;
-                size_t bytes = kSearchBytes;
+                size_t bytes = limit;
                 while (bytes > 0x40 && !gs::rtti::Readable(reinterpret_cast<const void*>(obj), bytes)) bytes /= 2;
                 for (uintptr_t off = 0x08; off + 8 <= bytes; off += 8)
                 {
@@ -296,7 +323,7 @@ namespace gs::aim
                         continue;
                     }
                     if (depth > 0 && strstr(n, "FindDetectTargetTask"))
-                        found += Walk("task", p, player, depth - 1, eye, log, out);
+                        found += Walk("task", p, player, depth - 1, kBytes_Task, eye, log, out);
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -330,12 +357,17 @@ namespace gs::aim
         const uintptr_t detect = g_detect.load();
         const uintptr_t special = g_special.load();
         const uintptr_t player = g_player.load();
+        // The scalars an older build's notes named live past +0x250, which is
+        // where this class's own code stops, so they are somebody else's
+        // memory. Session fifty-three read a world coordinate at +0x3E8 and
+        // 0x86322B60 at the flag that is supposed to be zero or 0xFF. They are
+        // printed from inside the object's real bounds only.
         if (log)
-            GS_LOG("[target] detect scalars: +3E8 %.3f  +3EC %.3f  +410 0x%08X  +42C %u  +300 %.3f  +580 %.3f",
-                   ScalarAt(detect, 0x3E8), ScalarAt(detect, 0x3EC), DwordAt(detect, 0x410),
-                   DwordAt(detect, 0x42C), ScalarAt(detect, 0x300), ScalarAt(detect, 0x580));
-        int n = Walk("detect", detect, player, 1, eye, log, &best);
-        n += Walk("special", special, player, 1, eye, log, &best);
+            GS_LOG("[target] detect +1D0 task 0x%p, +1DA %u, +208 %.3f, +240 %.3f",
+                   reinterpret_cast<void*>(DetectTask()), DwordAt(detect, 0x1D8) >> 16,
+                   ScalarAt(detect, 0x208), ScalarAt(detect, 0x240));
+        int n = Walk("detect", detect, player, 1, kBytes_Detect, eye, log, &best);
+        n += Walk("special", special, player, 1, kBytes_Special, eye, log, &best);
         if (!n && log) GS_LOG("[target] no actor pointer on either component or the task right now");
         return best;
     }

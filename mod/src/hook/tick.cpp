@@ -589,18 +589,22 @@ namespace
         // session forty-seven measured a real glint at a hundred and eighteen.
         // Being far away was the evidence against it, and being far away is
         // the whole point.
-        // The game's answer takes the pin only when the manager's pools also
-        // hold the actor it points at. Without that test the walk can return a
-        // pointer read past the end of the object it was scanning, which is
-        // what session nineteen's +0x540 was: FindDetectTargetTask is 112
-        // bytes and that read was more than a kilobyte beyond it.
-        bool byTarget = false;
-        if (held.valid && held.inPools && held.angle < 15.0f &&
-            held.dist > 5.0f && held.dist < 500.0f)
-        {
-            byTarget = true;
-            pickAngle = held.angle;
-        }
+        // The detect system does not get the pin. Session fifty-three ran the
+        // control nobody had run: Seth aimed at one glint, teleported, and
+        // aimed at another. The actor the detect component was holding moved
+        // around on its own and sat a hundred and forty-seven degrees off his
+        // crosshair, then sixty-eight. It follows the scene and not the aim.
+        //
+        // The disassembly says why. Every field this route ever read lives
+        // past the end of the object it was read from: the task is 112 bytes
+        // and the reads were at +0x500 and beyond, the special mode component
+        // is 248 and the scan ran to 2048, and the detect component's own code
+        // stops at +0x250 while the reads were at +0x508 and +0x3E8. All of it
+        // was the neighbouring allocation.
+        //
+        // It is still read, inside the real bounds now, and still logged, so a
+        // build where something real turns up there would say so.
+        const bool byTarget = false;
 
         // One chosen thing, whichever route named it, so the hold and the pin
         // below do not care which one did.
