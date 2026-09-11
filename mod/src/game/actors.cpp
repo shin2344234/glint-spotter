@@ -24,6 +24,9 @@ namespace
     constexpr uintptr_t kOff_Ent_Comps       = 0x68;
     constexpr uintptr_t kOff_Comps_Transform = 0x1A0;
     constexpr uintptr_t kOff_Tf_WorldPos     = 0x29C;
+    constexpr uintptr_t kOff_Tf_LocalPos     = 0xB4;
+    constexpr uintptr_t kOff_Tf_ParentEid    = 0xC8;
+    constexpr uintptr_t kOff_Tf_ParentPos    = 0xEC;
     constexpr uintptr_t kComps_SlotsEnd      = 0x80;
     constexpr uint32_t  kListCapMax          = 0x10000;
     constexpr uint32_t  kKeepMs              = 12000;
@@ -204,7 +207,23 @@ namespace
 
     bool PtrLike(uintptr_t p) { return p >= 0x10000 && (p & 7) == 0 && p <= 0x00007FFFFFFFFFFFull; }
 
-    bool WorldPos(uintptr_t e, float* out)
+    bool Sane(const float* v)
+    {
+        if (!std::isfinite(v[0]) || !std::isfinite(v[1]) || !std::isfinite(v[2])) return false;
+        return std::fabs(v[0]) + std::fabs(v[1]) + std::fabs(v[2]) <= 1.0e6f;
+    }
+
+    // Where an entity is, in the map's frame.
+    //
+    // Two models, and they disagree. The transform keeps a cached world
+    // position at +0x29C, and it also keeps a local position at +0xB4 with a
+    // parent id at +0xC8 and the parent's own world position at +0xEC, which
+    // is what Master Looter composes. Session thirty-five found every pickup
+    // sitting within two units of the world origin while the player stood ten
+    // thousand away: those are entities whose cached world position is not
+    // filled, and the sum of local and parent is where they really are. So
+    // both are read, and the one that is not parked at the origin wins.
+    bool WorldPos(uintptr_t e, float* out, bool* usedParent = nullptr)
     {
         __try
         {
@@ -212,12 +231,40 @@ namespace
             if (!PtrLike(comps)) return false;
             const uintptr_t tf = *reinterpret_cast<const uintptr_t*>(comps + kOff_Comps_Transform);
             if (!PtrLike(tf)) return false;
-            memcpy(out, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
-            if (!std::isfinite(out[0]) || !std::isfinite(out[1]) || !std::isfinite(out[2])) return false;
-            if (std::fabs(out[0]) + std::fabs(out[1]) + std::fabs(out[2]) > 1.0e6f) return false;
-            // Not placed yet: session twenty-six had entities at the origin.
-            if (out[0] == 0.0f && out[1] == 0.0f && out[2] == 0.0f) return false;
-            return true;
+
+            float cached[3];
+            memcpy(cached, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
+            const bool cachedOk = Sane(cached) &&
+                                  (std::fabs(cached[0]) + std::fabs(cached[2]) > 4.0f);
+
+            float local[3];
+            memcpy(local, reinterpret_cast<const void*>(tf + kOff_Tf_LocalPos), 12);
+            bool localOk = Sane(local);
+            if (localOk)
+            {
+                const uint32_t parent = *reinterpret_cast<const uint32_t*>(tf + kOff_Tf_ParentEid);
+                if (parent != 0xFFFFFFFF && parent != 0)
+                {
+                    float pw[3];
+                    memcpy(pw, reinterpret_cast<const void*>(tf + kOff_Tf_ParentPos), 12);
+                    if (Sane(pw)) { local[0] += pw[0]; local[1] += pw[1]; local[2] += pw[2]; }
+                }
+                localOk = std::fabs(local[0]) + std::fabs(local[2]) > 4.0f;
+            }
+
+            if (cachedOk)
+            {
+                memcpy(out, cached, 12);
+                if (usedParent) *usedParent = false;
+                return true;
+            }
+            if (localOk)
+            {
+                memcpy(out, local, 12);
+                if (usedParent) *usedParent = true;
+                return true;
+            }
+            return false;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -542,7 +589,8 @@ namespace gs::actors
             for (; j < g_setN; ++j) if (g_set[j].ptr == e) break;
             if (j < g_setN && g_set[j].lastSeenMs == nowMs) { ++dupes; continue; }   // listed twice this pass
             float pos[3];
-            if (!WorldPos(e, pos))
+            bool usedParent = false;
+            if (!WorldPos(e, pos, &usedParent))
             {
                 ++noPos;
                 if (g_failLogsLeft > 0 && pp.valid && (i % 7) == 3)
@@ -573,6 +621,7 @@ namespace gs::actors
             }
             Entity& en = g_set[j];
             en.x = pos[0]; en.y = pos[1]; en.z = pos[2];
+            en.parented = usedParent;
             en.lastSeenMs = nowMs;
             // The glint byte, every pass: the event that sets it can fire any time.
             bool g = false;
@@ -627,16 +676,28 @@ namespace gs::actors
             g_lastSaidMs = nowMs;
             GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d gimmicks, %d of them pickups, %d lit",
                    n, dupes, noPos, g_setN, gimmicks, pickups, lits);
+            // The nearest pickups, which is what the player can actually see.
+            int order[6];
+            float dist[6];
             int named = 0;
-            for (int i = 0; i < g_setN && named < 4; ++i)
-                if (g_set[i].pickup)
-                {
-                    ++named;
-                    const float dx = g_set[i].x - pp.x, dz = g_set[i].z - pp.z;
-                    GS_LOG("[actors]   pickup eid %08X \"%s\"%s at (%.1f, %.1f, %.1f), %.0f away", g_set[i].eid,
-                           g_set[i].name[0] ? g_set[i].name : "?", g_set[i].locked ? ", locked" : "",
-                           g_set[i].x, g_set[i].y, g_set[i].z, std::sqrt(dx * dx + dz * dz));
-                }
+            for (int i = 0; i < g_setN; ++i)
+            {
+                if (!g_set[i].pickup) continue;
+                const float dx = g_set[i].x - pp.x, dz = g_set[i].z - pp.z;
+                const float d = std::sqrt(dx * dx + dz * dz);
+                if (named == 6 && d >= dist[5]) continue;
+                int pos2 = named < 6 ? named : 5;
+                while (pos2 > 0 && dist[pos2 - 1] > d) { dist[pos2] = dist[pos2 - 1]; order[pos2] = order[pos2 - 1]; --pos2; }
+                dist[pos2] = d; order[pos2] = i;
+                if (named < 6) ++named;
+            }
+            for (int k = 0; k < named; ++k)
+            {
+                const Entity& en = g_set[order[k]];
+                GS_LOG("[actors]   pickup eid %08X \"%s\"%s%s at (%.1f, %.1f, %.1f), %.0f away", en.eid,
+                       en.name[0] ? en.name : "?", en.locked ? ", locked" : "", en.parented ? ", via its parent" : "",
+                       en.x, en.y, en.z, dist[k]);
+            }
             int shown = 0;
             for (int i = 0; i < g_setN && shown < 3; ++i)
                 if (g_set[i].glint)

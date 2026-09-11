@@ -29,6 +29,7 @@ namespace
         cand.lit = e.lit;
         cand.pickup = e.pickup;
         cand.locked = e.locked;
+        cand.parented = e.parented;
         memcpy(cand.name, e.name, sizeof(cand.name));
         const uintptr_t vt = Deref(e.ptr);
         const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;

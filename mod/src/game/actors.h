@@ -32,6 +32,7 @@ namespace gs::actors
         bool lit = false;            // the reveal effect is on it right now
         bool pickup = false;         // a gimmick carrying item or gather data
         bool locked = false;
+        bool parented = false;       // its position came from the parent chain
         char name[48]{};             // the gimmick's node name, when it has one
         uintptr_t gimmickComp = 0;
         uintptr_t detectComp = 0;    // its own ClientDetectActorComponent, or 0

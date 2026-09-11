@@ -34,6 +34,7 @@ namespace gs::nearest
         bool lit = false;            // the reveal effect is on it right now
         bool pickup = false;         // a gimmick that yields an item
         bool locked = false;
+        bool parented = false;
         char name[48]{};             // the gimmick's node name
         char cls[80]{};
     };
