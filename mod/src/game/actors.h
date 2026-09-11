@@ -34,6 +34,7 @@ namespace gs::actors
         bool knowledge = false;      // carries a ClientKnowledgeActorComponent
         bool locked = false;
         bool parented = false;       // its position came from the parent chain
+        float cx = 0, cy = 0, cz = 0; // the transform's cached world position
         char name[48]{};             // the gimmick's node name, when it has one
         uintptr_t gimmickComp = 0;
         uintptr_t detectComp = 0;    // its own ClientDetectActorComponent, or 0

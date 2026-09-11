@@ -36,6 +36,7 @@ namespace gs::nearest
         bool knowledge = false;      // carries a knowledge component
         bool locked = false;
         bool parented = false;
+        float cx = 0, cy = 0, cz = 0;   // the cached world position, for the log
         char name[48]{};             // the gimmick's node name
         char cls[80]{};
     };

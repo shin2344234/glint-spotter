@@ -31,6 +31,7 @@ namespace
         cand.knowledge = e.knowledge;
         cand.locked = e.locked;
         cand.parented = e.parented;
+        cand.cx = e.cx; cand.cy = e.cy; cand.cz = e.cz;
         memcpy(cand.name, e.name, sizeof(cand.name));
         const uintptr_t vt = Deref(e.ptr);
         const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;

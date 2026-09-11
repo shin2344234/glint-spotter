@@ -216,15 +216,17 @@ namespace
 
     // Where an entity is, in the map's frame.
     //
-    // Two models, and they disagree. The transform keeps a cached world
-    // position at +0x29C, and it also keeps a local position at +0xB4 with a
-    // parent id at +0xC8 and the parent's own world position at +0xEC, which
-    // is what Master Looter composes. Session thirty-five found every pickup
-    // sitting within two units of the world origin while the player stood ten
-    // thousand away: those are entities whose cached world position is not
-    // filled, and the sum of local and parent is where they really are. So
-    // both are read, and the one that is not parked at the origin wins.
-    bool WorldPos(uintptr_t e, float* out, bool* usedParent = nullptr)
+    // The transform keeps two answers and they disagree. There is a cached
+    // world position at +0x29C, and there is a local position at +0xB4 with a
+    // parent id at +0xC8 and the parent's world position at +0xEC. Master
+    // Looter has composed the second pair since build 2474 and its distances
+    // match what the player sees; this mod preferred the cached one and put a
+    // pin twenty metres from the berry patch it named, with every entity
+    // reading several metres below the player's own feet.
+    //
+    // So the composed position wins whenever it is usable, and the cached one
+    // is the fallback. Both are kept, and the log prints the gap.
+    bool WorldPos(uintptr_t e, float* out, bool* usedParent = nullptr, float* cached = nullptr)
     {
         __try
         {
@@ -233,14 +235,15 @@ namespace
             const uintptr_t tf = *reinterpret_cast<const uintptr_t*>(comps + kOff_Comps_Transform);
             if (!PtrLike(tf)) return false;
 
-            float cached[3];
-            memcpy(cached, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
-            const bool cachedOk = Sane(cached) &&
-                                  (std::fabs(cached[0]) + std::fabs(cached[2]) > 4.0f);
+            float world[3];
+            memcpy(world, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
+            const bool worldOk = Sane(world) && (std::fabs(world[0]) + std::fabs(world[2]) > 4.0f);
+            if (cached && worldOk) memcpy(cached, world, 12);
 
             float local[3];
             memcpy(local, reinterpret_cast<const void*>(tf + kOff_Tf_LocalPos), 12);
             bool localOk = Sane(local);
+            bool composed = false;
             if (localOk)
             {
                 const uint32_t parent = *reinterpret_cast<const uint32_t*>(tf + kOff_Tf_ParentEid);
@@ -248,21 +251,25 @@ namespace
                 {
                     float pw[3];
                     memcpy(pw, reinterpret_cast<const void*>(tf + kOff_Tf_ParentPos), 12);
-                    if (Sane(pw)) { local[0] += pw[0]; local[1] += pw[1]; local[2] += pw[2]; }
+                    if (Sane(pw))
+                    {
+                        local[0] += pw[0]; local[1] += pw[1]; local[2] += pw[2];
+                        composed = true;
+                    }
                 }
                 localOk = std::fabs(local[0]) + std::fabs(local[2]) > 4.0f;
             }
 
-            if (cachedOk)
-            {
-                memcpy(out, cached, 12);
-                if (usedParent) *usedParent = false;
-                return true;
-            }
             if (localOk)
             {
                 memcpy(out, local, 12);
-                if (usedParent) *usedParent = true;
+                if (usedParent) *usedParent = composed;
+                return true;
+            }
+            if (worldOk)
+            {
+                memcpy(out, world, 12);
+                if (usedParent) *usedParent = false;
                 return true;
             }
             return false;
@@ -691,8 +698,9 @@ namespace gs::actors
             for (; j < g_setN; ++j) if (g_set[j].ptr == e) break;
             if (j < g_setN && g_set[j].lastSeenMs == nowMs) { ++dupes; continue; }   // listed twice this pass
             float pos[3];
+            float cached[3] = {0, 0, 0};
             bool usedParent = false;
-            if (!WorldPos(e, pos, &usedParent))
+            if (!WorldPos(e, pos, &usedParent, cached))
             {
                 ++noPos;
                 if (g_failLogsLeft > 0 && pp.valid && (i % 7) == 3)
@@ -726,6 +734,7 @@ namespace gs::actors
             Entity& en = g_set[j];
             en.x = pos[0]; en.y = pos[1]; en.z = pos[2];
             en.parented = usedParent;
+            en.cx = cached[0]; en.cy = cached[1]; en.cz = cached[2];
             en.lastSeenMs = nowMs;
             // The glint byte, every pass: the event that sets it can fire any time.
             bool g = false;
