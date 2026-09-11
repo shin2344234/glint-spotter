@@ -1044,3 +1044,53 @@ which the automatic marker uses at any range. The one route left to an
 exact far ground point is the depth buffer: a Direct3D 12 hook that reads
 the depth under the centre pixel at present time. It is a larger piece of
 work and it is not started.
+
+
+## The 2.02.00 patch, 11 September 2026
+
+The game updated itself to Steam 2.02.00, exe 1.0.0.2850, at 05:32. Every
+recorded address moved and the mod's checks refused every hook, which is
+their job. `docs/investigations/rebase.py` re-derives the block in
+`signatures.h` from a new exe, and 0.10.0 stops depending on most of it:
+vtables fall back to RTTI, the camera update is matched by its first bytes,
+the ray cast wrapper by its prologue pattern with the facade and frame
+offset decoded from its own operands.
+
+Four audits, each refuted by a second pass, went over everything:
+
+- Nothing the mod reads or calls changed in shape. Entity, transform,
+  actor manager pools, the gimmick byte and its setter, the detect gate,
+  the map icon dispatcher and constructor, the camera update chain (shifted
+  by a flat 0x11B0), the ray cast wrapper (byte for byte). Only addresses
+  moved, and `signatures.h` already carries the new ones. True slot counts,
+  now boundary-checked: map roots 185 each, TPS camera 16, detect component
+  47, special mode 44, actor manager 10, transform 71.
+- One trap for a future rebase: `hknpWorld`'s primary vtable no longer holds
+  castRay at slot 61; it sits on a secondary vtable (locator offset 0x20).
+  The mod never reads that vtable, only the facade's, so nothing breaks.
+- The patch notes contain nothing about the map, pins, the flash, the
+  camera or terrain. No other mod had reacted at research time.
+- Runtime-only facts (the flash flag at special `+0x40`, the detect
+  scalars, the transform's local quaternion) were never tied to code and
+  stay unverified until a session on 2850 exercises them.
+
+Three things the audit found that were never in the notes:
+
+1. **A native pin subsystem.** `PinMarkerIconSaveData`,
+   `TrocTrCreateOrChangePinMarkerReq/Ack`, `TrocTrRemovePinMarkerReq/Ack`,
+   a `CreateOrUpdatePinMarkerIcon` string, and error codes for too many
+   pins and for removing an unknown one. The mod's pins skip all of it and
+   go straight to the icon dispatcher with a made-up id, so they are almost
+   certainly session-local and not the player's to delete. Routing through
+   the request path would make them real.
+2. **A second glint candidate on gimmicks.** A sub-object at gimmick
+   component `+0x438` holding a custom render value table, reached by
+   `GimmickEventHandlerData_DetectLighting` (gimmick vtable slot 167) and
+   `SetDetectCustomRenderValueName`. The `+0x45B` byte was set at spawn and
+   cleared; this table is where a "lit by the flash" state would live for
+   gimmicks. Characters need their own answer; `ClientKnowledgeActorComponent`
+   is the open question there.
+3. **A screen-space ray cast with a GPU depth readback already exists in
+   the engine**, used by two real functions (`0x302C600`, `0x3A12A20`), the
+   native analog of the depth-buffer plan for far ground points. What owns
+   it and whether it runs every frame is not yet known.
