@@ -50,8 +50,9 @@ namespace
         fputs("; every pin, so the list can be grown from a session.\n", f);
         fputs("Mark=clue,artifact,treasure,relic,chest,challenge,standstone,socket_collection,", f);
         fputs("gather,ore,herb,flower,mushroom,useartifact,puzzle_attach,dial,crank,lever\n", f);
-        fputs("; How far from you a node can be and still be pinned, in metres.\n", f);
-        fputs("Radius=80\n", f);
+        fputs("; An optional cap in metres on how far a node can be. Zero means\n", f);
+        fputs("; everything the game has loaded around you, which is the natural limit.\n", f);
+        fputs("Radius=0\n", f);
         fclose(f);
     }
 }
@@ -103,7 +104,7 @@ namespace gs::Settings
             else if (_stricmp(key, "Radius") == 0)
             {
                 const float r = static_cast<float>(atof(val));
-                if (r >= 5.0f && r <= 400.0f) g_values.radius = r;
+                if (r == 0.0f || (r >= 5.0f && r <= 2000.0f)) g_values.radius = r;
                 else GS_LOG_ERR("settings: Radius=%s is out of range, keeping %.0f", val, g_values.radius);
             }
             else
@@ -113,8 +114,12 @@ namespace gs::Settings
         }
         fclose(f);
 
-        GS_LOG("settings: Key=%02X (%s), Spy=%d, Radius=%.0f", g_values.key, KeyName(g_values.key),
-               g_values.spy ? 1 : 0, g_values.radius);
+        if (g_values.radius > 0.0f)
+            GS_LOG("settings: Key=%02X (%s), Spy=%d, Radius=%.0f metres", g_values.key, KeyName(g_values.key),
+                   g_values.spy ? 1 : 0, g_values.radius);
+        else
+            GS_LOG("settings: Key=%02X (%s), Spy=%d, no radius cap: everything the game has loaded",
+                   g_values.key, KeyName(g_values.key), g_values.spy ? 1 : 0);
         GS_LOG("settings: Mark=%s", g_values.mark);
         return g_values;
     }

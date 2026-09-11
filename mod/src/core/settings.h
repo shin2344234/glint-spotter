@@ -8,7 +8,9 @@
 //   Spy=1         ; log every map icon the game creates, through slot 170
 //   Mark=clue,artifact,...   ; node names worth a pin, matched anywhere in
 //                            ; the prefab path
-//   Radius=80     ; how far from the player a node can be and still be pinned
+//   Radius=0      ; optional cap in metres on how far a node can be. Zero,
+//                 ; the default, means everything the game has loaded, which
+//                 ; is already a few hundred metres and no more.
 //
 // Master Looter's notes record a whole test round lost to a key appended at the
 // end of a sectioned ini, where it landed under the wrong section and read as
@@ -29,7 +31,11 @@ namespace gs::Settings
         char mark[512] = "clue,artifact,treasure,relic,chest,challenge,standstone,"
                          "socket_collection,gather,ore,herb,flower,mushroom,useartifact,"
                          "puzzle_attach,dial,crank,lever";
-        float radius = 80.0f;
+        // Zero means no cap. The entity set only holds what the actor
+        // manager has handed over, which is the world around the player and
+        // nothing beyond it, so a radius is a second limit doing the first
+        // one's job. It stays for anyone who wants fewer pins.
+        float radius = 0.0f;
     };
 
     // True when `path` contains any of the Mark list's entries.
