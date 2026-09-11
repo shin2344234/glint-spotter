@@ -63,7 +63,7 @@ namespace
     const char* const kKeywords[] = {
         "MapIcon", "MiniMap", "Minimap", "WorldMap", "DetectMode", "SpecialMode",
         "ClientDetectActorComponent", "ClientTransformSyncActorComponent",
-        "ClientActorManager", "PlayerCameraTPSMode",
+        "ClientActorManager", "PlayerCameraTPSMode", "ClientGimmickActorComponent",
     };
     uintptr_t g_cameraVt = 0;
     uintptr_t g_managerVt = 0;
@@ -213,31 +213,46 @@ namespace
             // Read the vtable at the expected address and let RTTI name it,
             // independent of what the keyword sweep happened to keep.
             const bool agreed = gs::rtti::VtableIs(reinterpret_cast<const void*>(base + e.rva), e.name);
+            uintptr_t vt = agreed ? base + e.rva : 0;
             if (agreed)
-            {
                 GS_LOG_OK("signatures.h +0x%08llX still matches %s",
                           static_cast<unsigned long long>(e.rva), ShortName(e.name));
-                // Only a vtable the running game has just named gets hooked.
-                if (e.rva == gs::sig::kWorldMapVtable) g_worldVt = base + e.rva;
-                if (e.rva == gs::sig::kMiniMapVtable)  g_miniVt = base + e.rva;
-            }
             else
-                GS_LOG_ERR("signatures.h +0x%08llX no longer matches %s, RVAs are stale",
-                           static_cast<unsigned long long>(e.rva), ShortName(e.name));
+            {
+                // The 11 September patch moved every address. The sweep names
+                // the same class by RTTI, and that vtable is as good.
+                for (size_t i = 0; i < n && !vt; ++i)
+                    if (found[i].vtableVa && strcmp(found[i].name, e.name) == 0) vt = found[i].vtableVa;
+                if (vt)
+                    GS_LOG_OK("signatures.h +0x%08llX is stale; %s found by RTTI at +0x%08llX instead",
+                              static_cast<unsigned long long>(e.rva), ShortName(e.name),
+                              static_cast<unsigned long long>(vt - base));
+                else
+                    GS_LOG_ERR("signatures.h +0x%08llX no longer matches %s and RTTI did not offer it",
+                               static_cast<unsigned long long>(e.rva), ShortName(e.name));
+            }
+            // Only a vtable the running game has just named gets hooked.
+            if (vt && e.rva == gs::sig::kWorldMapVtable) g_worldVt = vt;
+            if (vt && e.rva == gs::sig::kMiniMapVtable)  g_miniVt = vt;
         }
 
         // The gimmick component's vtable, so the entity set can find the
         // component with one compare and read its detect mode target byte.
-        if (gs::rtti::VtableIs(reinterpret_cast<const void*>(base + gs::sig::kGimmickVtable), gs::sig::kGimmickClass))
         {
-            gs::actors::SetGimmickVtable(base + gs::sig::kGimmickVtable);
-            GS_LOG_OK("signatures.h +0x%08llX still matches ClientGimmickActorComponent; glint byte at +0x%llX",
-                      static_cast<unsigned long long>(gs::sig::kGimmickVtable),
-                      static_cast<unsigned long long>(gs::sig::kOff_Gimmick_DetectTgt));
+            uintptr_t gvt = gs::rtti::VtableIs(reinterpret_cast<const void*>(base + gs::sig::kGimmickVtable), gs::sig::kGimmickClass)
+                                ? base + gs::sig::kGimmickVtable : 0;
+            for (size_t i = 0; i < n && !gvt; ++i)
+                if (found[i].vtableVa && strcmp(found[i].name, gs::sig::kGimmickClass) == 0) gvt = found[i].vtableVa;
+            if (gvt)
+            {
+                gs::actors::SetGimmickVtable(gvt);
+                GS_LOG_OK("ClientGimmickActorComponent vtable at +0x%08llX (%s); glint byte at +0x%llX",
+                          static_cast<unsigned long long>(gvt - base),
+                          gvt == base + gs::sig::kGimmickVtable ? "as recorded" : "by RTTI, the record is stale",
+                          static_cast<unsigned long long>(gs::sig::kOff_Gimmick_DetectTgt));
+            }
+            else GS_LOG_ERR("ClientGimmickActorComponent not found by address or RTTI; gimmicks found by name, no glint byte");
         }
-        else
-            GS_LOG_ERR("signatures.h +0x%08llX no longer names ClientGimmickActorComponent; gimmicks found by name, no glint byte",
-                       static_cast<unsigned long long>(gs::sig::kGimmickVtable));
     }
 
     // Read what the create path would need. False means the candidate does not

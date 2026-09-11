@@ -6,25 +6,31 @@
 
 #include "core/log.h"
 #include "game/rtti.h"
+#include "game/signatures.h"
 #include "game/typescan.h"
 
 namespace
 {
-    constexpr uintptr_t kWrapperRva     = 0x03926550;
-    constexpr uintptr_t kFacadeRva      = 0x06915FB8;   // the static physics world facade
-    constexpr uintptr_t kWorldPtrRva    = 0x06C16B20;   // hknpWorld*, null until a world exists
-    constexpr uintptr_t kFrameOffsetRva = 0x06C16B80;   // float4 subtracted from every position
-    constexpr int       kSlotCastRay    = 61;
-
-    // The wrapper's first twelve bytes: mov rax,rsp; mov [rax+8],rbx; mov
-    // [rax+0x10],rsi; mov [rax+0x18],rdi starts.
-    const uint8_t kPrologue[12] = {0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x08, 0x48, 0x89, 0x70, 0x10, 0x48};
+    // The wrapper's first 27 bytes: mov rax,rsp; four register homes; push rbp,
+    // r14, r15; sub rsp,0x200. Ten functions in the image start this way, so
+    // the two stack argument reads that follow within 0x60 bytes are required
+    // too: mov rdi,[rsp+0x240] and vmovss xmm8,[rsp+0x248].
+    const uint8_t kPrologue[27] = {
+        0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x08, 0x48, 0x89, 0x70, 0x10, 0x48, 0x89, 0x78, 0x18,
+        0x4C, 0x89, 0x60, 0x20, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xEC};
+    const uint8_t kArgDir[8]  = {0x48, 0x8B, 0xBC, 0x24, 0x40, 0x02, 0x00, 0x00};
+    const uint8_t kArgDist[9] = {0xC5, 0x7A, 0x10, 0x84, 0x24, 0x48, 0x02, 0x00, 0x00};
 
     using CastFn = bool (*)(void* unused, int layer, bool flag, const float* start, const float* dir,
                             float maxDist, float* outDist, float* outNormal, bool* outFlag);
 
     uintptr_t g_base = 0;
     size_t g_size = 0;
+    uintptr_t g_wrapper = 0;
+    uintptr_t g_facade = 0;
+    uintptr_t g_frameOff = 0;
+    bool g_located = false;
+    bool g_saidWhy = false;
 
     bool Base()
     {
@@ -48,6 +54,94 @@ namespace
         }
     }
 
+    bool Has(const uint8_t* hay, size_t n, const uint8_t* needle, size_t m)
+    {
+        if (m > n) return false;
+        for (size_t i = 0; i + m <= n; ++i)
+            if (memcmp(hay + i, needle, m) == 0) return true;
+        return false;
+    }
+
+    // rip-relative target of an instruction whose disp32 sits at `at`, with
+    // the instruction ending `tail` bytes after the disp32.
+    uintptr_t RipTarget(uintptr_t at, int tail = 0)
+    {
+        int32_t disp;
+        memcpy(&disp, reinterpret_cast<const void*>(at), 4);
+        return at + 4 + tail + static_cast<intptr_t>(disp);
+    }
+
+    // Find the wrapper in the module's code and decode its operands. Runs once.
+    void Locate()
+    {
+        if (g_located || !Base()) return;
+        g_located = true;
+        uintptr_t at = g_base;
+        __try
+        {
+            while (at < g_base + g_size && !g_wrapper)
+            {
+                MEMORY_BASIC_INFORMATION mbi{};
+                if (!VirtualQuery(reinterpret_cast<const void*>(at), &mbi, sizeof(mbi))) break;
+                const uintptr_t rb = reinterpret_cast<uintptr_t>(mbi.BaseAddress), re = rb + mbi.RegionSize;
+                const bool code = mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) &&
+                                  (mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+                if (code)
+                {
+                    const uint8_t* p = reinterpret_cast<const uint8_t*>(rb);
+                    const size_t n = re - rb;
+                    for (size_t i = 0; i + 0x220 <= n; ++i)
+                    {
+                        if (p[i] != 0x48 || memcmp(p + i, kPrologue, sizeof(kPrologue)) != 0) continue;
+                        if (!Has(p + i + sizeof(kPrologue), 0x60, kArgDir, sizeof(kArgDir))) continue;
+                        if (!Has(p + i + sizeof(kPrologue), 0x60, kArgDist, sizeof(kArgDist))) continue;
+                        const uintptr_t fn = rb + i;
+                        // The facade: mov rax,[rip+d] (48 8B 05) followed by lea rcx,[rip+d']
+                        // (48 8D 0D) with both resolving to the same address.
+                        uintptr_t facade = 0, frame = 0;
+                        for (size_t k = 0; k + 14 <= 0x220; ++k)
+                        {
+                            const uint8_t* q = p + i + k;
+                            if (!facade && q[0] == 0x48 && q[1] == 0x8B && q[2] == 0x05 && q[7] == 0x48 && q[8] == 0x8D && q[9] == 0x0D)
+                            {
+                                const uintptr_t a = RipTarget(fn + k + 3), b = RipTarget(fn + k + 10);
+                                if (a == b) facade = a;
+                            }
+                            // vsubps xmm4, xmm1, [rip+d]: C5 F0 5C 25
+                            if (!frame && q[0] == 0xC5 && q[1] == 0xF0 && q[2] == 0x5C && q[3] == 0x25)
+                                frame = RipTarget(fn + k + 4);
+                        }
+                        if (facade && frame)
+                        {
+                            g_wrapper = fn;
+                            g_facade = facade;
+                            g_frameOff = frame;
+                            break;
+                        }
+                    }
+                }
+                at = re;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        if (g_wrapper)
+        {
+            GS_LOG_OK("[physics] ray cast wrapper found by pattern at RVA 0x%llX; facade RVA 0x%llX, frame offset RVA 0x%llX%s",
+                      static_cast<unsigned long long>(g_wrapper - g_base), static_cast<unsigned long long>(g_facade - g_base),
+                      static_cast<unsigned long long>(g_frameOff - g_base),
+                      g_wrapper - g_base == gs::sig::kRayCastWrapper ? " (as recorded)" : " (moved since the record)");
+        }
+        else
+        {
+            g_wrapper = g_base + gs::sig::kRayCastWrapper;
+            g_facade = g_base + gs::sig::kPhysicsFacade;
+            g_frameOff = g_base + gs::sig::kPhysicsFrameOff;
+            GS_LOG_ERR("[physics] the ray cast wrapper's pattern was not found; using the recorded RVAs, which the prologue check may refuse");
+        }
+    }
+
     bool CallGuarded(CastFn fn, void* facade, int layer, bool flag, const float* start, const float* dir,
                      float maxDist, float* outDist, float* outNormal, bool* outFlag, bool* result)
     {
@@ -68,17 +162,16 @@ namespace gs::physics
     bool Ready(const char** why)
     {
         if (!Base()) { *why = "module range unknown"; return false; }
-        const uintptr_t fn = g_base + kWrapperRva;
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(fn), sizeof(kPrologue)) ||
-            memcmp(reinterpret_cast<const void*>(fn), kPrologue, sizeof(kPrologue)) != 0)
+        Locate();
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(g_wrapper), sizeof(kPrologue)) ||
+            memcmp(reinterpret_cast<const void*>(g_wrapper), kPrologue, sizeof(kPrologue)) != 0)
         {
-            *why = "the wrapper at RVA 0x3926550 does not start with the analysed bytes";
+            *why = "the wrapper does not start with the analysed bytes";
             return false;
         }
-        uintptr_t vt = 0, slot = 0, world = 0;
-        if (!ReadQ(g_base + kFacadeRva, &vt) || !InImage(vt)) { *why = "the facade's vtable is not in the image"; return false; }
-        if (!ReadQ(vt + kSlotCastRay * 8, &slot) || !InImage(slot)) { *why = "the facade's castRay slot is not in the image"; return false; }
-        if (!ReadQ(g_base + kWorldPtrRva, &world) || !world) { *why = "no physics world yet"; return false; }
+        uintptr_t vt = 0, slot = 0;
+        if (!ReadQ(g_facade, &vt) || !InImage(vt)) { *why = "the facade's vtable is not in the image"; return false; }
+        if (!ReadQ(vt + sig::kSlotCastRay * 8, &slot) || !InImage(slot)) { *why = "the facade's castRay slot is not in the image"; return false; }
         return true;
     }
 
@@ -86,16 +179,19 @@ namespace gs::physics
     {
         Hit h;
         const char* why = nullptr;
-        if (!Ready(&why)) return h;
+        if (!Ready(&why))
+        {
+            if (!g_saidWhy) { g_saidWhy = true; GS_LOG_ERR("[physics] not ready: %s", why); }
+            return h;
+        }
         float s[4] = {start[0], start[1], start[2], 0};
         float d[4] = {dir[0], dir[1], dir[2], 0};
         float dist = 0;
         float normal[4] = {0, 0, 0, 0};
         bool f = false;
         bool result = false;
-        const CastFn fn = reinterpret_cast<CastFn>(g_base + kWrapperRva);
-        if (!CallGuarded(fn, reinterpret_cast<void*>(g_base + kFacadeRva), layer, flag, s, d, maxDist,
-                         &dist, normal, &f, &result))
+        const CastFn fn = reinterpret_cast<CastFn>(g_wrapper);
+        if (!CallGuarded(fn, reinterpret_cast<void*>(g_facade), layer, flag, s, d, maxDist, &dist, normal, &f, &result))
         {
             GS_LOG_ERR("[physics] the cast faulted (layer %d); no hit", layer);
             return h;
@@ -112,17 +208,12 @@ namespace gs::physics
     {
         const char* why = nullptr;
         const bool ok = Ready(&why);
-        uintptr_t vt = 0, world = 0;
-        ReadQ(g_base + kFacadeRva, &vt);
-        ReadQ(g_base + kWorldPtrRva, &world);
+        uintptr_t vt = 0;
+        ReadQ(g_facade, &vt);
         float off[4] = {0, 0, 0, 0};
-        if (gs::rtti::Readable(reinterpret_cast<const void*>(g_base + kFrameOffsetRva), 16))
-            memcpy(off, reinterpret_cast<const void*>(g_base + kFrameOffsetRva), 16);
-        const char* wn = world && gs::rtti::Readable(reinterpret_cast<const void*>(world), 8)
-                             ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(*reinterpret_cast<const uintptr_t*>(world)))
-                             : nullptr;
-        GS_LOG("[physics] %s; facade vtable 0x%p, world 0x%p (%s), frame offset (%.1f, %.1f, %.1f, %.1f)",
-               ok ? "ready" : why, reinterpret_cast<void*>(vt), reinterpret_cast<void*>(world), wn ? wn : "?",
-               off[0], off[1], off[2], off[3]);
+        if (g_frameOff && gs::rtti::Readable(reinterpret_cast<const void*>(g_frameOff), 16))
+            memcpy(off, reinterpret_cast<const void*>(g_frameOff), 16);
+        GS_LOG("[physics] %s; wrapper 0x%p, facade vtable 0x%p, frame offset (%.1f, %.1f, %.1f, %.1f)",
+               ok ? "ready" : why, reinterpret_cast<void*>(g_wrapper), reinterpret_cast<void*>(vt), off[0], off[1], off[2], off[3]);
     }
 }

@@ -72,9 +72,15 @@ namespace gs::camera
         const uintptr_t held = reinterpret_cast<uintptr_t>(slots[sig::kSlotCameraUpdate]);
         const uintptr_t expect = base + sig::kCameraTPSUpdate;
         const bool inImage = held >= base && held < base + size;
-        if (inImage && held != expect)
+        // The update is known by its first bytes, which read the fade weight
+        // at this+0x338, and not by its address: the 11 September patch moved
+        // every function and the address check refused a correct slot.
+        const bool looksLikeUpdate = inImage &&
+            gs::rtti::Readable(reinterpret_cast<const void*>(held), sizeof(sig::kCameraUpdatePrologue)) &&
+            memcmp(reinterpret_cast<const void*>(held), sig::kCameraUpdatePrologue, sizeof(sig::kCameraUpdatePrologue)) == 0;
+        if (inImage && !looksLikeUpdate)
         {
-            GS_LOG_ERR("[camera] slot %d holds 0x%p, expected 0x%p; the layout differs from the analysed exe, not hooking",
+            GS_LOG_ERR("[camera] slot %d holds 0x%p and it does not start like the update (recorded at 0x%p); not hooking",
                        sig::kSlotCameraUpdate, reinterpret_cast<void*>(held), reinterpret_cast<void*>(expect));
             return false;
         }
@@ -87,7 +93,8 @@ namespace gs::camera
         gs_cameraOriginal = g_swap.original;
         GS_LOG_OK("[camera] slot %d on vtable 0x%p was 0x%p (%s), now the capture thunk",
                   sig::kSlotCameraUpdate, reinterpret_cast<void*>(vtable), g_swap.original,
-                  held == expect ? "the update at RVA 0x113C100" : "someone else's hook, stacked on");
+                  looksLikeUpdate ? (held == expect ? "the update, at the recorded address" : "the update, moved since the record")
+                                  : "someone else's hook, stacked on");
         return true;
     }
 
