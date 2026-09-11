@@ -44,6 +44,30 @@ namespace gs::dump
         }
     }
 
+    int EffectActivity(uintptr_t entity, size_t bytes)
+    {
+        __try
+        {
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(entity + 0x68), 8)) return -1;
+            const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(entity + 0x68);
+            if (comps < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(comps), 0x80)) return -1;
+            const uintptr_t eff = *reinterpret_cast<const uintptr_t*>(comps + 0x60);
+            if (eff < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(eff), bytes)) return -1;
+            int set = 0;
+            const auto* q = reinterpret_cast<const uintptr_t*>(eff);
+            for (size_t i = 1; i * 8 < bytes; ++i)
+            {
+                const uintptr_t v = q[i];
+                if (v >= 0x10000 && v <= 0x00007FFFFFFFFFFFull && (v & 7) == 0) ++set;
+            }
+            return set;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+    }
+
     void GimmickState(const char* tag, uintptr_t entity, size_t bytes)
     {
         uintptr_t comp = 0, sub = 0;

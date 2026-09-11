@@ -22,4 +22,10 @@ namespace gs::dump
     // with it off: the field that means "this one is glinting" is the one
     // that moves for the revealed node and for no other.
     void GimmickState(const char* tag, uintptr_t entity, size_t bytes);
+
+    // How busy an entity's effect component is: how many of the pointers in
+    // its first `bytes` are set. A revealed object has the reveal effect
+    // attached to it, so this should rise when the flash lights it and fall
+    // when the flash ends, and not move on its neighbours.
+    int EffectActivity(uintptr_t entity, size_t bytes);
 }
