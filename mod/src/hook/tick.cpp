@@ -427,58 +427,55 @@ namespace
         const gs::player::Pos pp = gs::player::Read();
         if (!pp.valid) return;
 
-        gs::actors::Entity around[16];
-        const float cap = gs::Settings::Get().radius;
-        const int n = gs::actors::MarkedNear(pp.x, pp.z, cap > 0.0f ? cap : 1.0e9f, around, 16);
-
-        // The node the crosshair is on: of the marked nodes, the one whose
-        // bearing from the camera is nearest the view's, within ten degrees,
-        // and at least three metres from the player so that something
-        // underfoot cannot take it. Held for a second, it gets one pin at its
-        // own position and nothing else does.
+        // The node the crosshair is on: of every marked node the game has
+        // loaded, the one whose bearing from the camera is nearest the view's,
+        // within fifteen degrees, and at least three metres from the player so
+        // that something underfoot cannot take it. Held for a second, it gets
+        // one pin at its own position and nothing else does.
+        //
+        // Every marked node, not a nearest handful. Session fifty asked for
+        // the sixteen nearest and then chose among those, and the log says
+        // what that cost: twenty-seven marked nodes loaded, sixteen in reach,
+        // and the pin went to a berry bush twenty-two metres out. The eleven
+        // it dropped were the eleven farthest, which is where the glint was.
+        // A bearing test wants the far ones most: a bush three metres away
+        // sitting half a metre off the line is nine degrees wide, while a
+        // glint a hundred metres out has to be within a metre to read as one.
         //
         // Heights are not in this: session forty had firewood a metre away
         // reading six metres below the player's feet, so an angle measured in
         // three axes is unusable. A bearing is not.
+        gs::actors::Entity around[8];
+        float angles[8];
+        const float cap = gs::Settings::Get().radius;
+        int n = 0;
+        int marked = 0;
         View v;
-        int pick = -1;
-        float pickAngle = 0;
         if (ViewRay(pp, &v))
         {
             const float flen = std::sqrt(v.fx * v.fx + v.fz * v.fz);
             if (flen > 1e-3f)
-            {
-                const float ux = v.fx / flen, uz = v.fz / flen;
-                float best = 0.26f;   // fifteen degrees
-                for (int i = 0; i < n; ++i)
-                {
-                    const float px = around[i].x - pp.x, pz = around[i].z - pp.z;
-                    const float fromPlayer = std::sqrt(px * px + pz * pz);
-                    if (fromPlayer < 3.0f) continue;
-                    const float dx = around[i].x - v.ox, dz = around[i].z - v.oz;
-                    const float flat = std::sqrt(dx * dx + dz * dz);
-                    if (flat < 0.5f) continue;
-                    const float dot = (dx * ux + dz * uz) / flat;
-                    const float cross = (dx * uz - dz * ux) / flat;
-                    const float angle = std::fabs(std::atan2(cross, dot));
-                    if (angle < best) { best = angle; pick = i; pickAngle = angle; }
-                }
-            }
+                n = gs::actors::MarkedOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
+                                                cap > 0.0f ? cap : 1.0e9f, 0.26f, 3.0f,
+                                                around, angles, 8, &marked);
         }
+        const int pick = n > 0 ? 0 : -1;
+        const float pickAngle = n > 0 ? angles[0] : 0.0f;
 
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked nodes loaded, %d in reach",
-                   pp.x, pp.y, pp.z, gs::actors::PickupCount(), n);
+            GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked nodes loaded, %d of them in radius, "
+                   "%d within fifteen degrees of the crosshair",
+                   pp.x, pp.y, pp.z, gs::actors::PickupCount(), marked, n);
             for (int i = 0; i < n && i < 5; ++i)
             {
                 const float dx = around[i].x - pp.x, dz = around[i].z - pp.z;
-                GS_LOG("[auto]   %s\"%s\" eid %08X %.1f away at (%.1f, %.1f, %.1f), %d effects",
+                GS_LOG("[auto]   %s\"%s\" eid %08X %.1f degrees off, %.1f away at (%.1f, %.1f, %.1f)",
                        i == pick ? "ON THE CROSSHAIR " : "",
-                       around[i].name[0] ? around[i].name : "?", around[i].eid, std::sqrt(dx * dx + dz * dz),
-                       around[i].x, around[i].y, around[i].z, gs::dump::EffectActivity(around[i].ptr, 0x400));
+                       around[i].name[0] ? around[i].name : "?", around[i].eid, angles[i] * 57.2958f,
+                       std::sqrt(dx * dx + dz * dz), around[i].x, around[i].y, around[i].z);
             }
             if (pick < 0) GS_LOG("[auto]   nothing marked within fifteen degrees of the crosshair");
             else

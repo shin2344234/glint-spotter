@@ -75,6 +75,21 @@ namespace gs::actors
     // metres and nothing should turn on them.
     int MarkedNear(float px, float pz, float radius, Entity* out, int n);
 
+    // The marked nodes the crosshair is on, smallest bearing error first, so
+    // out[0] is the pick. The whole set is measured, not a nearest handful:
+    // session fifty asked for the nearest sixteen and then chose among those,
+    // and a berry bush three metres away won over the glint the player was
+    // aiming at, which is why the pin landed short.
+    //
+    // `px, pz` is the player, `ox, oz` the eye, `ux, uz` the unit view bearing.
+    // Nodes closer than `minFromPlayer` to the player cannot be picked, and
+    // nodes whose bearing error exceeds `maxAngle` radians are not candidates.
+    // `angles` receives each kept node's bearing error in radians. `marked`,
+    // when given, receives how many marked nodes were in radius at all.
+    int MarkedOnBearing(float px, float pz, float ox, float oz, float ux, float uz,
+                        float radius, float maxAngle, float minFromPlayer,
+                        Entity* out, float* angles, int n, int* marked);
+
     // The entity carrying this id, from the set, or 0.
     uintptr_t ByEid(uint32_t eid);
 

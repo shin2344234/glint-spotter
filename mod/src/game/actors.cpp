@@ -883,6 +883,41 @@ namespace gs::actors
         return found;
     }
 
+    int MarkedOnBearing(float px, float pz, float ox, float oz, float ux, float uz,
+                        float radius, float maxAngle, float minFromPlayer,
+                        Entity* out, float* angles, int n, int* marked)
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        int found = 0;
+        int inRadius = 0;
+        for (int i = 0; i < g_setN; ++i)
+        {
+            if (!g_set[i].pickup && !(g_set[i].gimmick && g_set[i].knowledge)) continue;
+            const float px2 = g_set[i].x - px, pz2 = g_set[i].z - pz;
+            const float fromPlayer = std::sqrt(px2 * px2 + pz2 * pz2);
+            if (fromPlayer > radius) continue;
+            ++inRadius;
+            if (fromPlayer < minFromPlayer) continue;
+            const float dx = g_set[i].x - ox, dz = g_set[i].z - oz;
+            const float flat = std::sqrt(dx * dx + dz * dz);
+            if (flat < 0.5f) continue;
+            const float dot = (dx * ux + dz * uz) / flat;
+            const float cross = (dx * uz - dz * ux) / flat;
+            const float angle = std::fabs(std::atan2(cross, dot));
+            if (angle >= maxAngle) continue;
+            int pos = found;
+            while (pos > 0 && angles[pos - 1] > angle)
+            {
+                if (pos < n) { out[pos] = out[pos - 1]; angles[pos] = angles[pos - 1]; }
+                --pos;
+            }
+            if (pos < n) { out[pos] = g_set[i]; angles[pos] = angle; }
+            if (found < n) ++found;
+        }
+        if (marked) *marked = inRadius;
+        return found;
+    }
+
     int LitNear(float px, float py, float pz, Entity* out, int n)
     {
         std::lock_guard<std::mutex> lock(g_setMutex);

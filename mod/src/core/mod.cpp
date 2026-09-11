@@ -778,18 +778,31 @@ namespace
 
             gs::actors::Locate(GetTickCount());
 
+            // How long to wait before the next sweep. A sweep reads gigabytes
+            // and takes the better part of a minute, and session fifty ran one
+            // every fifteen seconds for eight minutes without finding anything
+            // new: the two it wanted were the map roots, which do not exist
+            // until the player opens the map. Seth saw that as choppiness. So a
+            // sweep that finds nothing new buys the next one more time, up to
+            // two minutes, and a sweep that finds something starts over.
+            static size_t lastLive = 0;
+            static int barren = 0;
+            int ticks = 30;
             if (live < hunted)
             {
+                if (live > lastLive) barren = 0;
+                else if (barren < 4) ++barren;
+                lastLive = live;
                 GS_LOG("--- pass %d, %zu of %zu located ---", ++pass, live, hunted);
                 ScanFor();
                 idle = 0;
+                static const int kWait[5] = {10, 30, 60, 120, 240};  // 5 s to 2 min
+                ticks = kWait[barren];
             }
             else if (++idle == 1)
             {
                 GS_LOG_OK("all %zu located, holding. Nothing more unless one changes.", hunted);
             }
-
-            const int ticks = (pass < 6) ? 10 : 30;  // 5 s early, 15 s once settled
             for (int i = 0; i < ticks && !g_stop.load(); ++i) Sleep(500);
         }
         return 0;
