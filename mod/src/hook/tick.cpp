@@ -551,6 +551,13 @@ extern "C" void gs_OnMinimapTick(void* self)
                 GS_LOG("[mark] layer %d flag %d: hit at %.1f, normal (%.2f, %.2f, %.2f), out flag %d, lands (%.1f, %.1f, %.1f)",
                        layer, flag ? 1 : 0, h.dist, h.normal[0], h.normal[1], h.normal[2], h.flag ? 1 : 0,
                        v.ox + v.fx * h.dist, v.oy + v.fy * h.dist, v.oz + v.fz * h.dist);
+                // Sessions thirty and thirty-one: every direct hit sat on a face
+                // of a 160 by 160 box around the player with a normal along
+                // an axis. That is the edge of the loaded collision, not a
+                // surface, and it does not count.
+                const bool edge = std::fabs(h.normal[1]) < 0.05f &&
+                                  (std::fabs(std::fabs(h.normal[0]) - 1.0f) < 0.01f || std::fabs(std::fabs(h.normal[2]) - 1.0f) < 0.01f);
+                if (edge) continue;
                 // Ground-like first, then far.
                 const float score = (h.normal[1] > 0.3f ? 10000.0f : 0.0f) + h.dist;
                 if (score > bestScore) { bestScore = score; best = h; usedLayer = layer; }
@@ -569,6 +576,7 @@ extern "C" void gs_OnMinimapTick(void* self)
                 const float down[3] = {0, -1, 0};
                 int misses = 0, probes = 0;
                 float lastLoggedT = -100;
+                float t1 = -1, h1 = 0, t2 = -1, h2 = 0;   // the last two probes that found ground
                 for (float t = 4.0f; t <= 400.0f && probeT < 0; t += (t < 60.0f ? 4.0f : 8.0f))
                 {
                     const float px = v.ox + v.fx * t, pz = v.oz + v.fz * t, rayY = v.oy + v.fy * t;
@@ -577,6 +585,7 @@ extern "C" void gs_OnMinimapTick(void* self)
                     ++probes;
                     if (!h.hit) { ++misses; if (t - lastLoggedT >= 40.0f) { lastLoggedT = t; GS_LOG("[mark]   probe %.0f out: nothing below", t); } continue; }
                     const float groundY = from[1] - h.dist;
+                    t1 = t2; h1 = h2; t2 = t; h2 = groundY;
                     if (t - lastLoggedT >= 40.0f || groundY >= rayY - 0.2f)
                     {
                         lastLoggedT = t;
@@ -586,7 +595,28 @@ extern "C" void gs_OnMinimapTick(void* self)
                     if (groundY >= rayY - 0.2f) { probeT = t; probeY = groundY; }
                 }
                 GS_LOG("[mark] %d probes, %d found nothing below; %s", probes, misses,
-                       probeT > 0 ? "the ground meets the view ray" : "the view ray never meets the ground within 400 units");
+                       probeT > 0 ? "the ground meets the view ray" : "the view ray never meets the ground where collision is loaded");
+                // Beyond the loaded window, carry the last slope forward until it
+                // meets the ray. Wrong on a hill, right on a gentle fall, and
+                // better than the window's edge.
+                if (probeT < 0 && t1 > 0 && t2 > t1)
+                {
+                    const float slope = (h2 - h1) / (t2 - t1);
+                    const float denom = v.fy - slope;
+                    if (denom < -1e-4f)
+                    {
+                        const float t = (h2 - slope * t2 - v.oy) / denom;
+                        if (t > t2 && t <= 500.0f)
+                        {
+                            probeT = t;
+                            probeY = h2 + slope * (t - t2);
+                            GS_LOG("[mark] beyond the window: the ground slope %.3f from the last probes (%.0f: %.1f, %.0f: %.1f) meets the ray %.0f units out at height %.1f (extrapolated)",
+                                   slope, t1, h1, t2, h2, t, probeY);
+                        }
+                        else GS_LOG("[mark] beyond the window: the slope meets the ray at %.0f, out of range", t);
+                    }
+                    else GS_LOG("[mark] beyond the window: the ground falls away faster than the ray; no meeting point");
+                }
             }
             if (probeT > 0)
             {
