@@ -14,6 +14,7 @@
 #include "game/aim.h"
 #include "game/actors.h"
 #include "game/dump.h"
+#include "game/lgso.h"
 #include "game/camera.h"
 #include "hook/pad.h"
 #include "hook/tick.h"
@@ -998,6 +999,7 @@ namespace
             {
                 lgsoProbed = true;
                 ProbeLevelGimmicks();
+                gs::lgso::Load();
             }
 
             // How long to wait before the next sweep. A sweep reads gigabytes

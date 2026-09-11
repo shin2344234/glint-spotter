@@ -16,6 +16,7 @@
 #include "game/snapshot.h"
 #include "game/nearest.h"
 #include "game/actors.h"
+#include "game/lgso.h"
 #include "game/camera.h"
 #include "game/dump.h"
 #include "game/physics.h"
@@ -432,6 +433,7 @@ namespace
     int g_targetLogsLeft = 12;
     uint32_t g_targetLastMs = 0;
     int g_glintWinsLeft = 40;
+    int g_tableLogsLeft = 30;
     int g_quietLogsLeft = 20;
     uint32_t g_quietLastMs = 0;
     int g_lastGlintN = -1;
@@ -581,6 +583,24 @@ namespace
         float glintAngles[8];
         int glintN = 0;
 
+        // The level gimmick table, which is where the answer lives.
+        //
+        // Session sixty-seven settled it. With the player at (-9706.5, 559.9,
+        // -4235.0) the table put a placement at (-9715.7, 567.5, -4142.7), and
+        // Seth's own marker on the glint he has been testing against since
+        // session forty-seven sits at (-9714.073, -4141.196). Two metres apart.
+        // The thing he aims at is in the table, and the table does not care how
+        // far away he is: 17,728 placements across the whole map, read from a
+        // fixed global.
+        //
+        // Everything before this picked from what the actor manager had
+        // streamed, which never reached past about sixty-six metres, so a
+        // glint a hundred and nineteen metres out could not be chosen no
+        // matter how good the aim was.
+        gs::lgso::Place table[8];
+        float tableAngles[8];
+        int tableN = 0;
+
         gs::actors::Entity around[8];
         float angles[8];
         const float cap = gs::Settings::Get().radius;
@@ -598,6 +618,10 @@ namespace
                                                 around, angles, 8, &marked);
                 glintN = gs::actors::GlintOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
                                                     glints, glintAngles, 8);
+                tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
+                                             0.12f, 5.0f,
+                                             cap > 0.0f ? cap : 900.0f,
+                                             table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
                 // the thing he is looking at.
@@ -643,6 +667,22 @@ namespace
         }
         int pick = n > 0 ? 0 : -1;
         float pickAngle = n > 0 ? angles[0] : 0.0f;
+        // Seven degrees, because the table is complete and a wide cone over a
+        // complete set just invites the wrong answer. At two hundred metres
+        // seven degrees is twenty-four metres across, which is about the
+        // precision a crosshair has at that range.
+        bool byTable = tableN > 0;
+        if (byTable && g_tableLogsLeft > 0)
+        {
+            --g_tableLogsLeft;
+            const float dx = table[0].x - pp.x, dz = table[0].z - pp.z;
+            GS_LOG("[auto] the level gimmick table has %d placement(s) on the crosshair; the nearest "
+                   "the line is record %u element %u at (%.1f, %.1f, %.1f), %.0f metres away, "
+                   "%.1f degrees off",
+                   tableN, table[0].record, table[0].element, table[0].x, table[0].y, table[0].z,
+                   std::sqrt(dx * dx + dz * dz), tableAngles[0] * 57.2958f);
+        }
+
         bool byGlint = false;
         if (glintN > 0 && glintAngles[0] < 0.70f)   // forty degrees
         {
@@ -655,7 +695,7 @@ namespace
         // at 1.3 degrees and pinned it. Nothing about that pin was information.
         // The game marks the object it lights; when it has not marked
         // anything, the honest answer is nothing.
-        if (!byGlint && !gs::Settings::Get().guess)
+        if (!byTable && !byGlint && !gs::Settings::Get().guess)
         {
             if (g_quietLogsLeft > 0 && now - g_quietLastMs > 3000)
             {
@@ -720,7 +760,17 @@ namespace
             char name[64]{};
             bool valid = false;
         } chosen;
-        if (byGlint)
+        if (byTable)
+        {
+            chosen.x = table[0].x; chosen.y = table[0].y; chosen.z = table[0].z;
+            chosen.angleDeg = tableAngles[0] * 57.2958f;
+            chosen.eid = 0;
+            chosen.how = "the game's own level gimmick table";
+            _snprintf_s(chosen.name, sizeof(chosen.name), _TRUNCATE,
+                        "level gimmick %u.%u", table[0].record, table[0].element);
+            chosen.valid = true;
+        }
+        else if (byGlint)
         {
             chosen.x = glints[0].x; chosen.y = glints[0].y; chosen.z = glints[0].z;
             chosen.angleDeg = glintAngles[0] * 57.2958f;
@@ -829,7 +879,8 @@ namespace
                        std::fabs(east), east >= 0 ? "east" : "west");
             }
             PlaceAt(chosen.x, chosen.y, chosen.z,
-                    byGlint ? "automatic, the node the game marked as a detect mode target"
+                    byTable ? "automatic, the game's own level gimmick table"
+                            : byGlint ? "automatic, the node the game marked as a detect mode target"
                             : (byTarget ? "automatic, what the game's detect system is holding"
                                         : "automatic, the node under the crosshair"),
                     "Glint", pp, 8.0f);

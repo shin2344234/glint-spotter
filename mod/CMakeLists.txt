@@ -28,6 +28,7 @@ add_library(GlintSpotter SHARED
     src/game/player.cpp
     src/game/aim.cpp
     src/game/actors.cpp
+    src/game/lgso.cpp
     src/game/snapshot.cpp
     src/game/nearest.cpp
     src/game/camera.cpp
