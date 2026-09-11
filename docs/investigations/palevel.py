@@ -248,23 +248,74 @@ def transform_at(d, o):
     return q, p, s
 
 
-def positions(d):
-    """Transform pairs: (offset, world position, tile origin)."""
+def transform_runs(d, start=0):
+    """Every Transform-shaped run: a unit quaternion, a position, a scale.
+
+    Confirmed against abyssruins_cd_0002.palevel, which declares one placed
+    object and yields exactly one run at 0x173C: quaternion (0, 0.997, 0,
+    0.078), position (-7035.592, 588.141, -1954.682), scale (1, 1, 1). That
+    position sits inside the level's own _minVerts/_maxVerts box, which reads
+    (-7039.508, 587.924, -1958.450) to (-7031.654, 589.050, -1950.725), so the
+    layout is settled: 16 bytes of quaternion, 12 of position, 12 of scale.
+
+    The `_tiledTransform` follows at +40 and holds the same point with the
+    level's tile origin taken off. In that file the origin is
+    (-7000, 0, -1000); in graymane_camp_lv02_after it is (-10000, 0, -4000).
+    """
     out = []
-    o = 0
-    while o < len(d) - 0x50:
-        a = transform_at(d, o)
-        if a:
-            b = transform_at(d, o + 0x28)
-            if b:
-                w, t = a[1], b[1]
-                dx, dy, dz = w[0] - t[0], w[1] - t[1], w[2] - t[2]
-                if abs(dx) > 1.0 or abs(dz) > 1.0:
-                    out.append((o, w, (dx, dy, dz)))
-                    o += 0x50
-                    continue
+    o = start
+    n = len(d)
+    while o + 40 <= n:
+        q = struct.unpack_from("<ffff", d, o)
+        if all(v == v and abs(v) <= 1.001 for v in q) and 0.99 < sum(v * v for v in q) < 1.01:
+            pos = struct.unpack_from("<fff", d, o + 16)
+            sc = struct.unpack_from("<fff", d, o + 28)
+            if (all(v == v and abs(v) < 1e7 for v in pos)
+                    and all(v == v and 0.0001 < v < 10000.0 for v in sc)):
+                tiled = None
+                if o + 80 <= n:
+                    q2 = struct.unpack_from("<ffff", d, o + 40)
+                    if all(v == v and abs(v) <= 1.001 for v in q2) and 0.99 < sum(v * v for v in q2) < 1.01:
+                        tiled = struct.unpack_from("<fff", d, o + 56)
+                out.append((o, pos, sc, tiled))
+                o += 40
+                continue
         o += 4
     return out
+
+
+def placements(d):
+    """(prefab, world position, tile origin) by pairing in file order.
+
+    The identity string of an object comes BEFORE its field list, not after:
+    a level's first SceneObject block reads header, prefab path, field count,
+    fields. An earlier version of this file had the association off by one
+    because the prefab sits between one object's fields and the next object's
+    count and can be read either way.
+
+    Pairing is by order, which is an assumption and not a proof. The counts
+    are printed so the assumption can be judged.
+    """
+    names = []
+    o = 0
+    n = len(d)
+    while o + 4 < n:
+        g = pstring(d, o)
+        if g:
+            if g[0].lower().endswith(".prefab"):
+                names.append((o, g[0]))
+            o = g[1]
+        else:
+            o += 1
+    runs = transform_runs(d)
+    out = []
+    for i, (off, pos, sc, tiled) in enumerate(runs):
+        name = names[i][1] if i < len(names) else None
+        org = None
+        if tiled:
+            org = (pos[0] - tiled[0], pos[1] - tiled[1], pos[2] - tiled[2])
+        out.append((name, pos, org, off))
+    return out, len(names), len(runs)
 
 
 def main():
@@ -310,13 +361,17 @@ def main():
         print("%d prefab(s)" % n)
 
     if a.positions:
-        ps = positions(d)
-        print("%d transform pair(s) found by shape" % len(ps))
-        for o, w, org in ps:
-            print("  0x%06X  world (%11.3f, %9.3f, %11.3f)   tile origin (%.0f, %.0f, %.0f)"
-                  % (o, w[0], w[1], w[2], org[0], org[1], org[2]))
-        print("NOTE: this is a shape scan, not a walk of the value region. It is")
-        print("incomplete and does not say which object each position belongs to.")
+        rows, nnames, nruns = placements(d)
+        print("%d prefab path(s), %d transform(s)" % (nnames, nruns))
+        for name, pos, org, off in rows:
+            if a.grep and (not name or a.grep.lower() not in name.lower()):
+                continue
+            print("  0x%06X  (%11.3f, %9.3f, %11.3f)  %s%s"
+                  % (off, pos[0], pos[1], pos[2],
+                     (name or "(unpaired)").rsplit("/", 1)[-1],
+                     ("   tile origin (%.0f, %.0f, %.0f)" % org) if org else ""))
+        if nnames != nruns:
+            print("counts differ, so the order pairing is not trustworthy here")
     return 0
 
 
