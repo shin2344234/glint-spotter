@@ -29,6 +29,19 @@ namespace gs::dump
     // when the flash ends, and not move on its neighbours.
     int EffectActivity(uintptr_t entity, size_t bytes);
 
+    // Look through an object for a vector: a pointer to an array with a
+    // count and a capacity beside it. Reports each one it finds and dumps the
+    // first two elements at a few plausible strides.
+    //
+    // Session fifty-nine found pa::LevelGimmickSceneObjectInfoManager alive at
+    // 0x42C81E38A00, one candidate, exactly where static analysis said it could
+    // not be reached. Its bytes carry the shape: a pointer at +0x28 with
+    // 171 and 171 sitting at +0x30 and +0x34. The game's reflection tables say
+    // the records hold a _prefabPath and a _worldTransform, so the test for a
+    // real one is a readable string pointer and a float3 that lands in the
+    // world the player is standing in.
+    void Vectors(const char* tag, uintptr_t obj, size_t bytes, float px, float pz);
+
     // Every pointer-like qword in `bytes` at `obj`, named by RTTI where the
     // target carries a vtable, and every dword that reads as an entity id.
     //

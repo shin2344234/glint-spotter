@@ -517,6 +517,9 @@ namespace
                     // prefab-and-transform records is what to look for: a
                     // pointer to an array, or a count beside one.
                     GS_LOG("  [levelgimmick] %s at 0x%p", ShortName(t.info.name), t.object);
+                    const gs::player::Pos lp = gs::player::Read();
+                    gs::dump::Vectors("lgsovec", reinterpret_cast<uintptr_t>(t.object), 0x400,
+                                      lp.valid ? lp.x : 0.0f, lp.valid ? lp.z : 0.0f);
                     gs::dump::Pointers("lgso", reinterpret_cast<uintptr_t>(t.object), 0x200);
                     gs::dump::Object("lgsohex", reinterpret_cast<uintptr_t>(t.object), 0x200);
                 }

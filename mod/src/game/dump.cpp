@@ -44,6 +44,64 @@ namespace gs::dump
         }
     }
 
+    // Does this look like a world position near the player?
+    bool Worldish(const float* v, float px, float pz)
+    {
+        for (int i = 0; i < 3; ++i)
+            if (!(v[i] == v[i]) || v[i] > 1e6f || v[i] < -1e6f) return false;
+        const float dx = v[0] - px, dz = v[2] - pz;
+        return std::sqrt(dx * dx + dz * dz) < 20000.0f && (v[0] != 0.0f || v[2] != 0.0f);
+    }
+
+    void Vectors(const char* tag, uintptr_t obj, size_t bytes, float px, float pz)
+    {
+        __try
+        {
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), bytes)) return;
+            int found = 0;
+            for (size_t off = 0; off + 16 <= bytes && found < 12; off += 8)
+            {
+                const uintptr_t arr = *reinterpret_cast<const uintptr_t*>(obj + off);
+                const uint32_t count = *reinterpret_cast<const uint32_t*>(obj + off + 8);
+                const uint32_t cap = *reinterpret_cast<const uint32_t*>(obj + off + 12);
+                if (arr < 0x10000 || (arr & 7) != 0) continue;
+                if (count == 0 || count > cap || cap > 4000000) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(arr), 64)) continue;
+                ++found;
+                GS_LOG("[%s] +%03zX -> 0x%p, %u of %u", tag, off, reinterpret_cast<void*>(arr), count, cap);
+                // An element is either the record itself or a pointer to one.
+                // Both are tried, and anything holding a world-looking float3
+                // is called out because that is the thing worth having.
+                for (int elem = 0; elem < 2; ++elem)
+                {
+                    const uintptr_t direct = arr + static_cast<uintptr_t>(elem) * 8;
+                    if (!gs::rtti::Readable(reinterpret_cast<const void*>(direct), 8)) break;
+                    const uintptr_t via = *reinterpret_cast<const uintptr_t*>(direct);
+                    const uintptr_t bases[2] = {direct, via};
+                    for (int b = 0; b < 2; ++b)
+                    {
+                        const uintptr_t rec = bases[b];
+                        if (rec < 0x10000 || (rec & 3) != 0) continue;
+                        if (!gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x80)) continue;
+                        for (uintptr_t k = 0; k + 12 <= 0x80; k += 4)
+                        {
+                            const float* v = reinterpret_cast<const float*>(rec + k);
+                            if (!Worldish(v, px, pz)) continue;
+                            GS_LOG("[%s]   element %d %s +%02llX has a world float3 (%.1f, %.1f, %.1f)",
+                                   tag, elem, b ? "through its pointer" : "inline",
+                                   static_cast<unsigned long long>(k), v[0], v[1], v[2]);
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!found) GS_LOG("[%s] nothing in the first %zu bytes reads as a vector", tag, bytes);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
     void Pointers(const char* tag, uintptr_t obj, size_t bytes)
     {
         __try
