@@ -426,8 +426,8 @@ namespace
 
         // Pickups near the view, any range.
         gs::nearest::Candidate c[8];
-        const int n = CastView(v, 400.0f, 6.0f, 0.30f, true, c, 8, nullptr, 0, 6.0f);
-        const int pick = PickByAngle(c, n, 0.27f);   // fifteen degrees
+        const int n = CastView(v, 400.0f, 6.0f, 0.30f, true, c, 8, nullptr, 0);
+        const int pick = PickByAngle(c, n, 0.36f);   // twenty degrees
 
         // While the flash is on, a line every two seconds, sixty at most.
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
@@ -441,18 +441,17 @@ namespace
                 GS_LOG("[auto]   %s%s\"%s\" eid %08X at %.1f along, %.1f deg, %+.1f up%s", i == pick ? "PICK " : "",
                        c[i].lit ? "LIT " : "", c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, c[i].along,
                        std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy, c[i].locked ? ", locked" : "");
-            // Every gimmick near the view, named, whether or not it counted
-            // as a pickup. Master Looter names nodes by this same path and
-            // was still naming them on 2850 while this mod saw nothing.
             {
+                // Whatever the crosshair is nearest, marked or not, named.
                 gs::nearest::Candidate all[6];
-                const int an = CastView(v, 400.0f, 4.0f, 0.14f, false, all, 6, nullptr, 0);
-                for (int i = 0; i < an; ++i)
-                    if (all[i].gimmick)
-                        GS_LOG("[auto]   near the view, not marked: \"%s\" eid %08X at %.1f along, %.1f deg%s%s",
-                               all[i].name[0] ? all[i].name : "?", all[i].eid, all[i].along,
-                               std::atan2(all[i].off, all[i].along) * 57.2958f,
-                               all[i].knowledge ? ", knowledge" : "", all[i].locked ? ", locked" : "");
+                const int an = CastView(v, 400.0f, 6.0f, 0.30f, false, all, 6, nullptr, 0);
+                const int abest = PickByAngle(all, an, 0.36f);
+                for (int i = 0; i < an && i < 4; ++i)
+                    GS_LOG("[auto]   in view%s: \"%s\" eid %08X at %.1f along, %.1f deg%s",
+                           i == abest ? ", nearest the crosshair" : "",
+                           all[i].name[0] ? all[i].name : all[i].cls, all[i].eid, all[i].along,
+                           std::atan2(all[i].off, all[i].along) * 57.2958f,
+                           all[i].pickup ? ", marked" : "");
             }
             if (n == 0)
             {
@@ -486,19 +485,9 @@ namespace
             }
         }
 
-        int chosen = pick;
-        if (chosen < 0)
-        {
-            // Nothing within eight degrees, but something within arm's
-            // reach counts: the nearest of those, if any.
-            float best = 1e9f;
-            for (int i = 0; i < n; ++i)
-            {
-                const float dx = c[i].x - pp.x, dy = c[i].y - pp.y, dz = c[i].z - pp.z;
-                const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
-                if (d <= 6.0f && d < best) { best = d; chosen = i; }
-            }
-        }
+        // Only what the crosshair is on. A node at the player's feet is
+        // not what he is pointing at, however close it is.
+        const int chosen = pick;
         if (chosen < 0 || c[chosen].eid == 0)
         {
             g_autoEid = 0;
