@@ -962,3 +962,85 @@ published source lags the binary and has no such code. CrimsonDesertCoop
 publishes offset tables that do not match ours and names `pa::ClientActorManager`
 from a cheat table. Nothing there is reusable as is, and none of it is needed
 now that the pose comes from the game's own camera object.
+
+
+## The ray cast, and the edge of the world it can see, 10 September 2026, late
+
+### The camera, settled
+
+Three presses at known pitches in session 26 read -89, -0.6 and +19
+degrees from the quaternion at `+0x40` of the TPS mode object. It is the
+view. The pair at `+0xC8`/`+0xCC` is the over-the-shoulder offset (0.8 right,
+0.6 up), and `+0x14C` is that offset turned into world space by the same
+rotation, which is how the two were told apart. The update runs once per
+frame on one object.
+
+### The game's own ray cast
+
+Two more passes against the exe, each refuted by a second agent, gave:
+
+- `hknpWorld::castRay` at `0x41BDA30`, slot 61 of the world's vtable at
+  `0x51FB528`, taking (world, query, collector). Havok here is double
+  precision; the collector the game uses is `hknpClosestHitCollector`
+  (vtable `0x51FE910`, 0xC0 bytes, hit flag at `+0x0C`, best fraction as a
+  double at `+0x10`, the 0xA0 byte result at `+0x20` with its fraction at
+  `+0x30`).
+- A scan for `call [reg+0x1E8]` sites found the game's wrapper at
+  `0x3926550`:
+
+  ```
+  bool Cast(void* unused, int layer, bool flag, const float3* start,
+            const float3* dir, float maxDist, float* outDist,
+            float3* outNormal, bool* outFlag)
+  ```
+
+  It subtracts the frame offset at `0x6C16B80`, converts to doubles,
+  builds the query and the collector on its own stack, and calls castRay
+  through the facade object at `0x6915FB8`. The mod calls the wrapper and
+  nothing deeper. The layer word is `(layer < 0x3B ? layer : 0x40000000 |
+  (layer - 0x3B)) | flag << 9` beside a `0xFFFF` filter. Layer 0 hits the
+  world.
+- The frame offset is `{chunkX * 1000, 0, chunkZ * 1000, 0}`, rewritten at
+  one site in `0x391EEA0` when the player's 1000 unit chunk changes. It read
+  (-9000, 0, -4000) in the test area, so "local" positions in this file are
+  chunk positions.
+
+### The window
+
+Sessions 30 and 31: every direct hit sat on a face of a box 160 units a
+side around the player, edges on multiples of 32, normals along an axis.
+Physics keeps terrain collision only for a 5 by 5 window of 32 unit
+heightfield regions (`TerrainHeightFieldCollision_%d_%d`, built by the job
+at `0x3416A70`; `hknpDefaultHeightFieldGeometry` is 0x70 bytes with a
+self-relative pointer to a row-major uint16 sample array at `+0x20`, dims
+at `+0x5C`/`+0x60`, scale and base at `+0x64`/`+0x68`). A ray that leaves
+the window reports the edge as a hit.
+
+Build 0.9.3 therefore probes straight down along the view every few units
+and takes the first point where the ground rises to meet the ray. Inside
+the window that is exact. Beyond it the slope of the last two probes is
+carried forward; a guess, labelled as one in the log.
+
+### Beyond the window there is no height on the CPU
+
+Two further passes looked for a wider source and found none:
+
+- Rendering terrain is DDS height tiles streamed by virtual texturing. The
+  physics window is a 128 texel readback of them (four readback textures
+  on a 0x260 byte object at owner `+0xF48`, built by the ctor at
+  `0x3414990`).
+- `AttachTerrainQueryFilter` (used to snap things to the ground) queries the
+  same physics world, ring by ring.
+- `PreCalculateTerrainHeightMinMax` is a load-time step dispatched through a
+  runtime registry; no static table.
+- `TerrainRegionNaviInfoManager` (singleton pointer at `0x6C60F80`) streams
+  per-region records on demand and evicts them after 30 seconds; whether a
+  record carries a height was not settled.
+- The AI height operators replay baked waypoint heights.
+
+So a press within about 80 units lands where the crosshair meets the
+ground. Farther out, the only exact positions the mod has are entities,
+which the automatic marker uses at any range. The one route left to an
+exact far ground point is the depth buffer: a Direct3D 12 hook that reads
+the depth under the centre pixel at present time. It is a larger piece of
+work and it is not started.
