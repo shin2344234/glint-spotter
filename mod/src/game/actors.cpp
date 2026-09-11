@@ -35,6 +35,7 @@ namespace
     std::atomic<uintptr_t> g_slot{0};      // the global that holds the manager pointer
     int g_gimmicks = 0;
     int g_glints = 0;
+    int g_lits = 0;
     std::atomic<uintptr_t> g_mgr{0};
     uint32_t g_checkedAt = 0;
     uintptr_t g_slots[16];
@@ -265,6 +266,52 @@ namespace
         }
     }
 
+    // The entity's own ClientDetectActorComponent at block slot +0x50, named
+    // through RTTI once, when the entity joins the set.
+    uintptr_t DetectComponent(uintptr_t e)
+    {
+        __try
+        {
+            const uintptr_t comps = Deref(e + kOff_Ent_Comps);
+            if (!comps) return 0;
+            const uintptr_t c = Deref(comps + gs::sig::kOff_Comps_Detect);
+            if (!PtrLike(c)) return 0;
+            const uintptr_t vt = Deref(c);
+            const char* n = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+            return (n && strstr(n, "ClientDetectActorComponent")) ? c : 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
+    // Is the reveal on this entity right now: the detect component's byte,
+    // or for a gimmick without one, active custom render values.
+    bool ReadLit(uintptr_t detectComp, uintptr_t gimmickComp, bool* out)
+    {
+        __try
+        {
+            if (detectComp)
+            {
+                *out = *reinterpret_cast<const uint8_t*>(detectComp + gs::sig::kOff_Detect_Lit) != 0;
+                return true;
+            }
+            if (gimmickComp)
+            {
+                const uintptr_t sub = *reinterpret_cast<const uintptr_t*>(gimmickComp + gs::sig::kOff_Gimmick_Sub);
+                if (!PtrLike(sub)) return false;
+                *out = *reinterpret_cast<const uint32_t*>(sub + gs::sig::kOff_GimmickSub_Active) != 0;
+                return true;
+            }
+            return false;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     // The detect mode target byte on a gimmick component.
     bool GlintByte(uintptr_t comp, bool* out)
     {
@@ -448,6 +495,7 @@ namespace gs::actors
                 ne.eid = EidOf(e);
                 ne.gimmickComp = GimmickComponent(e);
                 ne.gimmick = ne.gimmickComp != 0;
+                ne.detectComp = DetectComponent(e);
                 ++g_setN;
             }
             Entity& en = g_set[j];
@@ -468,22 +516,42 @@ namespace gs::actors
                 }
                 en.glint = g;
             }
+            // The reveal, every pass, and its first flips in the log.
+            bool lit = false;
+            if (ReadLit(en.detectComp, en.gimmickComp, &lit))
+            {
+                static int litFlipsLeft = 30;
+                if (lit != en.lit && litFlipsLeft > 0)
+                {
+                    --litFlipsLeft;
+                    const uintptr_t vt = Deref(en.ptr);
+                    const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+                    const float dx = en.x - pp.x, dz = en.z - pp.z;
+                    GS_LOG("[actors] reveal %s on eid %08X %s%s at (%.1f, %.1f, %.1f), %.0f away, flash %s, via %s",
+                           lit ? "ON" : "off", en.eid, en.gimmick ? "gimmick " : "", cn ? (cn[0] == '.' ? cn + 4 : cn) : "?",
+                           en.x, en.y, en.z, std::sqrt(dx * dx + dz * dz), gs::aim::FlashActive() ? "on" : "off",
+                           en.detectComp ? "the detect component" : "the gimmick's render values");
+                }
+                en.lit = lit;
+            }
         }
-        int glints = 0;
+        int glints = 0, lits = 0;
         for (int i = 0; i < g_setN; ++i)
         {
             if (g_set[i].gimmick) ++gimmicks;
             if (g_set[i].glint) ++glints;
+            if (g_set[i].lit) ++lits;
         }
         g_gimmicks = gimmicks;
         g_glints = glints;
+        g_lits = lits;
 
         // A line every thirty seconds so the log says what the ray has to work with.
         if (nowMs - g_lastSaidMs > 30000)
         {
             g_lastSaidMs = nowMs;
-            GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d with a gimmick component, %d glinting",
-                   n, dupes, noPos, g_setN, gimmicks, glints);
+            GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d with a gimmick component, %d with the byte, %d lit by the flash",
+                   n, dupes, noPos, g_setN, gimmicks, glints, lits);
             int shown = 0;
             for (int i = 0; i < g_setN && shown < 3; ++i)
                 if (g_set[i].glint)
@@ -506,6 +574,12 @@ namespace gs::actors
     {
         std::lock_guard<std::mutex> lock(g_setMutex);
         return g_glints;
+    }
+
+    int LitCount()
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        return g_lits;
     }
 
     int Snapshot(Entity* out, int n)

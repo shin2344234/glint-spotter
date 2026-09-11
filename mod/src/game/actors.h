@@ -29,7 +29,9 @@ namespace gs::actors
         uint32_t lastSeenMs = 0;
         bool gimmick = false;        // carries a ClientGimmickActorComponent
         bool glint = false;          // its detect mode target byte is set
+        bool lit = false;            // the reveal effect is on it right now
         uintptr_t gimmickComp = 0;
+        uintptr_t detectComp = 0;    // its own ClientDetectActorComponent, or 0
     };
 
     // Give the finder the manager's vtable, from the RTTI sweep. It looks for
@@ -56,6 +58,7 @@ namespace gs::actors
     int Count();
     int GimmickCount();
     int GlintCount();
+    int LitCount();
 
     // The entity carrying this id, from the set, or 0.
     uintptr_t ByEid(uint32_t eid);

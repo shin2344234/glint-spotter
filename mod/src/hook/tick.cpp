@@ -340,25 +340,22 @@ namespace
         GS_LOG("[mark]     %s components:%s", tag, line);
     }
 
-    // Flash on: the object under the crosshair, the one nearest the view
-    // ray by angle within six degrees, held for a second and a half, gets a
-    // Glint pin once per area, and no other automatic pin for five seconds.
-    //
-    // No glint test yet. Session twenty-six showed the glint Seth aims at
-    // is a character, not a gimmick, so the detect mode target byte on the
-    // gimmick component cannot see it. The object's components are dumped
-    // when the pin is placed with the flash on, and once more after the
-    // flash ends, so the state that means "being revealed" can be read off
-    // the diff and become the test.
+    // Flash on: among the objects the flash has lit, the one nearest the
+    // view ray within eight degrees, out to four hundred units, held for a
+    // second, gets a Glint pin once per area, and no other automatic pin for
+    // five seconds. "Lit" is the detect component's reveal byte (+0x1DA), or
+    // for a gimmick without one, active custom render values; both are
+    // static findings on 2850 and this build is their live test. Nothing
+    // that is not lit gets a pin any more.
     uint32_t g_autoEid = 0;
     uint32_t g_autoSinceMs = 0;
     uint32_t g_autoCooldownUntil = 0;
-    int g_autoLogsLeft = 40;
+    int g_autoLogsLeft = 60;
     uint32_t g_autoLastLogMs = 0;
     uintptr_t g_autoDumpEntity = 0;   // dumped again once the flash is off
     uint32_t g_autoDumpEid = 0;
     uint32_t g_autoFlashOffMs = 0;
-    int g_autoDumpsLeft = 8;
+    int g_autoDumpsLeft = 4;
 
     int PickByAngle(const gs::nearest::Candidate* c, int n, float maxAngle)
     {
@@ -396,47 +393,46 @@ namespace
         const gs::player::Pos pp = gs::player::Read();
         View v;
         if (!pp.valid || !ViewRay(pp, &v)) return;
-        gs::nearest::Candidate c[8];
-        const int n = CastView(v, 200.0f, 1.5f, 0.05f, false, c, 8, nullptr, 0);
-        const int pick = PickByAngle(c, n, 0.07f);   // four degrees
 
-        // While the flash is on, a line every two seconds saying what the
-        // cone holds, forty lines at most.
+        // Lit objects near the view, any range.
+        gs::nearest::Candidate c[8];
+        const int n = CastView(v, 400.0f, 4.0f, 0.14f, true, c, 8, nullptr, 0);
+        const int pick = PickByAngle(c, n, 0.14f);   // eight degrees
+
+        // While the flash is on, a line every two seconds saying what is lit
+        // and what sits near the view, sixty lines at most.
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on, view from the %s (pitch %.0f deg); set %d, %d gimmicks, %d with the byte, %d in the cone",
+            GS_LOG("[auto] flash on, view from the %s (pitch %.0f deg); set %d, %d lit by the flash, %d lit near the view",
                    v.camera ? "camera" : "body, level", std::asin(v.fy) * 57.2958f,
-                   gs::actors::Count(), gs::actors::GimmickCount(), gs::actors::GlintCount(), n);
+                   gs::actors::Count(), gs::actors::LitCount(), n);
             for (int i = 0; i < n && i < 4; ++i)
-                GS_LOG("[auto]   %s%s%s%s eid %08X at %.1f along, %.2f off, %.1f deg, %+.1f up", i == pick ? "PICK " : "",
-                       c[i].glint ? "BYTE " : "", c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along, c[i].off,
-                       std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy);
-            // Wider and farther: what sits within about eight degrees of the
-            // view out to four hundred units, nearest the view first. If the
-            // glint is an entity at all, it is in this list or the set lacks it.
-            gs::nearest::Candidate wide[6];
-            const int wn = CastView(v, 400.0f, 4.0f, 0.14f, false, wide, 6, nullptr, 0);
-            const int wbest = PickByAngle(wide, wn, 1.0f);
-            GS_LOG("[auto]   near the view, any range: %d", wn);
-            for (int i = 0; i < wn && i < 3; ++i)
-                GS_LOG("[auto]     %s%s%s eid %08X at %.1f along, %.1f deg, %+.1f up, (%.1f, %.1f, %.1f)",
-                       wide[i].glint ? "BYTE " : "", wide[i].gimmick ? "gimmick " : "", wide[i].cls, wide[i].eid, wide[i].along,
-                       std::atan2(wide[i].off, wide[i].along) * 57.2958f, wide[i].dy, wide[i].x, wide[i].y, wide[i].z);
-            // Dump the components of whatever is nearest the view, with the
-            // flash on, and remember it for the dump after the flash ends.
-            const gs::nearest::Candidate* watch = pick >= 0 ? &c[pick] : (wbest >= 0 ? &wide[wbest] : nullptr);
-            static uint32_t lastDumpMs = 0;
-            if (watch && g_autoDumpsLeft > 0 && now - lastDumpMs > 4000)
+                GS_LOG("[auto]   %sLIT %s%s eid %08X at %.1f along, %.1f deg, %+.1f up, (%.1f, %.1f, %.1f)", i == pick ? "PICK " : "",
+                       c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along,
+                       std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy, c[i].x, c[i].y, c[i].z);
+            if (n == 0)
             {
-                lastDumpMs = now;
-                --g_autoDumpsLeft;
-                GS_LOG("[auto] dumping eid %08X (%s) with the flash on, %.1f deg off the view", watch->eid, watch->cls,
-                       std::atan2(watch->off, watch->along) * 57.2958f);
-                gs::dump::EntityComponents("on", watch->entity, 0x200);
-                g_autoDumpEntity = watch->entity;
-                g_autoDumpEid = watch->eid;
+                // Nothing lit near the view: what is there at all, for the record.
+                gs::nearest::Candidate any[3];
+                const int m = CastView(v, 400.0f, 4.0f, 0.14f, false, any, 3, nullptr, 0);
+                for (int i = 0; i < m; ++i)
+                    GS_LOG("[auto]   near the view, not lit: %s%s eid %08X at %.1f along, %.1f deg",
+                           any[i].gimmick ? "gimmick " : "", any[i].cls, any[i].eid, any[i].along,
+                           std::atan2(any[i].off, any[i].along) * 57.2958f);
+                // And a dump of the nearest, so the reveal state can be diffed
+                // against the flash-off dump if the byte turns out wrong.
+                static uint32_t lastDumpMs = 0;
+                if (m > 0 && g_autoDumpsLeft > 0 && now - lastDumpMs > 6000 && !g_autoDumpEntity)
+                {
+                    lastDumpMs = now;
+                    --g_autoDumpsLeft;
+                    GS_LOG("[auto] dumping eid %08X (%s) with the flash on", any[0].eid, any[0].cls);
+                    gs::dump::EntityComponents("on", any[0].entity, 0x200);
+                    g_autoDumpEntity = any[0].entity;
+                    g_autoDumpEid = any[0].eid;
+                }
             }
         }
 
@@ -452,19 +448,11 @@ namespace
             g_autoSinceMs = now;
             return;
         }
-        if (now - g_autoSinceMs < 1500 || now < g_autoCooldownUntil) return;
+        if (now - g_autoSinceMs < 1000 || now < g_autoCooldownUntil) return;
         g_autoCooldownUntil = now + 5000;
-        GS_LOG("[auto] %s%s eid %08X held under the crosshair for a second and a half at %.1f units",
+        GS_LOG("[auto] %s%s eid %08X lit by the flash and held near the view for a second at %.1f units",
                c[pick].gimmick ? "gimmick " : "", c[pick].cls, c[pick].eid, c[pick].along);
-        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, held under the crosshair with the flash on", "Glint", pp, 8.0f);
-        if (g_autoDumpsLeft > 0 && !g_autoDumpEntity)
-        {
-            --g_autoDumpsLeft;
-            GS_LOG("[auto] dumping eid %08X with the flash on", c[pick].eid);
-            gs::dump::EntityComponents("on", c[pick].entity, 0x200);
-            g_autoDumpEntity = c[pick].entity;
-            g_autoDumpEid = c[pick].eid;
-        }
+        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, lit by the flash", "Glint", pp, 8.0f);
     }
 }
 

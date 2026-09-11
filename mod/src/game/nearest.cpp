@@ -26,6 +26,7 @@ namespace
         cand.dy = dy;
         cand.gimmick = e.gimmick;
         cand.glint = e.glint;
+        cand.lit = e.lit;
         const uintptr_t vt = Deref(e.ptr);
         const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
         strncpy_s(cand.cls, sizeof(cand.cls), cn ? (cn[0] == '.' ? cn + 4 : cn) : "?", _TRUNCATE);
@@ -79,7 +80,7 @@ namespace gs::nearest
         {
             const gs::actors::Entity& e = set[i];
             if (!e.ptr || e.ptr == playerActor) continue;
-            if (glintOnly && !e.glint) continue;
+            if (glintOnly && !e.lit) continue;   // "only": only what the flash has lit
 
             const float dx = e.x - px, dz = e.z - pz, dy = e.y - py;
             const float along = dx * fx + dz * fz;
@@ -219,7 +220,7 @@ namespace gs::nearest
         {
             const gs::actors::Entity& e = set[i];
             if (!e.ptr || e.ptr == playerActor) continue;
-            if (glintOnly && !e.glint) continue;
+            if (glintOnly && !e.lit) continue;   // "only": only what the flash has lit
 
             const float dx = e.x - ox, dy = e.y - oy, dz = e.z - oz;
             const float along = dx * fx + dy * fy + dz * fz;

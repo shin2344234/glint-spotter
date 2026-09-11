@@ -58,6 +58,21 @@ namespace gs::sig
     constexpr uintptr_t kOff_Comps_Gimmick     = 0x30;
     constexpr uintptr_t kOff_Gimmick_DetectTgt = 0x45B;
 
+    // The reveal itself. ClientDetectActorComponent (block slot +0x50, on
+    // characters and on anything else the flash can reveal) keeps a byte at
+    // +0x1DA that a single toggle (0x8FBF30 on 2850) sets when it spawns the
+    // DetectEffect on the actor's effect component and clears when it
+    // removes it. Gimmicks without a detect component keep their reveal as
+    // a list of active custom render values on the sub-object at gimmick
+    // +0x438: count at +0x1B8, pushed and popped by the DetectLighting
+    // handler. Static findings on 2850, checked by a second pass; live
+    // confirmation is the next session's job.
+    constexpr const char* kDetectClass          = ".?AVClientDetectActorComponent@pa@@";
+    constexpr uintptr_t kOff_Comps_Detect       = 0x50;
+    constexpr uintptr_t kOff_Detect_Lit         = 0x1DA;
+    constexpr uintptr_t kOff_Gimmick_Sub        = 0x438;
+    constexpr uintptr_t kOff_GimmickSub_Active  = 0x1B8;
+
     // The game's ray cast wrapper (start, direction, distance in; hit distance
     // and normal out) and what it uses. Found at runtime by byte pattern, with
     // the facade and the frame offset decoded from its own RIP-relative

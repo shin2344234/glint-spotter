@@ -31,6 +31,7 @@ namespace gs::nearest
         float dy = 0;                // height relative to the ray origin
         bool gimmick = false;        // carries a ClientGimmickActorComponent
         bool glint = false;          // that component's detect mode target byte is set
+        bool lit = false;            // the reveal effect is on it right now
         char cls[80]{};
     };
 
