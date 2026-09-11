@@ -376,6 +376,9 @@ namespace
     // node and stayed put on the other three.
     uint32_t g_flashOnMs = 0;
     bool g_flashWas = false;
+    uint32_t g_heldEid = 0;
+    uint32_t g_heldSinceMs = 0;
+    uint32_t g_cooldownUntil = 0;
     int g_autoLogsLeft = 60;
     uint32_t g_autoLastLogMs = 0;
     uintptr_t g_huntEnts[4] = {0, 0, 0, 0};
@@ -427,19 +430,78 @@ namespace
         const float cap = gs::Settings::Get().radius;
         const int n = gs::actors::MarkedNear(pp.x, pp.z, cap > 0.0f ? cap : 1.0e9f, around, 16);
 
+        // The node the crosshair is on: of the marked nodes, the one whose
+        // bearing from the camera is nearest the view's, within ten degrees,
+        // and at least three metres from the player so that something
+        // underfoot cannot take it. Held for a second, it gets one pin at its
+        // own position and nothing else does.
+        //
+        // Heights are not in this: session forty had firewood a metre away
+        // reading six metres below the player's feet, so an angle measured in
+        // three axes is unusable. A bearing is not.
+        View v;
+        int pick = -1;
+        float pickAngle = 0;
+        if (ViewRay(pp, &v))
+        {
+            const float flen = std::sqrt(v.fx * v.fx + v.fz * v.fz);
+            if (flen > 1e-3f)
+            {
+                const float ux = v.fx / flen, uz = v.fz / flen;
+                float best = 0.175f;   // ten degrees
+                for (int i = 0; i < n; ++i)
+                {
+                    const float px = around[i].x - pp.x, pz = around[i].z - pp.z;
+                    const float fromPlayer = std::sqrt(px * px + pz * pz);
+                    if (fromPlayer < 3.0f) continue;
+                    const float dx = around[i].x - v.ox, dz = around[i].z - v.oz;
+                    const float flat = std::sqrt(dx * dx + dz * dz);
+                    if (flat < 0.5f) continue;
+                    const float dot = (dx * ux + dz * uz) / flat;
+                    const float cross = (dx * uz - dz * ux) / flat;
+                    const float angle = std::fabs(std::atan2(cross, dot));
+                    if (angle < best) { best = angle; pick = i; pickAngle = angle; }
+                }
+            }
+        }
+
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked nodes loaded, %d in reach. Nothing is pinned: the glint is not identified yet.",
+            GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked nodes loaded, %d in reach",
                    pp.x, pp.y, pp.z, gs::actors::PickupCount(), n);
             for (int i = 0; i < n && i < 5; ++i)
             {
                 const float dx = around[i].x - pp.x, dz = around[i].z - pp.z;
-                GS_LOG("[auto]   \"%s\" eid %08X %.1f away at (%.1f, %.1f, %.1f), %d effects",
+                GS_LOG("[auto]   %s\"%s\" eid %08X %.1f away at (%.1f, %.1f, %.1f), %d effects",
+                       i == pick ? "ON THE CROSSHAIR " : "",
                        around[i].name[0] ? around[i].name : "?", around[i].eid, std::sqrt(dx * dx + dz * dz),
                        around[i].x, around[i].y, around[i].z, gs::dump::EffectActivity(around[i].ptr, 0x400));
             }
+            if (pick < 0) GS_LOG("[auto]   nothing marked within ten degrees of the crosshair");
+        }
+
+        // One pin, on the node the crosshair held for a second.
+        if (pick < 0)
+        {
+            g_heldEid = 0;
+            g_heldSinceMs = 0;
+        }
+        else if (around[pick].eid != g_heldEid)
+        {
+            g_heldEid = around[pick].eid;
+            g_heldSinceMs = now;
+        }
+        else if (now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&
+                 !gs::mapicon::PinNear(around[pick].x, around[pick].z, 8.0f))
+        {
+            g_cooldownUntil = now + 3000;
+            const float dx = around[pick].x - pp.x, dz = around[pick].z - pp.z;
+            GS_LOG("[auto] the crosshair held \"%s\" eid %08X for a second, %.1f degrees off, %.1f metres away; pinning it where it stands",
+                   around[pick].name[0] ? around[pick].name : "?", around[pick].eid, pickAngle * 57.2958f,
+                   std::sqrt(dx * dx + dz * dz));
+            PlaceAt(around[pick].x, around[pick].y, around[pick].z, "automatic, the node under the crosshair", "Glint", pp, 8.0f);
         }
 
         // The measurement, once the flash has been on for a moment.
