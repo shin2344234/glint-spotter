@@ -23,6 +23,7 @@ namespace gs::nearest
         float along = 0;             // distance along the ray to the closest point
         float off = 0;               // distance from the ray at that point, XZ
         float dy = 0;                // height difference from the player
+        bool gimmick = false;        // an interactable, the kind the glint is drawn on
         char cls[80]{};
     };
 

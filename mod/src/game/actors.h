@@ -24,6 +24,7 @@ namespace gs::actors
         uint32_t eid = 0;
         float x = 0, y = 0, z = 0;   // world, from the transform at +0x29C
         uint32_t lastSeenMs = 0;
+        bool gimmick = false;        // carries a ClientGimmickActorComponent
     };
 
     // Give the finder the manager's vtable, from the RTTI sweep. It looks for

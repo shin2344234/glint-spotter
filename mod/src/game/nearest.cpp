@@ -62,6 +62,7 @@ namespace gs::nearest
             cand.along = along;
             cand.off = off;
             cand.dy = dy;
+            cand.gimmick = e.gimmick;
             const uintptr_t vt = Deref(e.ptr);
             const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
             strncpy_s(cand.cls, sizeof(cand.cls), cn ? (cn[0] == '.' ? cn + 4 : cn) : "?", _TRUNCATE);

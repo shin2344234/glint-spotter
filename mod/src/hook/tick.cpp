@@ -175,7 +175,6 @@ namespace
     // component reporting a target, the object at that distance along the
     // facing gets a pin once the target has held for a second.
     uint32_t g_autoSinceMs = 0;
-    float g_autoLastDist = -1.0f;
     uint64_t g_lastRefreshTick = 0;
 
     void PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp)
@@ -193,45 +192,61 @@ namespace
         (void)ty;
     }
 
-    // Flash on, detect component reporting a target for a full second: pin
-    // the object at that distance along the facing, once per area.
+    // Flash on: the first gimmick in a narrow beam along the facing is the
+    // candidate. When the same one stays the candidate for a second it gets a
+    // Glint pin, once per area, and no other automatic pin for five seconds.
+    // The detect component's own target field is still unknown (session
+    // twenty read -1 with the flash on a glint), so the pick is geometric.
+    uint32_t g_autoEid = 0;
+    uint32_t g_autoCooldownUntil = 0;
+    int g_autoLogsLeft = 40;
+    uint32_t g_autoLastLogMs = 0;
+
     void AutoMark(uint32_t now)
     {
-        float dist = 0;
-        if (!gs::aim::FlashActive() || !gs::aim::DetectDistance(&dist))
+        if (!gs::aim::FlashActive())
         {
+            g_autoEid = 0;
             g_autoSinceMs = 0;
             return;
         }
-        if (g_autoSinceMs == 0 || std::fabs(dist - g_autoLastDist) > 3.0f)
-        {
-            g_autoSinceMs = now;
-            g_autoLastDist = dist;
-            return;
-        }
-        if (now - g_autoSinceMs < 1000) return;
-        g_autoSinceMs = now + 5000;   // and not again for five seconds
-
         const gs::player::Pos pp = gs::player::Read();
         float fx = 0, fz = 0;
         if (!pp.valid || !gs::nearest::ForwardFromQuat(pp.q, &fx, &fz)) return;
         gs::nearest::Candidate c[8];
-        const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y, pp.z, fx, fz, 60.0f, 2.5f, 0.15f, c, 8);
-        GS_LOG("[auto] flash on, detect distance %.1f, %d object(s) in the cone", dist, n);
-        int best = -1;
-        float bestErr = 1e9f;
-        for (int i = 0; i < n; ++i)
+        const int n = gs::nearest::Cast(gs::player::Actor(), pp.x, pp.y, pp.z, fx, fz, 40.0f, 1.5f, 0.08f, c, 8);
+
+        // While the flash is on, a line every two seconds saying what sits in
+        // the beam, so the glint's class and flags can be read off the log.
+        if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
-            const float err = std::fabs(c[i].along - dist);
-            GS_LOG("[auto]   %s eid %08X at %.1f along, %.2f off, distance error %.1f", c[i].cls, c[i].eid, c[i].along, c[i].off, err);
-            if (err < bestErr) { bestErr = err; best = i; }
+            g_autoLastLogMs = now;
+            --g_autoLogsLeft;
+            float dd = 0;
+            const bool hd = gs::aim::DetectDistance(&dd);
+            GS_LOG("[auto] flash on, %d in the beam, set %d, detect distance %s %.2f", n, gs::actors::Count(), hd ? "is" : "none,", dd);
+            for (int i = 0; i < n && i < 4; ++i)
+                GS_LOG("[auto]   %s%s eid %08X at %.1f along, %.2f off, %+.1f up", c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy);
         }
-        if (best < 0 || bestErr > 6.0f)
+
+        int pick = -1;
+        for (int i = 0; i < n; ++i) if (c[i].gimmick) { pick = i; break; }
+        if (pick < 0 || c[pick].eid == 0)
         {
-            GS_LOG("[auto] nothing in the cone at the detect distance, no pin");
+            g_autoEid = 0;
+            g_autoSinceMs = 0;
             return;
         }
-        PlaceAt(c[best].x, c[best].y, c[best].z, "automatic, detect distance matched an object", "Glint", pp);
+        if (c[pick].eid != g_autoEid)
+        {
+            g_autoEid = c[pick].eid;
+            g_autoSinceMs = now;
+            return;
+        }
+        if (now - g_autoSinceMs < 1000 || now < g_autoCooldownUntil) return;
+        g_autoCooldownUntil = now + 5000;
+        GS_LOG("[auto] %s eid %08X held in the beam for a second at %.1f units", c[pick].cls, c[pick].eid, c[pick].along);
+        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, gimmick held in the beam", "Glint", pp);
     }
 }
 
@@ -315,8 +330,8 @@ extern "C" void gs_OnMinimapTick(void* self)
                 GS_LOG("[mark] ray from (%.1f, %.1f, %.1f) along (%.3f, %.3f) over %d entities: %d hit(s)",
                        pp.x, pp.y, pp.z, fx, fz, gs::actors::Count(), n);
                 for (int i = 0; i < n; ++i)
-                    GS_LOG("[mark]   %d. %s eid %08X at %.1f along, %.2f off, %+.1f up, (%.1f, %.1f, %.1f)",
-                           i + 1, c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy, c[i].x, c[i].y, c[i].z);
+                    GS_LOG("[mark]   %d. %s%s eid %08X at %.1f along, %.2f off, %+.1f up, (%.1f, %.1f, %.1f)",
+                           i + 1, c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy, c[i].x, c[i].y, c[i].z);
                 if (n > 0)
                 {
                     have = true; tx = c[0].x; ty = c[0].y; tz = c[0].z;
@@ -349,13 +364,14 @@ extern "C" void gs_OnMinimapTick(void* self)
             if (d && gs::rtti::Readable(reinterpret_cast<const void*>(d), 0x650))
             {
                 const auto* q = reinterpret_cast<const uint8_t*>(d);
-                float f3e8, f3ec, f580, f5e8, f640;
+                float f3e8, f3ec, f580, f5e8, f640, f2ec, f300, f368;
                 uint32_t u410, u42c;
                 memcpy(&f3e8, q + 0x3E8, 4); memcpy(&f3ec, q + 0x3EC, 4); memcpy(&f580, q + 0x580, 4);
                 memcpy(&f5e8, q + 0x5E8, 4); memcpy(&f640, q + 0x640, 4);
+                memcpy(&f2ec, q + 0x2EC, 4); memcpy(&f300, q + 0x300, 4); memcpy(&f368, q + 0x368, 4);
                 memcpy(&u410, q + 0x410, 4); memcpy(&u42c, q + 0x42C, 4);
-                GS_LOG("[mark] detect scalars: +3E8 %.3f +3EC %.3f +580 %.3f +5E8 %.3f +640 %.3f +410 0x%X +42C 0x%X",
-                       f3e8, f3ec, f580, f5e8, f640, u410, u42c);
+                GS_LOG("[mark] detect scalars: +2EC %.3f +300 %.3f +368 %.3f +3E8 %.3f +3EC %.3f +580 %.3f +5E8 %.3f +640 %.3f +410 0x%X +42C 0x%X",
+                       f2ec, f300, f368, f3e8, f3ec, f580, f5e8, f640, u410, u42c);
             }
         }
 
