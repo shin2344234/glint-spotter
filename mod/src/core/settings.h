@@ -65,7 +65,21 @@ namespace gs::Settings
         // that landed on the wrong things that session were called
         // "sector_-39_-17_sub_1_2" and "sector_-39_-17_sub_2_12", which are
         // not objects at all but the level chunks the world is cut into.
-        char kinds[512] = "";
+        // The record families worth a pin, from the tally of all 171 in
+        // session seventy-four. The ones that name a kind of thing:
+        //
+        //   Vein_Minerals_South_Silver_Levelindex_62   ore veins, 21 records
+        //   Challenge_Sealed_Artifact_Her              Seth's glint
+        //   Mission_PororinVillage_Bell_All_Calphade   mission bells
+        //   Abyss_marni_visione_gate_0001              visione gates
+        //   Titan_Boss_Sotdae_I_Gimmick                boss gimmicks
+        //
+        // The rest name a place rather than a thing: 01_tom_dungeon_0001,
+        // Calphade_SubInner_0001_Phase00, KliffHouse_Hernand_0001_Phase00,
+        // FortAnvil_SubInner_0001_Phase00_00. Those hold hundreds of
+        // placements each and are where every wrong pin has come from.
+        char kinds[512] = "vein_,challenge,mission,artifact,treasure,relic,clue,"
+                          "visione,titan,puzzle,standstone,socket";
     };
 
     // True when `path` contains any of the Mark list's entries.

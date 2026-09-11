@@ -618,10 +618,15 @@ namespace
                                                 around, angles, 8, &marked);
                 glintN = gs::actors::GlintOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
                                                     glints, glintAngles, 8);
-                // Four metres off the line, which is about how precisely a
-                // crosshair can be held, and out to nine hundred.
+                // Eight metres off the line or three per cent of the range,
+                // whichever is more. Four flat was too tight: Seth tested from
+                // the air, where the crosshair sways, and a placement four
+                // hundred metres out left the cone between passes so the
+                // second a pin needs never came. Three per cent is twelve
+                // metres at four hundred and twenty-seven at nine hundred,
+                // which is roughly how steady a crosshair is at those ranges.
                 tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             4.0f, 5.0f,
+                                             8.0f, 5.0f,
                                              cap > 0.0f ? cap : 900.0f,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
@@ -853,8 +858,15 @@ namespace
         }
         else
         {
+            // Six metres was right for things twenty metres away. A
+            // placement four hundred metres out moves further than that
+            // between passes while the crosshair sways, and resetting the
+            // timer every time means no pin ever matures.
             const float hx = chosen.x - g_heldX, hz = chosen.z - g_heldZ;
-            const bool samePlace = g_heldSinceMs && std::sqrt(hx * hx + hz * hz) <= 6.0f;
+            const float hd = std::sqrt((chosen.x - pp.x) * (chosen.x - pp.x) +
+                                       (chosen.z - pp.z) * (chosen.z - pp.z));
+            const float holdTol = hd * 0.05f > 10.0f ? hd * 0.05f : 10.0f;
+            const bool samePlace = g_heldSinceMs && std::sqrt(hx * hx + hz * hz) <= holdTol;
             if (!samePlace) g_heldSinceMs = now;
             g_heldEid = chosen.eid;
             g_heldX = chosen.x;

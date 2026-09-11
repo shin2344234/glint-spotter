@@ -159,8 +159,12 @@ namespace gs::lgso
             // How far along the ray it lies, and how far off it sits.
             const float along = dx * ux + dz * uz;
             if (along < minFromPlayer || along > maxRange) continue;
+            // Scaled, not flat. A fixed tolerance is generous up close and
+            // impossible at range, and the crosshair's own steadiness works
+            // the other way round.
             const float perp = std::fabs(dx * uz - dz * ux);
-            if (perp > maxPerp) continue;
+            const float allow = along * 0.03f > maxPerp ? along * 0.03f : maxPerp;
+            if (perp > allow) continue;
             if (!Worth(g_places[i].name)) continue;
             const float fx = g_places[i].x - px, fz = g_places[i].z - pz;
             const float fromPlayer = std::sqrt(fx * fx + fz * fz);
