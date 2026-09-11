@@ -376,8 +376,8 @@ namespace
         View v;
         if (!pp.valid || !ViewRay(pp, &v)) return;
         gs::nearest::Candidate c[8];
-        const int n = CastView(v, 45.0f, 2.0f, 0.12f, false, c, 8, nullptr, 0);
-        const int pick = PickByAngle(c, n, 0.105f);   // six degrees
+        const int n = CastView(v, 200.0f, 1.5f, 0.05f, false, c, 8, nullptr, 0);
+        const int pick = PickByAngle(c, n, 0.07f);   // four degrees
 
         // While the flash is on, a line every two seconds saying what the
         // cone holds, forty lines at most.
@@ -496,9 +496,16 @@ extern "C" void gs_OnMinimapTick(void* self)
         else
         {
             gs::nearest::Candidate c[6], miss[3];
-            // 60 units out, a beam 1.5 units wide at the eye widening by 0.06
-            // per unit, so 5 units wide at the far end.
-            const int n = CastView(v, 60.0f, 1.5f, 0.06f, false, c, 6, miss, 3);
+            // 300 units out, a beam 1.5 units wide at the eye widening by 0.03
+            // per unit, so about two degrees at the far end.
+            const int n = CastView(v, 300.0f, 1.5f, 0.03f, false, c, 6, miss, 3);
+            {
+                int bands[5];
+                float farthest = 0;
+                gs::nearest::Reach(pp.x, pp.y, pp.z, bands, &farthest);
+                GS_LOG("[mark] the set reaches %.0f units: %d within 30, %d to 60, %d to 120, %d to 300, %d beyond",
+                       farthest, bands[0], bands[1], bands[2], bands[3], bands[4]);
+            }
             GS_LOG("[mark] ray from the %s at (%.1f, %.1f, %.1f) along (%.3f, %.3f, %.3f) over %d entities: %d hit(s)",
                    v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, gs::actors::Count(), n);
             for (int i = 0; i < n; ++i)
@@ -524,7 +531,7 @@ extern "C" void gs_OnMinimapTick(void* self)
             }
             float gx = 0, gy = 0, gz = 0, gt = 0;
             uint32_t geid = 0;
-            bool ground = v.camera && gs::nearest::GroundAlong(v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, 100.0f,
+            bool ground = v.camera && gs::nearest::GroundAlong(v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, 300.0f,
                                                                 &gx, &gy, &gz, &gt, &geid);
             if (ground)
                 GS_LOG("[mark] the view ray meets the terrain %.1f units out at (%.1f, %.1f, %.1f), height from eid %08X",
@@ -540,7 +547,7 @@ extern "C" void gs_OnMinimapTick(void* self)
             // degrees; session twenty-six's aimed character sat four degrees
             // off at 32 units while a gimmick sat fourteen degrees off at 13
             // and would have won on distance. Otherwise the ground point.
-            const int pick = PickByAngle(c, n, 0.105f);
+            const int pick = PickByAngle(c, n, 0.07f);
             if (pick >= 0 && (!ground || c[pick].along <= gt + 3.0f))
             {
                 have = true; tx = c[pick].x; ty = c[pick].y; tz = c[pick].z;

@@ -98,6 +98,21 @@ namespace gs::nearest
         return found;
     }
 
+    void Reach(float px, float py, float pz, int* bands, float* farthest)
+    {
+        static gs::actors::Entity set[4096];
+        const int total = gs::actors::Snapshot(set, 4096);
+        for (int i = 0; i < 5; ++i) bands[i] = 0;
+        *farthest = 0;
+        for (int i = 0; i < total; ++i)
+        {
+            const float dx = set[i].x - px, dy = set[i].y - py, dz = set[i].z - pz;
+            const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (d > *farthest) *farthest = d;
+            ++bands[d < 30 ? 0 : d < 60 ? 1 : d < 120 ? 2 : d < 300 ? 3 : 4];
+        }
+    }
+
     int Closest(uintptr_t playerActor, float px, float py, float pz, Candidate* out, int n)
     {
         if (!out || n <= 0) return 0;
@@ -139,7 +154,9 @@ namespace gs::nearest
             {
                 const float dx = set[i].x - px, dz = set[i].z - pz;
                 const float d2 = dx * dx + dz * dz;
-                if (d2 < bestD2 && std::fabs(set[i].y - py) < 30.0f)
+                // Below the ray and not far below: session twenty-seven took
+                // a height from something thirty units up a cliff.
+                if (d2 < bestD2 && set[i].y <= py + 1.0f && py - set[i].y < 40.0f)
                 {
                     bestD2 = d2;
                     h = set[i].y;

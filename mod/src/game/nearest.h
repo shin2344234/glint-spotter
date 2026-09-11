@@ -52,6 +52,11 @@ namespace gs::nearest
                float maxAlong, float radius, float spread, bool glintOnly,
                Candidate* out, int n, Candidate* miss = nullptr, int missN = 0);
 
+    // How far the set reaches from a point: counts within 30, 60, 120, 300
+    // units and beyond, and the farthest entity. Session twenty-seven's
+    // glint was more than 90 units out and the casts stopped at 60.
+    void Reach(float px, float py, float pz, int* bands, float* farthest);
+
     // The n entities closest to a point, any direction, nearest first. `along`
     // carries the straight-line distance and `off` is zero.
     int Closest(uintptr_t playerActor, float px, float py, float pz, Candidate* out, int n);
