@@ -153,6 +153,54 @@ namespace
         delete canary;
     }
 
+    // The level gimmick database, read straight from the global its own
+    // vtable maintains. Dumps the first records whole so their layout can be
+    // read rather than guessed at: the reflection tables say they carry a
+    // _prefabPath and a _worldTransform.
+    void ProbeLevelGimmicks()
+    {
+        uintptr_t base = 0;
+        size_t size = 0;
+        if (!gs::typescan::ModuleRange(base, size)) return;
+        const uintptr_t at = base + gs::sig::kLgsoManagerGlobal;
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 8))
+        {
+            GS_LOG("[lgso] the global at +0x%llX is not readable",
+                   static_cast<unsigned long long>(gs::sig::kLgsoManagerGlobal));
+            return;
+        }
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(at);
+        if (mgr < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(mgr), 0x80))
+        {
+            GS_LOG("[lgso] the global holds 0x%p, which is not an object yet",
+                   reinterpret_cast<void*>(mgr));
+            return;
+        }
+        const char* cls = gs::rtti::VtableClassName(
+            reinterpret_cast<const void*>(*reinterpret_cast<const uintptr_t*>(mgr)));
+        const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
+        const uintptr_t recs = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Records);
+        GS_LOG_OK("[lgso] manager 0x%p (%s) via the global, %u record(s), array 0x%p",
+                  reinterpret_cast<void*>(mgr), cls ? ShortName(cls) : "?", count,
+                  reinterpret_cast<void*>(recs));
+        if (!count || recs < 0x10000) return;
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(recs), 8ull * (count < 8 ? count : 8))) return;
+
+        const gs::player::Pos pp = gs::player::Read();
+        const auto* arr = reinterpret_cast<const uintptr_t*>(recs);
+        for (uint32_t i = 0; i < count && i < 3; ++i)
+        {
+            const uintptr_t rec = arr[i];
+            if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x100)) continue;
+            char tag[24];
+            _snprintf_s(tag, sizeof(tag), _TRUNCATE, "lgso%u", i);
+            GS_LOG("[lgso] record %u at 0x%p", i, reinterpret_cast<void*>(rec));
+            gs::dump::Pointers(tag, rec, 0x200);
+            gs::dump::Object(tag, rec, 0x200);
+            gs::dump::Vectors(tag, rec, 0x200, pp.valid ? pp.x : 0.0f, pp.valid ? pp.z : 0.0f);
+        }
+    }
+
     uintptr_t g_worldVt = 0;
     uintptr_t g_miniVt = 0;
 
@@ -809,6 +857,13 @@ namespace
             }
 
             gs::actors::Locate(GetTickCount());
+
+            static bool lgsoProbed = false;
+            if (!lgsoProbed && gs::player::Read().valid)
+            {
+                lgsoProbed = true;
+                ProbeLevelGimmicks();
+            }
 
             // How long to wait before the next sweep. A sweep reads gigabytes
             // and takes the better part of a minute, and session fifty ran one

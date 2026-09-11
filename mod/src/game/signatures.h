@@ -53,7 +53,31 @@ namespace gs::sig
 
     // The gimmick component on world objects, and the byte the detect mode
     // event handler sets on it (slot 124 stores it at +0x45B, slot 7 reads it).
-    constexpr uintptr_t kGimmickVtable         = 0x054A8A58;
+    // pa::LevelGimmickSceneObjectInfoManager is a singleton, and it keeps its
+// own pointer in a module global. Slots 2 and 3 of its vtable are the setter
+// and the clear, and both write the same address:
+//
+//   RVA 0x0154FAC0  mov qword ptr [rip + 0x56E2DF9], rcx ; ret
+//   RVA 0x0154FAD0  mov qword ptr [rip + 0x56E2DE5], 0   ; ret
+//
+// Both resolve to RVA 0x06C328C0. The lookup at RVA 0x00433370 then says how
+// the records are reached:
+//
+//   mov edi, dword ptr [rcx]           the key, a plain index
+//   mov rbx, qword ptr [rip+0x67FF535] the manager, the same global
+//   cmp edi, dword ptr [rbx + 8]       against the count
+//   lea rsi, [rdi*8]
+//   mov rax, qword ptr [rbx + 0x58]    an array of record pointers
+//   mov rax, qword ptr [rsi + rax]     array[key]
+//
+// Session sixty-two read 171 at manager+0x08 and a pointer at +0x58, which
+// matches. This beats the heap sweep: one read of a fixed global instead of
+// gigabytes of scanning.
+constexpr uintptr_t kLgsoManagerGlobal = 0x06C328C0;
+constexpr uintptr_t kOff_Lgso_Count    = 0x08;
+constexpr uintptr_t kOff_Lgso_Records  = 0x58;
+
+constexpr uintptr_t kGimmickVtable         = 0x054A8A58;
     constexpr const char* kGimmickClass        = ".?AVClientGimmickActorComponent@pa@@";
     constexpr uintptr_t kOff_Comps_Gimmick     = 0x30;
     constexpr uintptr_t kOff_Gimmick_DetectTgt = 0x45B;
