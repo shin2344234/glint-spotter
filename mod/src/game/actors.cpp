@@ -843,8 +843,8 @@ namespace gs::actors
         if (nowMs - g_lastSaidMs > 30000)
         {
             g_lastSaidMs = nowMs;
-            GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d gimmicks, %d of them pickups, %d lit",
-                   n, dupes, noPos, g_setN, gimmicks, pickups, lits);
+            GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d gimmicks, %d of them pickups, %d with the glint byte set, %d lit",
+                   n, dupes, noPos, g_setN, gimmicks, pickups, glints, lits);
             // The nearest pickups, which is what the player can actually see.
             int order[6];
             float dist[6];
@@ -970,6 +970,33 @@ namespace gs::actors
         }
         for (int i = 0; i < g_setN; ++i) g_set[i].shown = false;
         GS_LOG("[set] %d entity(s) listed of %d in the set", shown, g_setN);
+    }
+
+    int GlintOnBearing(float px, float pz, float ox, float oz, float ux, float uz,
+                       Entity* out, float* angles, int n)
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        int found = 0;
+        for (int i = 0; i < g_setN; ++i)
+        {
+            if (!g_set[i].glint) continue;
+            const float dx = g_set[i].x - ox, dz = g_set[i].z - oz;
+            const float flat = std::sqrt(dx * dx + dz * dz);
+            if (flat < 0.5f) continue;
+            const float dot = (dx * ux + dz * uz) / flat;
+            const float cross = (dx * uz - dz * ux) / flat;
+            const float angle = std::fabs(std::atan2(cross, dot));
+            int pos = found;
+            while (pos > 0 && angles[pos - 1] > angle)
+            {
+                if (pos < n) { out[pos] = out[pos - 1]; angles[pos] = angles[pos - 1]; }
+                --pos;
+            }
+            if (pos < n) { out[pos] = g_set[i]; angles[pos] = angle; }
+            if (found < n) ++found;
+        }
+        (void)px; (void)pz;
+        return found;
     }
 
     bool InSet(uintptr_t ptr)

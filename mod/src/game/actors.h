@@ -110,6 +110,18 @@ namespace gs::actors
     // apart from a glint the game never put in the pools at all.
     float MarkedReach(float px, float pz);
 
+    // The entities whose gimmick component carries the detect mode target
+    // byte, nearest the given bearing first, with their bearing errors.
+    //
+    // Session fifty-seven is the first time in the project that byte ever
+    // moved: "glint byte set on eid B0100301 at (-9706.3, 566.7, -4162.5)"
+    // while Seth was walking toward the glint he had marked. Every earlier
+    // session read it on every gimmick every pass and never saw it change,
+    // which is explained now: the object it belongs to is not in the pools
+    // until the player is near it, so there was nothing to watch.
+    int GlintOnBearing(float px, float pz, float ox, float oz, float ux, float uz,
+                       Entity* out, float* angles, int n);
+
     // Is this pointer one of the entities the manager's pools hold?
     //
     // The test that tells a real actor from heap that happens to look like

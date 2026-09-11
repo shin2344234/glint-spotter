@@ -431,6 +431,7 @@ namespace
     float g_setListedX = 0, g_setListedZ = 0;
     int g_targetLogsLeft = 12;
     uint32_t g_targetLastMs = 0;
+    int g_glintWinsLeft = 40;
     int g_heldWinsLeft = 40;   // how many times the log says the target took the pick
     int g_loadingLogsLeft = 4;
     uint32_t g_heldEid = 0;
@@ -560,6 +561,23 @@ namespace
         // Heights are not in this: session forty had firewood a metre away
         // reading six metres below the player's feet, so an angle measured in
         // three axes is unusable. A bearing is not.
+        // The gimmick's own detect mode target byte, when anything in the set
+        // carries it. This is the thing the project has been looking for: a
+        // flag the game sets on the object that glints, rather than a guess
+        // from where the crosshair points. It never moved in fifty-six
+        // sessions because the object carrying it is not in the pools until
+        // the player is near it, and session fifty-seven caught it the moment
+        // Seth walked toward the glint he had marked:
+        //
+        //   [14:59:22.881] glint byte set on eid B0100301 at (-9706.3, 566.7, -4162.5)
+        //
+        // Nearest the crosshair wins among them, in a wider cone than the
+        // bearing pick gets, because this is the game saying so rather than
+        // the mod inferring it.
+        gs::actors::Entity glints[8];
+        float glintAngles[8];
+        int glintN = 0;
+
         gs::actors::Entity around[8];
         float angles[8];
         const float cap = gs::Settings::Get().radius;
@@ -575,6 +593,8 @@ namespace
                 n = gs::actors::MarkedOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
                                                 cap > 0.0f ? cap : 1.0e9f, 0.26f, 3.0f,
                                                 around, angles, 8, &marked);
+                glintN = gs::actors::GlintOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
+                                                    glints, glintAngles, 8);
                 // The whole gimmick set, named, so the log says whether the
                 // glint was in it. Once per place: session fifty-three spent
                 // both its listings on the first glint and had none left for
@@ -605,6 +625,21 @@ namespace
         }
         int pick = n > 0 ? 0 : -1;
         float pickAngle = n > 0 ? angles[0] : 0.0f;
+        bool byGlint = false;
+        if (glintN > 0 && glintAngles[0] < 0.70f)   // forty degrees
+        {
+            byGlint = true;
+            pickAngle = glintAngles[0];
+        }
+        if (byGlint && g_glintWinsLeft > 0)
+        {
+            --g_glintWinsLeft;
+            const float gx = glints[0].x - pp.x, gz = glints[0].z - pp.z;
+            GS_LOG("[auto] the game has set the glint byte on %d node(s); the nearest the crosshair is "
+                   "\"%s\" eid %08X, %.1f metres away, %.1f degrees off. That takes the pin.",
+                   glintN, glints[0].name[0] ? glints[0].name : "?", glints[0].eid,
+                   std::sqrt(gx * gx + gz * gz), glintAngles[0] * 57.2958f);
+        }
 
         // The game's own detect target, when it has one on the crosshair,
         // beats anything the bearing found. Fifteen degrees is the same cone
@@ -645,7 +680,17 @@ namespace
             char name[64]{};
             bool valid = false;
         } chosen;
-        if (byTarget)
+        if (byGlint)
+        {
+            chosen.x = glints[0].x; chosen.y = glints[0].y; chosen.z = glints[0].z;
+            chosen.angleDeg = glintAngles[0] * 57.2958f;
+            chosen.eid = glints[0].eid;
+            chosen.how = glints[0].how ? glints[0].how : "?";
+            strncpy_s(chosen.name, sizeof(chosen.name),
+                      glints[0].name[0] ? glints[0].name : "?", _TRUNCATE);
+            chosen.valid = true;
+        }
+        else if (byTarget)
         {
             chosen.x = held.x; chosen.y = held.y; chosen.z = held.z;
             chosen.angleDeg = held.angle;
@@ -744,8 +789,9 @@ namespace
                        std::fabs(east), east >= 0 ? "east" : "west");
             }
             PlaceAt(chosen.x, chosen.y, chosen.z,
-                    byTarget ? "automatic, what the game's detect system is holding"
-                             : "automatic, the node under the crosshair",
+                    byGlint ? "automatic, the node the game marked as a detect mode target"
+                            : (byTarget ? "automatic, what the game's detect system is holding"
+                                        : "automatic, the node under the crosshair"),
                     "Glint", pp, 8.0f);
         }
 
