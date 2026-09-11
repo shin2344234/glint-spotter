@@ -188,6 +188,64 @@ namespace
 
         const gs::player::Pos pp = gs::player::Read();
         const auto* arr = reinterpret_cast<const uintptr_t*>(recs);
+
+        // The whole table, then the handful nearest the player.
+        //
+        // Session sixty-six read the names: "Mission_PororinVillage_Bell_All_
+        // Calphade", "Hernand_Bell". So these are the game's notable level
+        // gimmicks, the kind that earn a map icon, rather than every prop in
+        // the world. Whether that includes what glints is the question this
+        // answers, and the test is whether anything in here lands near the
+        // spot Seth has been marking, around (-9714, -4141).
+        struct Near { float x, y, z, d; uint32_t rec, el; };
+        Near best[12]{};
+        int bestN = 0;
+        uint32_t total = 0;
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const uintptr_t rec = arr[i];
+            if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x70)) continue;
+            for (uintptr_t off = 0; off + 16 <= 0x70; off += 8)
+            {
+                const uintptr_t a2 = *reinterpret_cast<const uintptr_t*>(rec + off);
+                const uint32_t n2 = *reinterpret_cast<const uint32_t*>(rec + off + 8);
+                const uint32_t c2 = *reinterpret_cast<const uint32_t*>(rec + off + 12);
+                if (a2 < 0x10000 || (a2 & 7) != 0) continue;
+                if (n2 == 0 || n2 > c2 || c2 > 100000) continue;
+                const size_t span = static_cast<size_t>(n2) * gs::sig::kOff_LgsoData_Stride;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(a2), span)) continue;
+                for (uint32_t e = 0; e < n2; ++e)
+                {
+                    const uintptr_t el = a2 + static_cast<uintptr_t>(e) * gs::sig::kOff_LgsoData_Stride;
+                    const float* q = reinterpret_cast<const float*>(el + gs::sig::kOff_LgsoData_Transform);
+                    const float unit = q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3];
+                    if (!(unit > 0.98f && unit < 1.02f)) continue;   // a wrong read, skipped
+                    const float* p = q + 4;
+                    if (!(p[0] == p[0]) || !(p[2] == p[2])) continue;
+                    ++total;
+                    if (!pp.valid) continue;
+                    const float dx = p[0] - pp.x, dz = p[2] - pp.z;
+                    const float d = std::sqrt(dx * dx + dz * dz);
+                    int at = bestN;
+                    while (at > 0 && best[at - 1].d > d)
+                    {
+                        if (at < 12) best[at] = best[at - 1];
+                        --at;
+                    }
+                    if (at < 12) best[at] = Near{p[0], p[1], p[2], d, i, e};
+                    if (bestN < 12) ++bestN;
+                }
+            }
+        }
+        GS_LOG_OK("[lgso] the table holds %u placement(s) across %u record(s)", total, count);
+        if (pp.valid)
+        {
+            GS_LOG("[lgso] nearest to you at (%.1f, %.1f, %.1f):", pp.x, pp.y, pp.z);
+            for (int k = 0; k < bestN; ++k)
+                GS_LOG("[lgso]   %6.0f m  record %u element %u at (%.1f, %.1f, %.1f)",
+                       best[k].d, best[k].rec, best[k].el, best[k].x, best[k].y, best[k].z);
+        }
+
         for (uint32_t i = 0; i < count && i < 3; ++i)
         {
             const uintptr_t rec = arr[i];
