@@ -70,6 +70,11 @@ namespace gs::actors
     // The lit entities, wherever they are, nearest the given point first.
     int LitNear(float px, float py, float pz, Entity* out, int n);
 
+    // The marked nodes within `radius` of a point, nearest first. Distance
+    // is measured flat: the heights disagree with the player's by several
+    // metres and nothing should turn on them.
+    int MarkedNear(float px, float pz, float radius, Entity* out, int n);
+
     // The entity carrying this id, from the set, or 0.
     uintptr_t ByEid(uint32_t eid);
 }

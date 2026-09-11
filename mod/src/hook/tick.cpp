@@ -358,150 +358,79 @@ namespace
         GS_LOG("[mark]     %s components:%s", tag, line);
     }
 
-    // Flash on: among the pickups near the view, the one nearest the crosshair
-    // by angle, held for a second, gets a Glint pin once per area and no
-    // other automatic pin for five seconds.
+    // Flash on: pin the nodes around the player, each at its own position.
     //
-    // A pickup is what Seth described as the glint: an object on the ground
-    // he can take, or one that yields an item when a puzzle is done. Master
-    // Looter has known how to tell one since build 2474: a gimmick component
-    // carrying item data or gather data. The reveal state that would say
-    // "glinting right now" is still unfound (the byte the static pass named
-    // flipped with the flash off in session thirty-four), so the flash being
-    // on is the gate and the pickup is the pick. That marks a takeable thing
-    // under the crosshair whether or not the game has drawn its glint yet,
-    // which is the useful behaviour while the reveal state is open.
-    uint32_t g_autoEid = 0;
-    uint32_t g_autoSinceMs = 0;
-    uint32_t g_autoCooldownUntil = 0;
+    // Aiming is out. Three sessions tried to read which node the crosshair
+    // was on and every one of them failed for its own reason: the entity
+    // heights disagree with the player's by five to ten metres, so a cone in
+    // three axes put the world a quarter turn below the crosshair, and a flat
+    // bearing takes whatever happens to line up, which was firewood at his
+    // feet. Seth's own words: it should be the exact position of the gimmick
+    // the glint belongs to.
+    //
+    // So the flash is the gate and proximity is the pick. While it is held,
+    // the nearest marked nodes within thirty metres get a pin each, one per
+    // second, at their own coordinates, eight metres of dedupe between them,
+    // four at most per press of the flash. Anything already pinned is left
+    // alone, so holding the flash in a place that is already marked does
+    // nothing.
+    uint32_t g_autoNextMs = 0;
+    int g_autoThisFlash = 0;
+    bool g_flashWas = false;
     int g_autoLogsLeft = 60;
     uint32_t g_autoLastLogMs = 0;
-    uintptr_t g_autoDumpEnts[3] = {0, 0, 0};   // dumped again once the flash is off
-    uint32_t g_autoDumpEids[3] = {0, 0, 0};
-    int g_autoDumpN = 0;
-    uint32_t g_autoFlashOffMs = 0;
-    int g_autoDumpsLeft = 4;
 
-    int PickByAngle(const gs::nearest::Candidate* c, int n, float maxAngle)
-    {
-        int pick = -1;
-        float best = maxAngle;
-        for (int i = 0; i < n; ++i)
-        {
-            const float angle = c[i].off / (c[i].along > 1.0f ? c[i].along : 1.0f);
-            if (angle < best) { best = angle; pick = i; }
-        }
-        return pick;
-    }
+    constexpr float kAutoRadius = 30.0f;
+    constexpr int kAutoPerFlash = 4;
 
     void AutoMark(uint32_t now)
     {
-        if (!gs::aim::FlashActive())
+        const bool flash = gs::aim::FlashActive();
+        if (!flash)
         {
-            g_autoEid = 0;
-            g_autoSinceMs = 0;
-            // The second dump, two seconds after the flash ended.
-            if (g_autoDumpN)
-            {
-                if (!g_autoFlashOffMs) g_autoFlashOffMs = now;
-                else if (now - g_autoFlashOffMs > 2000)
-                {
-                    for (int i = 0; i < g_autoDumpN; ++i)
-                    {
-                        char tag[24];
-                        _snprintf_s(tag, sizeof(tag), _TRUNCATE, "off%d", i + 1);
-                        GS_LOG("[auto] flash off for two seconds; dumping eid %08X again", g_autoDumpEids[i]);
-                        gs::dump::EntityComponents(tag, g_autoDumpEnts[i], 0x300);
-                    }
-                    g_autoDumpN = 0;
-                    g_autoFlashOffMs = 0;
-                }
-            }
+            g_flashWas = false;
             return;
         }
-        g_autoFlashOffMs = 0;
-        const gs::player::Pos pp = gs::player::Read();
-        View v;
-        if (!pp.valid || !ViewRay(pp, &v)) return;
-
-        // Marked nodes whose bearing matches the crosshair's, nearest the
-        // bearing first. Height decides nothing here: session forty had
-        // firewood a metre away reading six and a half metres below the
-        // player's feet, so the heights are not to be trusted for aim.
-        gs::nearest::Candidate c[8];
-        const int n = gs::nearest::CastBearing(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fz,
-                                               400.0f, 0.26f, 40.0f, true, c, 8);   // fifteen degrees
-        // Nothing the player is standing on. Session forty-one put the pin on
-        // firewood 0.7 metres from him: it was 1.3 degrees off the bearing,
-        // nearer the heading than the blueberry sockets he was pointing at
-        // twenty-four metres out, and a pin under his own feet is a pin on
-        // him. Four metres is the line, measured from the player and not
-        // from the camera six metres behind him.
-        int pick = -1;
-        for (int i = 0; i < n; ++i)
+        if (!g_flashWas)
         {
-            const float dx = c[i].x - pp.x, dz = c[i].z - pp.z;
-            if (std::sqrt(dx * dx + dz * dz) < 4.0f) continue;
-            pick = i;   // already ordered by bearing
-            break;
+            g_flashWas = true;
+            g_autoThisFlash = 0;
+            g_autoNextMs = now + 700;   // a moment to let the reveal appear
         }
+        const gs::player::Pos pp = gs::player::Read();
+        if (!pp.valid) return;
 
-        // While the flash is on, a line every two seconds, sixty at most.
+        gs::actors::Entity around[8];
+        const int n = gs::actors::MarkedNear(pp.x, pp.z, kAutoRadius, around, 8);
+
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on, ray from the %s at (%.1f, %.1f, %.1f) bearing (%.2f, %.2f), player at (%.1f, %.1f, %.1f); set %d, %d marked, %d on the bearing",
-                   v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fz, pp.x, pp.y, pp.z,
-                   gs::actors::Count(), gs::actors::PickupCount(), n);
+            GS_LOG("[auto] flash on at (%.1f, %.1f, %.1f); %d marked in the set, %d within %.0f metres, %d pinned this flash",
+                   pp.x, pp.y, pp.z, gs::actors::PickupCount(), n, kAutoRadius, g_autoThisFlash);
             for (int i = 0; i < n && i < 4; ++i)
             {
-                const float dx = c[i].x - pp.x, dz = c[i].z - pp.z;
-                const float fromPlayer = std::sqrt(dx * dx + dz * dz);
-                GS_LOG("[auto]   %s\"%s\" eid %08X at %.1f away, %.1f deg off the bearing, %+.1f up%s%s", i == pick ? "PICK " : "",
-                       c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, fromPlayer, c[i].off * 57.2958f, c[i].dy,
-                       c[i].lit ? ", lit" : "", fromPlayer < 4.0f ? ", underfoot, skipped" : "");
+                const float dx = around[i].x - pp.x, dz = around[i].z - pp.z;
+                GS_LOG("[auto]   \"%s\" eid %08X %.1f away at (%.1f, %.1f, %.1f)%s%s",
+                       around[i].name[0] ? around[i].name : "?", around[i].eid, std::sqrt(dx * dx + dz * dz),
+                       around[i].x, around[i].y, around[i].z, around[i].lit ? ", lit" : "",
+                       gs::mapicon::PinNear(around[i].x, around[i].z, 8.0f) ? ", already pinned" : "");
             }
-            // What is on the bearing at all, marked or not, so a session says
-            // what the crosshair was on.
-            gs::nearest::Candidate all[6];
-            const int an = gs::nearest::CastBearing(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fz,
-                                                    400.0f, 0.26f, 40.0f, false, all, 6);
-            for (int i = 0; i < an && i < 4; ++i)
-                GS_LOG("[auto]   on the bearing: \"%s\" eid %08X at %.1f away, %.1f deg, %+.1f up%s",
-                       all[i].name[0] ? all[i].name : all[i].cls, all[i].eid, all[i].along,
-                       all[i].off * 57.2958f, all[i].dy, all[i].pickup ? ", marked" : "");
-            // The height disagreement, which is the open bug: what the nearest
-            // few entities say their height is against the player's own.
-            gs::nearest::Candidate close[3];
-            const int cn = gs::nearest::Closest(gs::player::Actor(), pp.x, pp.y, pp.z, close, 3);
-            for (int i = 0; i < cn; ++i)
-                GS_LOG("[auto]   nearby: \"%s\" %.1f away, its height %.1f against the player's %.1f, a gap of %+.1f",
-                       close[i].name[0] ? close[i].name : close[i].cls, close[i].along, close[i].y, pp.y, close[i].y - pp.y);
         }
 
-        // Only what the crosshair is on. A node at the player's feet is
-        // not what he is pointing at, however close it is.
-        const int chosen = pick;
-        if (chosen < 0 || c[chosen].eid == 0)
+        if (g_autoThisFlash >= kAutoPerFlash || now < g_autoNextMs) return;
+        for (int i = 0; i < n; ++i)
         {
-            g_autoEid = 0;
-            g_autoSinceMs = 0;
+            if (gs::mapicon::PinNear(around[i].x, around[i].z, 8.0f)) continue;
+            const float dx = around[i].x - pp.x, dz = around[i].z - pp.z;
+            GS_LOG("[auto] \"%s\" eid %08X revealed %.1f metres away; pinning it where it stands",
+                   around[i].name[0] ? around[i].name : "?", around[i].eid, std::sqrt(dx * dx + dz * dz));
+            PlaceAt(around[i].x, around[i].y, around[i].z, "automatic, revealed by the flash", "Glint", pp, 8.0f);
+            ++g_autoThisFlash;
+            g_autoNextMs = now + 1000;
             return;
         }
-        const int pickIdx = chosen;
-        if (c[pickIdx].eid != g_autoEid)
-        {
-            g_autoEid = c[pickIdx].eid;
-            g_autoSinceMs = now;
-            return;
-        }
-        if (now - g_autoSinceMs < 1000 || now < g_autoCooldownUntil) return;
-        g_autoCooldownUntil = now + 5000;
-        GS_LOG("[auto] pickup \"%s\" eid %08X held for a second at %.1f along%s",
-               c[pickIdx].name[0] ? c[pickIdx].name : c[pickIdx].cls, c[pickIdx].eid, c[pickIdx].along,
-               c[pickIdx].lit ? ", lit" : "");
-        PlaceAt(c[pickIdx].x, c[pickIdx].y, c[pickIdx].z, "automatic, a pickup in view with the flash on", "Glint", pp, 8.0f);
     }
 }
 

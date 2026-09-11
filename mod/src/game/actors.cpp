@@ -842,6 +842,30 @@ namespace gs::actors
         return g_pickups;
     }
 
+    int MarkedNear(float px, float pz, float radius, Entity* out, int n)
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        int found = 0;
+        for (int i = 0; i < g_setN; ++i)
+        {
+            if (!g_set[i].pickup && !(g_set[i].gimmick && g_set[i].knowledge)) continue;
+            const float dx = g_set[i].x - px, dz = g_set[i].z - pz;
+            const float d = std::sqrt(dx * dx + dz * dz);
+            if (d > radius) continue;
+            int pos = found;
+            while (pos > 0)
+            {
+                const float ax = out[pos - 1].x - px, az = out[pos - 1].z - pz;
+                if (std::sqrt(ax * ax + az * az) <= d) break;
+                if (pos < n) out[pos] = out[pos - 1];
+                --pos;
+            }
+            if (pos < n) out[pos] = g_set[i];
+            if (found < n) ++found;
+        }
+        return found;
+    }
+
     int LitNear(float px, float py, float pz, Entity* out, int n)
     {
         std::lock_guard<std::mutex> lock(g_setMutex);
