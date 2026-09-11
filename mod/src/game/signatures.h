@@ -77,6 +77,24 @@ constexpr uintptr_t kLgsoManagerGlobal = 0x06C328C0;
 constexpr uintptr_t kOff_Lgso_Count    = 0x08;
 constexpr uintptr_t kOff_Lgso_Records  = 0x58;
 
+// A record's lists hold the placements. Session sixty-four's raw dump of
+// record 0's list at +0x20 gives the layout outright:
+//
+//   +0x64  quaternion  (0.0000, 0.7292, 0.0000, 0.6843)   a unit rotation
+//   +0x74  position    (-11896.2109, 713.9378, -2027.1711)
+//   +0x80  scale       (1.0, 1.0, 1.0)
+//
+// and the next element repeats it at +0x12C, +0x13C, +0x148, so the stride is
+// 0xC8. That is the same forty-byte Transform the .palevel files carry,
+// quaternion then position then scale, sitting at +0x64 of a 200-byte record.
+//
+// The positions are real and far: (-11896, 714, -2027) and (-4442, 410,
+// -3879) with the player near (-9711, 569, -4260), and they sit beside the
+// gimmick map icons the game creates for itself out there.
+constexpr uintptr_t kOff_LgsoData_Stride    = 0xC8;
+constexpr uintptr_t kOff_LgsoData_Transform = 0x64;
+constexpr uintptr_t kOff_Transform_Pos      = 0x10;   // after the quaternion
+
 constexpr uintptr_t kGimmickVtable         = 0x054A8A58;
     constexpr const char* kGimmickClass        = ".?AVClientGimmickActorComponent@pa@@";
     constexpr uintptr_t kOff_Comps_Gimmick     = 0x30;

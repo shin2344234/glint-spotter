@@ -200,13 +200,10 @@ namespace
             GS_LOG("[lgso] record %u at 0x%p", i, reinterpret_cast<void*>(rec));
             gs::dump::Object(tag, rec, 0x70);
 
-            // The lists it owns. The world positions are in here: session
-            // sixty-three found (-11896.211, 713.938, -2027.171) and
-            // (-10702.497, 631.127, -3833.859) at a fixed 0x74 from an array's
-            // base, which is a couple of kilometres from the player and beside
-            // the gimmick map icons the game itself creates out there. What is
-            // not known is the element stride or where the prefab path sits,
-            // and a raw dump of the array answers both.
+            // The lists it owns, read with the stride and offsets the raw
+            // dump gave up. Every element's world position comes out, and its
+            // two pointers are dumped on the first one so the prefab path can
+            // be found next.
             for (uintptr_t off = 0; off + 16 <= 0x70; off += 8)
             {
                 const uintptr_t arr2 = *reinterpret_cast<const uintptr_t*>(rec + off);
@@ -214,14 +211,43 @@ namespace
                 const uint32_t c2 = *reinterpret_cast<const uint32_t*>(rec + off + 12);
                 if (arr2 < 0x10000 || (arr2 & 7) != 0) continue;
                 if (n2 == 0 || n2 > c2 || c2 > 100000) continue;
-                if (!gs::rtti::Readable(reinterpret_cast<const void*>(arr2), 0x100)) continue;
-                char t2[28];
-                _snprintf_s(t2, sizeof(t2), _TRUNCATE, "lgso%u.%02llX", i,
-                            static_cast<unsigned long long>(off));
+                const size_t span = static_cast<size_t>(n2) * gs::sig::kOff_LgsoData_Stride;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(arr2), span < 0x100 ? 0x100 : span))
+                    continue;
                 GS_LOG("[lgso] record %u list at +%02llX -> 0x%p, %u of %u", i,
                        static_cast<unsigned long long>(off), reinterpret_cast<void*>(arr2), n2, c2);
-                gs::dump::Object(t2, arr2, 0x180);
-                gs::dump::Pointers(t2, arr2, 0x180);
+                for (uint32_t e = 0; e < n2 && e < 8; ++e)
+                {
+                    const uintptr_t el = arr2 + static_cast<uintptr_t>(e) * gs::sig::kOff_LgsoData_Stride;
+                    const float* q = reinterpret_cast<const float*>(el + gs::sig::kOff_LgsoData_Transform);
+                    const float* p = q + 4;
+                    const float* s = q + 7;
+                    const float unit = q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3];
+                    const float dx = p[0] - (pp.valid ? pp.x : 0.0f);
+                    const float dz = p[2] - (pp.valid ? pp.z : 0.0f);
+                    GS_LOG("[lgso]   %u.%u at (%.3f, %.3f, %.3f) scale %.2f, %.0f m away%s",
+                           i, e, p[0], p[1], p[2], s[0], std::sqrt(dx * dx + dz * dz),
+                           (unit > 0.98f && unit < 1.02f) ? "" : "  (rotation is not a unit quaternion)");
+                    if (e == 0)
+                    {
+                        char t2[28];
+                        _snprintf_s(t2, sizeof(t2), _TRUNCATE, "lgso%u.%02llXe", i,
+                                    static_cast<unsigned long long>(off));
+                        // Two pointers sit near the head of an element, one into
+                        // the image and one on the heap, and the heap one moves
+                        // by 0x20 between neighbours. A prefab path is the thing
+                        // to hope for.
+                        for (uintptr_t k = 0; k + 8 <= 0x40; k += 8)
+                        {
+                            const uintptr_t pv = *reinterpret_cast<const uintptr_t*>(el + k);
+                            if (pv < 0x10000 || (pv & 7) != 0) continue;
+                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(pv), 0x40)) continue;
+                            GS_LOG("[lgso]     +%02llX -> 0x%p",
+                                   static_cast<unsigned long long>(k), reinterpret_cast<void*>(pv));
+                            gs::dump::Object(t2, pv, 0x40);
+                        }
+                    }
+                }
             }
         }
     }
