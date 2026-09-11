@@ -18,6 +18,7 @@
 #include "game/actors.h"
 #include "game/camera.h"
 #include "game/dump.h"
+#include "game/physics.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
 extern "C" void* gs_minimapOriginal = nullptr;
@@ -515,70 +516,62 @@ extern "C" void gs_OnMinimapTick(void* self)
                    pp.q[0], pp.q[1], pp.q[2], pp.q[3]);
         else
         {
-            gs::nearest::Candidate c[6], miss[3];
-            // 300 units out, a beam 1.5 units wide at the eye widening by 0.03
-            // per unit, so about two degrees at the far end.
-            const int n = CastView(v, 300.0f, 1.5f, 0.03f, false, c, 6, miss, 3);
+            // A real ray against the world's collision, from the camera along
+            // the view. The first press tries a handful of layer words and
+            // remembers the first that reports a hit; a hit closer than the
+            // pivot is the player's own body and the ray is cast again from
+            // just past the pivot.
+            static int knownLayer = -1;
+            const gs::camera::Pose cam = gs::camera::Read();
+            const float camDist = (cam.valid && cam.dist > 0.5f && cam.dist < 30.0f) ? cam.dist : 6.0f;
+            gs::physics::LogState();
+            const float origin[3] = {v.ox, v.oy, v.oz};
+            const float dir[3] = {v.fx, v.fy, v.fz};
+            gs::physics::Hit best;
+            int usedLayer = -1;
+            const int layers[] = {0, 1, 2, 3, 4, 5, 6, 8, 0x3B, 0x3C};
+            for (int li = 0; li < static_cast<int>(sizeof(layers) / sizeof(layers[0])); ++li)
             {
-                int bands[5];
-                float farthest = 0;
-                gs::nearest::Reach(pp.x, pp.y, pp.z, bands, &farthest);
-                GS_LOG("[mark] the set reaches %.0f units: %d within 30, %d to 60, %d to 120, %d to 300, %d beyond",
-                       farthest, bands[0], bands[1], bands[2], bands[3], bands[4]);
+                const int layer = knownLayer >= 0 ? knownLayer : layers[li];
+                gs::physics::Hit h = gs::physics::Cast(origin, dir, 600.0f, layer, false);
+                if (h.hit && h.dist < camDist + 1.0f)
+                {
+                    // Past the player's body.
+                    const float o2[3] = {v.ox + v.fx * (camDist + 1.0f), v.oy + v.fy * (camDist + 1.0f), v.oz + v.fz * (camDist + 1.0f)};
+                    gs::physics::Hit h2 = gs::physics::Cast(o2, dir, 600.0f, layer, false);
+                    GS_LOG("[mark] layer %d: hit at %.1f (the body); from past the pivot: %s %.1f", layer, h.dist,
+                           h2.hit ? "hit at" : "no hit", h2.hit ? h2.dist + camDist + 1.0f : 0.0f);
+                    if (h2.hit) { h2.dist += camDist + 1.0f; h = h2; }
+                    else h.hit = false;
+                }
+                else
+                    GS_LOG("[mark] layer %d: %s %.1f, normal (%.2f, %.2f, %.2f), flag %d", layer,
+                           h.hit ? "hit at" : "no hit", h.dist, h.normal[0], h.normal[1], h.normal[2], h.flag ? 1 : 0);
+                if (h.hit) { best = h; usedLayer = layer; break; }
+                if (knownLayer >= 0) break;
             }
-            GS_LOG("[mark] ray from the %s at (%.1f, %.1f, %.1f) along (%.3f, %.3f, %.3f) over %d entities: %d hit(s)",
-                   v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, gs::actors::Count(), n);
-            for (int i = 0; i < n; ++i)
-                GS_LOG("[mark]   %d. %s%s%s eid %08X at %.1f along, %.2f off, %+.1f up, (%.1f, %.1f, %.1f)",
-                       i + 1, c[i].glint ? "GLINT " : "", c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid,
-                       c[i].along, c[i].off, c[i].dy, c[i].x, c[i].y, c[i].z);
-            int missN = 0;
-            for (int i = 0; i < 3 && miss[i].entity; ++i) ++missN;
-            for (int i = 0; i < missN; ++i)
-                GS_LOG("[mark]   near miss: %s%s eid %08X at %.1f along, %.2f off, %+.1f up",
-                       miss[i].glint ? "GLINT " : "", miss[i].cls, miss[i].eid, miss[i].along, miss[i].off, miss[i].dy);
-            for (int i = 0; i < n && i < 2; ++i) DescribeComponents(i == 0 ? "hit 1" : "hit 2", c[i].entity);
-            if (missN > 0) DescribeComponents("near miss 1", miss[0].entity);
-
+            if (best.hit)
             {
-                // "near" is a Windows macro; hence the name.
-                gs::nearest::Candidate close[8];
-                const int m = gs::nearest::Closest(gs::player::Actor(), pp.x, pp.y, pp.z, close, 8);
-                for (int i = 0; i < m; ++i)
-                    GS_LOG("[mark]   nearby %d: %s%s%s eid %08X %.1f away, %+.1f up, (%.1f, %.1f, %.1f)", i + 1,
-                           close[i].glint ? "GLINT " : "", close[i].gimmick ? "gimmick " : "", close[i].cls, close[i].eid,
-                           close[i].along, close[i].dy, close[i].x, close[i].y, close[i].z);
+                if (knownLayer < 0) knownLayer = usedLayer;
+                tx = v.ox + v.fx * best.dist; ty = v.oy + v.fy * best.dist; tz = v.oz + v.fz * best.dist;
+                have = true;
+                how = "the world ray";
+                GS_LOG("[mark] the world ray lands %.1f units out at (%.1f, %.1f, %.1f)", best.dist, tx, ty, tz);
             }
-            float gx = 0, gy = 0, gz = 0, gt = 0;
-            uint32_t geid = 0;
-            bool ground = v.camera && gs::nearest::GroundAlong(v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, 300.0f,
-                                                                &gx, &gy, &gz, &gt, &geid);
-            if (ground)
-                GS_LOG("[mark] the view ray meets the terrain %.1f units out at (%.1f, %.1f, %.1f), height from eid %08X",
-                       gt, gx, gy, gz, geid);
             else
             {
-                ground = GroundPoint(v, &gx, &gy, &gz, &gt);
-                if (ground) GS_LOG("[mark] nothing stands near the ray to give a terrain height; the plane at the feet says %.1f units out at (%.1f, %.1f, %.1f)", gt, gx, gy, gz);
-                else GS_LOG("[mark] no ground point: %s", v.camera ? "looking level or up" : "no camera pitch");
-            }
-
-            // The object nearest the crosshair by angle wins, within six
-            // degrees; session twenty-six's aimed character sat four degrees
-            // off at 32 units while a gimmick sat fourteen degrees off at 13
-            // and would have won on distance. Otherwise the ground point.
-            const int pick = PickByAngle(c, n, 0.07f);
-            if (pick >= 0 && (!ground || c[pick].along <= gt + 3.0f))
-            {
-                have = true; tx = c[pick].x; ty = c[pick].y; tz = c[pick].z;
-                how = "the object under the crosshair";
-                GS_LOG("[mark] crosshair pick: hit %d, %.1f degrees off the view ray", pick + 1,
-                       std::atan2(c[pick].off, c[pick].along) * 57.2958f);
-            }
-            else if (ground)
-            {
-                have = true; tx = gx; ty = gy; tz = gz;
-                how = "the ground under the view ray";
+                GS_LOG("[mark] the world ray hit nothing on any layer; falling back to the terrain estimate");
+                float gx = 0, gy = 0, gz = 0, gt = 0;
+                uint32_t geid = 0;
+                bool ground = v.camera && gs::nearest::GroundAlong(v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, 300.0f,
+                                                                    &gx, &gy, &gz, &gt, &geid);
+                if (!ground) ground = GroundPoint(v, &gx, &gy, &gz, &gt);
+                if (ground)
+                {
+                    have = true; tx = gx; ty = gy; tz = gz;
+                    how = "the terrain estimate under the view ray";
+                }
+                else GS_LOG("[mark] no ground point either");
             }
         }
 
