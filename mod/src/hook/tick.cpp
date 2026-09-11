@@ -275,7 +275,9 @@ namespace
     {
         if (n <= 0) return;
         if (!gs::Settings::Get().survey) return;
-        if (g_surveyed && !FarFrom(pp.x, pp.z, g_surveyX, g_surveyZ, 150.0f)) return;
+        // Fifty metres, so walking toward a glint re-arms it. The point of
+        // the walk is to stand on the thing and have the mod name it.
+        if (g_surveyed && !FarFrom(pp.x, pp.z, g_surveyX, g_surveyZ, 50.0f)) return;
         g_surveyed = true;
         g_surveyX = pp.x;
         g_surveyZ = pp.z;
@@ -578,7 +580,7 @@ namespace
                 // both its listings on the first glint and had none left for
                 // the one it teleported to.
                 if (g_setListingsLeft > 0 && now - g_flashOnMs > 700 &&
-                    (!g_setListedOnce || FarFrom(pp.x, pp.z, g_setListedX, g_setListedZ, 100.0f)))
+                    (!g_setListedOnce || FarFrom(pp.x, pp.z, g_setListedX, g_setListedZ, 50.0f)))
                 {
                     --g_setListingsLeft;
                     g_setListedOnce = true;

@@ -20,7 +20,16 @@ namespace
     constexpr uintptr_t kOff_Mgr_ListsBegin  = 0x100;
     constexpr uintptr_t kOff_Mgr_ListsEnd    = 0x200;
     constexpr uintptr_t kOff_Mgr_PoolsBegin  = 0x100;
-    constexpr uintptr_t kOff_Mgr_PoolsEnd    = 0x300;
+    // Master Looter reads to +0x300 because it only ever wants what is near
+    // the player. Session fifty-six says that is not enough here: Seth marked
+    // a glint a hundred and nineteen metres due north, the listing swept every
+    // entity within sixty-six degrees of his crosshair, and the farthest thing
+    // on that bearing was sixty-six metres away. The pools do hold objects at
+    // two and three hundred metres in other directions, so the set is not
+    // distance-limited, it is incomplete. If the manager keeps more pools
+    // further along, this is where they are.
+    constexpr uintptr_t kOff_Mgr_PoolsEnd    = 0x1000;
+    constexpr uintptr_t kOff_Mgr_PoolsNarrow = 0x300;   // what is known to be readable
     constexpr uintptr_t kOff_Ent_Eid         = 0x60;
     constexpr uintptr_t kOff_Ent_Comps       = 0x68;
     constexpr uintptr_t kOff_Comps_Transform = 0x1A0;
@@ -141,7 +150,13 @@ namespace
         int n = 0;
         __try
         {
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(mgr), kOff_Mgr_PoolsEnd)) return 0;
+            // The wide range is a guess at how big the manager is, so it is
+            // tried and then given up on rather than failing the whole read.
+            uintptr_t poolsEnd = kOff_Mgr_PoolsEnd;
+            while (poolsEnd > kOff_Mgr_PoolsNarrow &&
+                   !gs::rtti::Readable(reinterpret_cast<const void*>(mgr), poolsEnd))
+                poolsEnd -= 0x100;
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(mgr), poolsEnd)) return 0;
             for (uintptr_t off = kOff_Mgr_ListsBegin; off + 16 <= kOff_Mgr_ListsEnd && n < cap; off += 8)
             {
                 const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + off);
@@ -154,9 +169,10 @@ namespace
                     if (EntityLike(ents[i])) out[n++] = ents[i];
             }
 
-            uintptr_t runs[64];
+            uintptr_t runs[128];
+            uintptr_t runOff[128];
             int runN = 0;
-            for (uintptr_t off = kOff_Mgr_PoolsBegin; off + 8 <= kOff_Mgr_PoolsEnd && runN < 64; off += 8)
+            for (uintptr_t off = kOff_Mgr_PoolsBegin; off + 8 <= poolsEnd && runN < 128; off += 8)
             {
                 const uintptr_t arr = *reinterpret_cast<const uintptr_t*>(mgr + off);
                 if (arr < 0x10000 || (arr & 7) != 0) continue;
@@ -164,21 +180,28 @@ namespace
                 const uintptr_t* ents = reinterpret_cast<const uintptr_t*>(arr);
                 bool ok = true;
                 for (int i = 0; i < 4 && ok; ++i) ok = EntityLike(ents[i]);
-                if (ok) runs[runN++] = arr;
+                if (ok) { runOff[runN] = off; runs[runN] = arr; ++runN; }
             }
             // Ascending, so a pool that starts inside an earlier run is skipped.
             for (int i = 1; i < runN; ++i)
             {
                 const uintptr_t v = runs[i];
+                const uintptr_t vo = runOff[i];
                 int j = i;
-                while (j > 0 && runs[j - 1] > v) { runs[j] = runs[j - 1]; --j; }
+                while (j > 0 && runs[j - 1] > v) { runs[j] = runs[j - 1]; runOff[j] = runOff[j - 1]; --j; }
                 runs[j] = v;
+                runOff[j] = vo;
             }
             // Sixteen misses in a row ended a run in Master Looter, which only
             // wanted what was near. Sessions twenty-six to thirty-one never
             // had the far glint in the set, so a run now survives five hundred
             // empty slots and the first two passes report what each yields.
+            // Session fifty-six spent both reports on the two passes before the
+            // world existed and printed nothing, the same way the globals scan
+            // once latched on an empty answer. A pass with nothing in it does
+            // not count.
             static int statsLeft = 2;
+            const bool worthReporting = statsLeft > 0;
             uintptr_t coveredTo = 0;
             for (int r = 0; r < runN && n < cap; ++r)
             {
@@ -196,10 +219,18 @@ namespace
                     out[n++] = e;
                 }
                 coveredTo = at;
-                if (statsLeft > 0)
-                    GS_LOG("[actors]   pool %d at 0x%p: %u slots walked, %d entities", r, reinterpret_cast<void*>(runs[r]), scanned, n - before);
+                if (worthReporting && n - before > 0)
+                    GS_LOG("[actors]   pool %d at manager+0x%03llX -> 0x%p: %u slots walked, %d entities",
+                           r, static_cast<unsigned long long>(runOff[r]),
+                           reinterpret_cast<void*>(runs[r]), scanned, n - before);
             }
-            if (statsLeft > 0) --statsLeft;
+            if (worthReporting && n > 100)
+            {
+                --statsLeft;
+                GS_LOG("[actors] %d pool(s) between manager+0x%03llX and +0x%03llX offered %d entities",
+                       runN, static_cast<unsigned long long>(kOff_Mgr_PoolsBegin),
+                       static_cast<unsigned long long>(poolsEnd), n);
+            }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
