@@ -73,6 +73,16 @@ namespace gs::sig
     constexpr uintptr_t kOff_Gimmick_Sub        = 0x438;
     constexpr uintptr_t kOff_GimmickSub_Active  = 0x1B8;
 
+    // What makes a gimmick a thing the player can pick up, from Master
+    // Looter, which has read these since build 2474: item data hangs at
+    // +0xC0, gather data at +0xE0, and either one means the node yields
+    // something. The node's own name is an engine string at +0x68 and the
+    // locked byte at +0x3E2. These are what the blinding flash reveals.
+    constexpr uintptr_t kOff_Gimmick_ItemData   = 0xC0;
+    constexpr uintptr_t kOff_Gimmick_GatherData = 0xE0;
+    constexpr uintptr_t kOff_Gimmick_NodeName   = 0x68;
+    constexpr uintptr_t kOff_Gimmick_Locked     = 0x3E2;
+
     // The game's ray cast wrapper (start, direction, distance in; hit distance
     // and normal out) and what it uses. Found at runtime by byte pattern, with
     // the facade and the frame offset decoded from its own RIP-relative

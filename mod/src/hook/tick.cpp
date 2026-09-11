@@ -340,13 +340,19 @@ namespace
         GS_LOG("[mark]     %s components:%s", tag, line);
     }
 
-    // Flash on: among the objects the flash has lit, the one nearest the
-    // view ray within eight degrees, out to four hundred units, held for a
-    // second, gets a Glint pin once per area, and no other automatic pin for
-    // five seconds. "Lit" is the detect component's reveal byte (+0x1DA), or
-    // for a gimmick without one, active custom render values; both are
-    // static findings on 2850 and this build is their live test. Nothing
-    // that is not lit gets a pin any more.
+    // Flash on: among the pickups near the view, the one nearest the crosshair
+    // by angle, held for a second, gets a Glint pin once per area and no
+    // other automatic pin for five seconds.
+    //
+    // A pickup is what Seth described as the glint: an object on the ground
+    // he can take, or one that yields an item when a puzzle is done. Master
+    // Looter has known how to tell one since build 2474: a gimmick component
+    // carrying item data or gather data. The reveal state that would say
+    // "glinting right now" is still unfound (the byte the static pass named
+    // flipped with the flash off in session thirty-four), so the flash being
+    // on is the gate and the pickup is the pick. That marks a takeable thing
+    // under the crosshair whether or not the game has drawn its glint yet,
+    // which is the useful behaviour while the reveal state is open.
     uint32_t g_autoEid = 0;
     uint32_t g_autoSinceMs = 0;
     uint32_t g_autoCooldownUntil = 0;
@@ -400,48 +406,35 @@ namespace
         View v;
         if (!pp.valid || !ViewRay(pp, &v)) return;
 
-        // Lit objects near the view, any range.
+        // Pickups near the view, any range.
         gs::nearest::Candidate c[8];
         const int n = CastView(v, 400.0f, 4.0f, 0.14f, true, c, 8, nullptr, 0);
         const int pick = PickByAngle(c, n, 0.14f);   // eight degrees
 
-        // While the flash is on, a line every two seconds saying what is lit
-        // and what sits near the view, sixty lines at most.
+        // While the flash is on, a line every two seconds, sixty at most.
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on, view from the %s (pitch %.0f deg); set %d, %d lit by the flash, %d lit near the view",
+            GS_LOG("[auto] flash on, view from the %s (pitch %.0f deg); set %d, %d pickups, %d lit, %d pickups near the view",
                    v.camera ? "camera" : "body, level", std::asin(v.fy) * 57.2958f,
-                   gs::actors::Count(), gs::actors::LitCount(), n);
+                   gs::actors::Count(), gs::actors::PickupCount(), gs::actors::LitCount(), n);
             for (int i = 0; i < n && i < 4; ++i)
-                GS_LOG("[auto]   %sLIT %s%s eid %08X at %.1f along, %.1f deg, %+.1f up, (%.1f, %.1f, %.1f)", i == pick ? "PICK " : "",
-                       c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along,
-                       std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy, c[i].x, c[i].y, c[i].z);
+                GS_LOG("[auto]   %s%s\"%s\" eid %08X at %.1f along, %.1f deg, %+.1f up%s", i == pick ? "PICK " : "",
+                       c[i].lit ? "LIT " : "", c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, c[i].along,
+                       std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy, c[i].locked ? ", locked" : "");
             if (n == 0)
             {
-                // Nothing lit near the view. Say what is there, say what is
-                // lit anywhere, and dump the effect components of the three
-                // nearest to the view; the flash-off pass dumps the same
-                // three, so the field that means "revealed" shows up in the
-                // diff. Session thirty-four: only the detect component's
-                // position and three effect-component floats moved, and none
-                // of them was the byte the static pass named.
+                // No pickup near the view: say what is there, and dump the
+                // three nearest with the flash on so the flash-off pass can
+                // be diffed against them. That diff is what will name the
+                // reveal state, once the glint is one of the three.
                 gs::nearest::Candidate any[3];
                 const int m = CastView(v, 400.0f, 4.0f, 0.14f, false, any, 3, nullptr, 0);
                 for (int i = 0; i < m; ++i)
-                    GS_LOG("[auto]   near the view, not lit: %s%s eid %08X at %.1f along, %.1f deg",
+                    GS_LOG("[auto]   near the view, no item data: %s%s eid %08X at %.1f along, %.1f deg",
                            any[i].gimmick ? "gimmick " : "", any[i].cls, any[i].eid, any[i].along,
                            std::atan2(any[i].off, any[i].along) * 57.2958f);
-                gs::actors::Entity lit[4];
-                const int ln = gs::actors::LitNear(pp.x, pp.y, pp.z, lit, 4);
-                for (int i = 0; i < ln; ++i)
-                {
-                    const float dx = lit[i].x - pp.x, dz = lit[i].z - pp.z;
-                    GS_LOG("[auto]   lit anywhere: eid %08X %s at (%.1f, %.1f, %.1f), %.0f away",
-                           lit[i].eid, lit[i].gimmick ? "gimmick" : "actor", lit[i].x, lit[i].y, lit[i].z,
-                           std::sqrt(dx * dx + dz * dz));
-                }
                 static uint32_t lastDumpMs = 0;
                 if (m > 0 && g_autoDumpsLeft > 0 && now - lastDumpMs > 6000 && !g_autoDumpN)
                 {
@@ -476,9 +469,9 @@ namespace
         }
         if (now - g_autoSinceMs < 1000 || now < g_autoCooldownUntil) return;
         g_autoCooldownUntil = now + 5000;
-        GS_LOG("[auto] %s%s eid %08X lit by the flash and held near the view for a second at %.1f units",
-               c[pick].gimmick ? "gimmick " : "", c[pick].cls, c[pick].eid, c[pick].along);
-        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, lit by the flash", "Glint", pp, 8.0f);
+        GS_LOG("[auto] pickup \"%s\" eid %08X held under the crosshair for a second at %.1f units%s",
+               c[pick].name[0] ? c[pick].name : c[pick].cls, c[pick].eid, c[pick].along, c[pick].lit ? ", lit" : "");
+        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, a pickup under the crosshair with the flash on", "Glint", pp, 8.0f);
     }
 }
 

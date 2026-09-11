@@ -30,6 +30,9 @@ namespace gs::actors
         bool gimmick = false;        // carries a ClientGimmickActorComponent
         bool glint = false;          // its detect mode target byte is set
         bool lit = false;            // the reveal effect is on it right now
+        bool pickup = false;         // a gimmick carrying item or gather data
+        bool locked = false;
+        char name[48]{};             // the gimmick's node name, when it has one
         uintptr_t gimmickComp = 0;
         uintptr_t detectComp = 0;    // its own ClientDetectActorComponent, or 0
         uintptr_t effectComp = 0;    // its ClientEffectActorComponent, or 0
@@ -60,6 +63,7 @@ namespace gs::actors
     int GimmickCount();
     int GlintCount();
     int LitCount();
+    int PickupCount();
 
     // The lit entities, wherever they are, nearest the given point first.
     int LitNear(float px, float py, float pz, Entity* out, int n);

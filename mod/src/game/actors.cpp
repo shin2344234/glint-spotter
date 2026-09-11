@@ -36,6 +36,7 @@ namespace
     int g_gimmicks = 0;
     int g_glints = 0;
     int g_lits = 0;
+    int g_pickups = 0;
     std::atomic<uintptr_t> g_mgr{0};
     uint32_t g_checkedAt = 0;
     uintptr_t g_slots[16];
@@ -331,6 +332,52 @@ namespace
         }
     }
 
+    // A string the engine keeps as a pointer to an object whose first field
+    // is the characters. Master Looter's ReadEngineString.
+    bool EngineString(uintptr_t slot, char* out, size_t n)
+    {
+        __try
+        {
+            const uintptr_t obj = Deref(slot);
+            if (!PtrLike(obj)) return false;
+            const uintptr_t cstr = Deref(obj);
+            if (!cstr || !gs::rtti::Readable(reinterpret_cast<const void*>(cstr), 1)) return false;
+            size_t i = 0;
+            for (; i + 1 < n; ++i)
+            {
+                const char c = *reinterpret_cast<const volatile char*>(cstr + i);
+                if (c == 0) break;
+                if (static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) > 0x7E) return false;
+                out[i] = c;
+            }
+            out[i] = 0;
+            return i > 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // Does this gimmick yield something: item data or gather data present.
+    // The flash reveals pickups, and this is how Master Looter knows one.
+    bool Pickup(uintptr_t comp, bool* locked, char* name, size_t nameBytes)
+    {
+        __try
+        {
+            const uintptr_t item = *reinterpret_cast<const uintptr_t*>(comp + gs::sig::kOff_Gimmick_ItemData);
+            const uintptr_t gather = *reinterpret_cast<const uintptr_t*>(comp + gs::sig::kOff_Gimmick_GatherData);
+            if (!PtrLike(item) && !PtrLike(gather)) return false;
+            *locked = *reinterpret_cast<const uint8_t*>(comp + gs::sig::kOff_Gimmick_Locked) != 0;
+            if (!EngineString(comp + gs::sig::kOff_Gimmick_NodeName, name, nameBytes)) name[0] = 0;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     // The detect mode target byte on a gimmick component.
     bool GlintByte(uintptr_t comp, bool* out)
     {
@@ -516,6 +563,12 @@ namespace gs::actors
                 ne.gimmick = ne.gimmickComp != 0;
                 ne.detectComp = DetectComponent(e);
                 ne.effectComp = EffectComponent(e);
+                if (ne.gimmickComp)
+                {
+                    bool locked = false;
+                    ne.pickup = Pickup(ne.gimmickComp, &locked, ne.name, sizeof(ne.name));
+                    ne.locked = locked;
+                }
                 ++g_setN;
             }
             Entity& en = g_set[j];
@@ -555,23 +608,35 @@ namespace gs::actors
                 en.lit = lit;
             }
         }
-        int glints = 0, lits = 0;
+        int glints = 0, lits = 0, pickups = 0;
         for (int i = 0; i < g_setN; ++i)
         {
             if (g_set[i].gimmick) ++gimmicks;
             if (g_set[i].glint) ++glints;
             if (g_set[i].lit) ++lits;
+            if (g_set[i].pickup) ++pickups;
         }
         g_gimmicks = gimmicks;
         g_glints = glints;
         g_lits = lits;
+        g_pickups = pickups;
 
         // A line every thirty seconds so the log says what the ray has to work with.
         if (nowMs - g_lastSaidMs > 30000)
         {
             g_lastSaidMs = nowMs;
-            GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d with a gimmick component, %d with the byte, %d lit by the flash",
-                   n, dupes, noPos, g_setN, gimmicks, glints, lits);
+            GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d gimmicks, %d of them pickups, %d lit",
+                   n, dupes, noPos, g_setN, gimmicks, pickups, lits);
+            int named = 0;
+            for (int i = 0; i < g_setN && named < 4; ++i)
+                if (g_set[i].pickup)
+                {
+                    ++named;
+                    const float dx = g_set[i].x - pp.x, dz = g_set[i].z - pp.z;
+                    GS_LOG("[actors]   pickup eid %08X \"%s\"%s at (%.1f, %.1f, %.1f), %.0f away", g_set[i].eid,
+                           g_set[i].name[0] ? g_set[i].name : "?", g_set[i].locked ? ", locked" : "",
+                           g_set[i].x, g_set[i].y, g_set[i].z, std::sqrt(dx * dx + dz * dz));
+                }
             int shown = 0;
             for (int i = 0; i < g_setN && shown < 3; ++i)
                 if (g_set[i].glint)
@@ -600,6 +665,12 @@ namespace gs::actors
     {
         std::lock_guard<std::mutex> lock(g_setMutex);
         return g_lits;
+    }
+
+    int PickupCount()
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        return g_pickups;
     }
 
     int LitNear(float px, float py, float pz, Entity* out, int n)

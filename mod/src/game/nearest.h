@@ -32,6 +32,9 @@ namespace gs::nearest
         bool gimmick = false;        // carries a ClientGimmickActorComponent
         bool glint = false;          // that component's detect mode target byte is set
         bool lit = false;            // the reveal effect is on it right now
+        bool pickup = false;         // a gimmick that yields an item
+        bool locked = false;
+        char name[48]{};             // the gimmick's node name
         char cls[80]{};
     };
 
