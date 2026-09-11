@@ -367,7 +367,19 @@ namespace gs::actors
             en.lastSeenMs = nowMs;
             // The glint byte, every pass: the event that sets it can fire any time.
             bool g = false;
-            if (en.gimmickComp && GlintByte(en.gimmickComp, &g)) en.glint = g;
+            if (en.gimmickComp && GlintByte(en.gimmickComp, &g))
+            {
+                static int flipsLeft = 20;
+                if (g && !en.glint && flipsLeft > 0)
+                {
+                    --flipsLeft;
+                    const uintptr_t vt = Deref(en.ptr);
+                    const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+                    GS_LOG("[actors] glint byte set on eid %08X %s at (%.1f, %.1f, %.1f)", en.eid,
+                           cn ? (cn[0] == '.' ? cn + 4 : cn) : "?", en.x, en.y, en.z);
+                }
+                en.glint = g;
+            }
         }
         int glints = 0;
         for (int i = 0; i < g_setN; ++i)

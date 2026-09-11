@@ -51,4 +51,14 @@ namespace gs::nearest
                float ox, float oy, float oz, float fx, float fy, float fz,
                float maxAlong, float radius, float spread, bool glintOnly,
                Candidate* out, int n, Candidate* miss = nullptr, int missN = 0);
+
+    // Where a ray meets the ground, with the ground estimated from the
+    // entities near its path: objects stand on the terrain, so the height of
+    // the nearest one within a few units is the terrain there. Walks the ray
+    // half a unit at a time until it drops below that estimate. Session
+    // twenty-four put a pin 33 units out from a plane at the player's feet
+    // where the terrain fell away much sooner. Returns false when the ray
+    // never reaches the ground within maxT or nothing stands near its path.
+    bool GroundAlong(float ox, float oy, float oz, float fx, float fy, float fz, float maxT,
+                     float* gx, float* gy, float* gz, float* t, uint32_t* sampleEid);
 }

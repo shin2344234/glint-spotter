@@ -156,6 +156,7 @@ namespace
         const gs::player::Pos pp = gs::player::Read();
         if (pp.valid) GS_LOG("[player %llu] (%.3f, %.3f, %.3f)",
                              static_cast<unsigned long long>(g_samples), pp.x, pp.y, pp.z);
+        gs::camera::LogSample(g_samples);
 
         for (Extra& e : g_extras)
         {
@@ -281,6 +282,41 @@ namespace
                                  maxAlong, radius, spread, glintOnly, c, n, miss, missN);
     }
 
+    // The classes in an entity's component block, one line. Session
+    // twenty-four's aimed object was a ClientNormalInGameActor with no
+    // gimmick component; this says what it carries instead.
+    void DescribeComponents(const char* tag, uintptr_t entity)
+    {
+        char line[900];
+        int w = 0;
+        __try
+        {
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(entity + 0x68), 8)) return;
+            const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(entity + 0x68);
+            if (comps < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(comps), 0x80)) return;
+            for (uintptr_t off = 0; off < 0x80 && w < 800; off += 8)
+            {
+                const uintptr_t c = *reinterpret_cast<const uintptr_t*>(comps + off);
+                if (c < 0x10000 || (c & 7) != 0 || !gs::rtti::Readable(reinterpret_cast<const void*>(c), 8)) continue;
+                const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(c);
+                const char* n = gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt));
+                if (!n) continue;
+                if (n[0] == '.') n += 4;
+                const char* end = strstr(n, "@");
+                const int len = end ? static_cast<int>(end - n) : static_cast<int>(strlen(n));
+                const int k = _snprintf_s(line + w, sizeof(line) - w, _TRUNCATE, " +%02llX:%.*s", static_cast<unsigned long long>(off), len, n);
+                if (k < 0) break;
+                w += k;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+        line[w] = 0;
+        GS_LOG("[mark]     %s components:%s", tag, line);
+    }
+
     // Flash on: among the objects whose gimmick component carries the detect
     // mode target byte, the one nearest the view ray within a cone. When the
     // same one stays the pick for a second it gets a Glint pin, once per
@@ -326,6 +362,17 @@ namespace
             for (int i = 0; i < n && i < 4; ++i)
                 GS_LOG("[auto]   %s%s eid %08X at %.1f along, %.2f off, %+.1f up", i == pick ? "PICK " : "",
                        c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy);
+            if (n == 0)
+            {
+                // What the flash is on, glinting or not, so the log says
+                // what a glint object is made of.
+                gs::nearest::Candidate any[3];
+                const int m = CastView(v, 45.0f, 2.0f, 0.12f, false, any, 3, nullptr, 0);
+                for (int i = 0; i < m; ++i)
+                    GS_LOG("[auto]   in view, not glinting: %s%s eid %08X at %.1f along, %.2f off",
+                           any[i].gimmick ? "gimmick " : "", any[i].cls, any[i].eid, any[i].along, any[i].off);
+                if (m > 0) DescribeComponents("in view", any[0].entity);
+            }
         }
 
         if (pick < 0 || c[pick].eid == 0)
@@ -435,11 +482,22 @@ extern "C" void gs_OnMinimapTick(void* self)
             for (int i = 0; i < missN; ++i)
                 GS_LOG("[mark]   near miss: %s%s eid %08X at %.1f along, %.2f off, %+.1f up",
                        miss[i].glint ? "GLINT " : "", miss[i].cls, miss[i].eid, miss[i].along, miss[i].off, miss[i].dy);
+            for (int i = 0; i < n && i < 2; ++i) DescribeComponents(i == 0 ? "hit 1" : "hit 2", c[i].entity);
+            if (missN > 0) DescribeComponents("near miss 1", miss[0].entity);
 
             float gx = 0, gy = 0, gz = 0, gt = 0;
-            const bool ground = GroundPoint(v, &gx, &gy, &gz, &gt);
-            if (ground) GS_LOG("[mark] the view ray meets the ground %.1f units out at (%.1f, %.1f, %.1f)", gt, gx, gy, gz);
-            else GS_LOG("[mark] no ground point: %s", v.camera ? "looking level or up" : "no camera pitch");
+            uint32_t geid = 0;
+            bool ground = v.camera && gs::nearest::GroundAlong(v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, 100.0f,
+                                                                &gx, &gy, &gz, &gt, &geid);
+            if (ground)
+                GS_LOG("[mark] the view ray meets the terrain %.1f units out at (%.1f, %.1f, %.1f), height from eid %08X",
+                       gt, gx, gy, gz, geid);
+            else
+            {
+                ground = GroundPoint(v, &gx, &gy, &gz, &gt);
+                if (ground) GS_LOG("[mark] nothing stands near the ray to give a terrain height; the plane at the feet says %.1f units out at (%.1f, %.1f, %.1f)", gt, gx, gy, gz);
+                else GS_LOG("[mark] no ground point: %s", v.camera ? "looking level or up" : "no camera pitch");
+            }
 
             // An object the ray hits before it reaches the ground wins;
             // otherwise the ground point; otherwise nothing.

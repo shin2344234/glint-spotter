@@ -98,6 +98,45 @@ namespace gs::nearest
         return found;
     }
 
+    bool GroundAlong(float ox, float oy, float oz, float fx, float fy, float fz, float maxT,
+                     float* gx, float* gy, float* gz, float* t, uint32_t* sampleEid)
+    {
+        if (fy > -0.02f) return false;
+        static gs::actors::Entity set[4096];
+        const int total = gs::actors::Snapshot(set, 4096);
+        if (total == 0) return false;
+
+        float h = 0;
+        bool haveH = false;
+        uint32_t hEid = 0;
+        for (float tt = 1.0f; tt <= maxT; tt += 0.5f)
+        {
+            const float px = ox + fx * tt, py = oy + fy * tt, pz = oz + fz * tt;
+            // The nearest entity in the ground plane within six units.
+            float bestD2 = 36.0f;
+            for (int i = 0; i < total; ++i)
+            {
+                const float dx = set[i].x - px, dz = set[i].z - pz;
+                const float d2 = dx * dx + dz * dz;
+                if (d2 < bestD2 && std::fabs(set[i].y - py) < 30.0f)
+                {
+                    bestD2 = d2;
+                    h = set[i].y;
+                    hEid = set[i].eid;
+                    haveH = true;
+                }
+            }
+            if (!haveH) continue;
+            if (py <= h + 0.2f)
+            {
+                *gx = px; *gy = h; *gz = pz; *t = tt;
+                *sampleEid = hEid;
+                return true;
+            }
+        }
+        return false;
+    }
+
     int Cast3D(uintptr_t playerActor,
                float ox, float oy, float oz, float fx, float fy, float fz,
                float maxAlong, float radius, float spread, bool glintOnly,

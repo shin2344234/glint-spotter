@@ -24,17 +24,26 @@ namespace
         float pivot[3];
         float q[4];
         float dist;
+        float ang[3];
+        float acc[2];
+        float vec[3];
+        float dist80;
     };
 
     bool ReadRaw(uintptr_t obj, Raw* r)
     {
         __try
         {
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x60)) return false;
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x380)) return false;
             const auto* b = reinterpret_cast<const uint8_t*>(obj);
             memcpy(r->pivot, b + gs::sig::kOff_Cam_Pivot, 12);
             memcpy(r->q, b + gs::sig::kOff_Cam_Quat, 16);
             memcpy(&r->dist, b + gs::sig::kOff_Cam_Distance, 4);
+            memcpy(r->ang, b + 0xC8, 12);
+            memcpy(&r->acc[0], b + 0x364, 4);
+            memcpy(&r->acc[1], b + 0x368, 4);
+            memcpy(r->vec, b + 0x14C, 12);
+            memcpy(&r->dist80, b + 0x80, 4);
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -98,7 +107,11 @@ namespace gs::camera
         if (!obj || !ReadRaw(obj, &r)) return p;
         memcpy(p.pivot, r.pivot, sizeof(p.pivot));
         memcpy(p.q, r.q, sizeof(p.q));
+        memcpy(p.ang, r.ang, sizeof(p.ang));
+        memcpy(p.acc, r.acc, sizeof(p.acc));
+        memcpy(p.vec, r.vec, sizeof(p.vec));
         p.dist = r.dist;
+        p.dist80 = r.dist80;
         p.valid = true;
 
         const float x = r.q[0], y = r.q[1], z = r.q[2], w = r.q[3];
@@ -118,6 +131,18 @@ namespace gs::camera
         return p;
     }
 
+    void LogSample(uint64_t sample)
+    {
+        const Pose p = Read();
+        if (!p.valid) return;
+        // Every candidate on one line, so a press at a known pitch can be
+        // matched against each of them.
+        GS_LOG("[cam %llu] quat pitch %.1f yaw %.1f | angles +C8 %.3f +CC %.3f +D0 %.3f | acc +364 %.3f +368 %.3f | vec +14C (%.3f, %.3f, %.3f) | dist +50 %.2f +80 %.2f",
+               static_cast<unsigned long long>(sample),
+               p.fwdValid ? p.pitch * 57.2958f : 0.0f, p.fwdValid ? p.yaw * 57.2958f : 0.0f,
+               p.ang[0], p.ang[1], p.ang[2], p.acc[0], p.acc[1], p.vec[0], p.vec[1], p.vec[2], p.dist, p.dist80);
+    }
+
     void LogAtPress(float facingYaw)
     {
         const Pose p = Read();
@@ -128,6 +153,7 @@ namespace gs::camera
         }
         GS_LOG("[camera] this 0x%p pivot (%.2f, %.2f, %.2f) quat (%.4f, %.4f, %.4f, %.4f) distance %.2f",
                gs_cameraThis, p.pivot[0], p.pivot[1], p.pivot[2], p.q[0], p.q[1], p.q[2], p.q[3], p.dist);
+        LogSample(0);
         if (!p.fwdValid)
         {
             GS_LOG("[camera] the quaternion is not a unit rotation; no view ray from it");
@@ -138,5 +164,13 @@ namespace gs::camera
         while (dyaw < -3.14159f) dyaw += 6.28318f;
         GS_LOG("[camera] forward (%.3f, %.3f, %.3f): pitch %.1f deg, yaw %.1f deg; body facing %.1f deg, camera minus body %.1f deg",
                p.fwd[0], p.fwd[1], p.fwd[2], p.pitch * 57.2958f, p.yaw * 57.2958f, facingYaw * 57.2958f, dyaw * 57.2958f);
+        // What the other two candidates would say the view is, if they are
+        // angles in radians or a direction the camera sits along.
+        GS_LOG("[camera] if +C8/+CC are yaw/pitch in radians: yaw %.1f pitch %.1f deg; in degrees: yaw %.1f pitch %.1f",
+               p.ang[0] * 57.2958f, p.ang[1] * 57.2958f, p.ang[0], p.ang[1]);
+        const float vl = std::sqrt(p.vec[0] * p.vec[0] + p.vec[1] * p.vec[1] + p.vec[2] * p.vec[2]);
+        if (vl > 0.5f)
+            GS_LOG("[camera] if +14C points from the pivot to the camera: the view back along it has pitch %.1f yaw %.1f deg",
+                   -std::asin(p.vec[1] / vl) * 57.2958f, std::atan2(-p.vec[0], -p.vec[2]) * 57.2958f);
     }
 }
