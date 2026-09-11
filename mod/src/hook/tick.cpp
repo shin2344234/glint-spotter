@@ -426,8 +426,8 @@ namespace
 
         // Pickups near the view, any range.
         gs::nearest::Candidate c[8];
-        const int n = CastView(v, 400.0f, 6.0f, 0.30f, true, c, 8, nullptr, 0);
-        const int pick = PickByAngle(c, n, 0.36f);   // twenty degrees
+        const int n = CastView(v, 400.0f, 8.0f, 0.60f, true, c, 8, nullptr, 0);
+        const int pick = PickByAngle(c, n, 0.70f);   // thirty five degrees
 
         // While the flash is on, a line every two seconds, sixty at most.
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
@@ -437,6 +437,19 @@ namespace
             GS_LOG("[auto] flash on, ray from the %s at (%.1f, %.1f, %.1f) along (%.2f, %.2f, %.2f), player at (%.1f, %.1f, %.1f); set %d, %d pickups, %d lit, %d near the view",
                    v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, pp.x, pp.y, pp.z,
                    gs::actors::Count(), gs::actors::PickupCount(), gs::actors::LitCount(), n);
+            {
+                int nearest = -1;
+                float bestAngle = 1e9f;
+                for (int i = 0; i < n; ++i)
+                {
+                    const float a = std::atan2(c[i].off, c[i].along);
+                    if (a < bestAngle) { bestAngle = a; nearest = i; }
+                }
+                if (nearest >= 0)
+                    GS_LOG("[auto]   the marked node nearest the crosshair is \"%s\" at %.1f deg, %.1f along%s",
+                           c[nearest].name[0] ? c[nearest].name : c[nearest].cls, bestAngle * 57.2958f,
+                           c[nearest].along, pick >= 0 ? ", inside the cone" : ", outside the cone");
+            }
             for (int i = 0; i < n && i < 4; ++i)
                 GS_LOG("[auto]   %s%s\"%s\" eid %08X at %.1f along, %.1f deg, %+.1f up%s", i == pick ? "PICK " : "",
                        c[i].lit ? "LIT " : "", c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, c[i].along,
@@ -444,8 +457,8 @@ namespace
             {
                 // Whatever the crosshair is nearest, marked or not, named.
                 gs::nearest::Candidate all[6];
-                const int an = CastView(v, 400.0f, 6.0f, 0.30f, false, all, 6, nullptr, 0);
-                const int abest = PickByAngle(all, an, 0.36f);
+                const int an = CastView(v, 400.0f, 8.0f, 0.60f, false, all, 6, nullptr, 0);
+                const int abest = PickByAngle(all, an, 0.70f);
                 for (int i = 0; i < an && i < 4; ++i)
                     GS_LOG("[auto]   in view%s: \"%s\" eid %08X at %.1f along, %.1f deg%s",
                            i == abest ? ", nearest the crosshair" : "",
