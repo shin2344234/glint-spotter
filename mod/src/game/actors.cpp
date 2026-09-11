@@ -216,18 +216,24 @@ namespace
 
     // Where an entity is, in the map's frame.
     //
-    // The transform keeps two answers and they disagree. There is a cached
-    // world position at +0x29C, and there is a local position at +0xB4 with a
-    // parent id at +0xC8 and the parent's world position at +0xEC. Master
-    // Looter has composed the second pair since build 2474 and its distances
-    // match what the player sees; this mod preferred the cached one and put a
-    // pin twenty metres from the berry patch it named, with every entity
-    // reading several metres below the player's own feet.
+    // The transform offers the same place in more than one frame and does not
+    // say which. There is a cached world position at +0x29C, a local position
+    // at +0xB4 in the chunk's frame, a parent id at +0xC8 and the parent's
+    // position at +0xEC. Preferring the cached one put a pin twenty metres
+    // from the berry patch it named; preferring the local one put every node
+    // nine thousand metres away, because the chunk's frame differs from the
+    // map's by the chunk origin, which is the player's own world position
+    // minus his local one.
     //
-    // So the composed position wins whenever it is usable, and the cached one
-    // is the fallback. Both are kept, and the log prints the gap.
-    bool WorldPos(uintptr_t e, float* out, bool* usedParent = nullptr, float* cached = nullptr)
+    // So all of them are tried and the one that lands near the player wins.
+    // Everything in the set was handed over by the manager because it is
+    // near him, so an answer that is not is the wrong frame.
+    struct Candidate { float p[3]; const char* how; };
+
+    bool WorldPos(uintptr_t e, const gs::player::Pos& pp, float* out, const char** how = nullptr)
     {
+        Candidate cand[4];
+        int n = 0;
         __try
         {
             const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(e + kOff_Ent_Comps);
@@ -235,49 +241,49 @@ namespace
             const uintptr_t tf = *reinterpret_cast<const uintptr_t*>(comps + kOff_Comps_Transform);
             if (!PtrLike(tf)) return false;
 
-            float world[3];
+            float world[3], local[3], pw[3];
             memcpy(world, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
-            const bool worldOk = Sane(world) && (std::fabs(world[0]) + std::fabs(world[2]) > 4.0f);
-            if (cached && worldOk) memcpy(cached, world, 12);
-
-            float local[3];
             memcpy(local, reinterpret_cast<const void*>(tf + kOff_Tf_LocalPos), 12);
-            bool localOk = Sane(local);
-            bool composed = false;
-            if (localOk)
-            {
-                const uint32_t parent = *reinterpret_cast<const uint32_t*>(tf + kOff_Tf_ParentEid);
-                if (parent != 0xFFFFFFFF && parent != 0)
-                {
-                    float pw[3];
-                    memcpy(pw, reinterpret_cast<const void*>(tf + kOff_Tf_ParentPos), 12);
-                    if (Sane(pw))
-                    {
-                        local[0] += pw[0]; local[1] += pw[1]; local[2] += pw[2];
-                        composed = true;
-                    }
-                }
-                localOk = std::fabs(local[0]) + std::fabs(local[2]) > 4.0f;
-            }
+            memcpy(pw, reinterpret_cast<const void*>(tf + kOff_Tf_ParentPos), 12);
+            const uint32_t parent = *reinterpret_cast<const uint32_t*>(tf + kOff_Tf_ParentEid);
+            const bool parented = parent != 0xFFFFFFFF && parent != 0;
 
-            if (localOk)
+            if (Sane(world)) { memcpy(cand[n].p, world, 12); cand[n].how = "its cached world position"; ++n; }
+            if (Sane(local))
             {
-                memcpy(out, local, 12);
-                if (usedParent) *usedParent = composed;
-                return true;
+                cand[n].p[0] = local[0] + pp.ox; cand[n].p[1] = local[1] + pp.oy; cand[n].p[2] = local[2] + pp.oz;
+                cand[n].how = "its local position and the chunk origin";
+                ++n;
+                if (parented && Sane(pw))
+                {
+                    cand[n].p[0] = local[0] + pw[0]; cand[n].p[1] = local[1] + pw[1]; cand[n].p[2] = local[2] + pw[2];
+                    cand[n].how = "its local position and its parent's";
+                    ++n;
+                    cand[n].p[0] = local[0] + pw[0] + pp.ox;
+                    cand[n].p[1] = local[1] + pw[1] + pp.oy;
+                    cand[n].p[2] = local[2] + pw[2] + pp.oz;
+                    cand[n].how = "its local position, its parent's, and the chunk origin";
+                    ++n;
+                }
             }
-            if (worldOk)
-            {
-                memcpy(out, world, 12);
-                if (usedParent) *usedParent = false;
-                return true;
-            }
-            return false;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return false;
         }
+
+        int best = -1;
+        float bestD = 1500.0f;   // the manager only hands over what is near
+        for (int i = 0; i < n; ++i)
+        {
+            const float dx = cand[i].p[0] - pp.x, dz = cand[i].p[2] - pp.z;
+            const float d = std::sqrt(dx * dx + dz * dz);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        if (best < 0) return false;
+        memcpy(out, cand[best].p, 12);
+        if (how) *how = cand[best].how;
+        return true;
     }
 
     uint32_t EidOf(uintptr_t e)
@@ -698,9 +704,8 @@ namespace gs::actors
             for (; j < g_setN; ++j) if (g_set[j].ptr == e) break;
             if (j < g_setN && g_set[j].lastSeenMs == nowMs) { ++dupes; continue; }   // listed twice this pass
             float pos[3];
-            float cached[3] = {0, 0, 0};
-            bool usedParent = false;
-            if (!WorldPos(e, pos, &usedParent, cached))
+            const char* how = "";
+            if (!pp.valid || !WorldPos(e, pp, pos, &how))
             {
                 ++noPos;
                 if (g_failLogsLeft > 0 && pp.valid && (i % 7) == 3)
@@ -733,8 +738,7 @@ namespace gs::actors
             }
             Entity& en = g_set[j];
             en.x = pos[0]; en.y = pos[1]; en.z = pos[2];
-            en.parented = usedParent;
-            en.cx = cached[0]; en.cy = cached[1]; en.cz = cached[2];
+            en.how = how;
             en.lastSeenMs = nowMs;
             // The glint byte, every pass: the event that sets it can fire any time.
             bool g = false;
@@ -807,9 +811,9 @@ namespace gs::actors
             for (int k = 0; k < named; ++k)
             {
                 const Entity& en = g_set[order[k]];
-                GS_LOG("[actors]   pickup eid %08X \"%s\"%s%s%s at (%.1f, %.1f, %.1f), %.0f away", en.eid,
+                GS_LOG("[actors]   pickup eid %08X \"%s\"%s%s at (%.1f, %.1f, %.1f), %.0f away, from %s", en.eid,
                        en.name[0] ? en.name : "?", en.knowledge ? ", knowledge" : "", en.locked ? ", locked" : "",
-                       en.parented ? ", via its parent" : "", en.x, en.y, en.z, dist[k]);
+                       en.x, en.y, en.z, dist[k], en.how ? en.how : "?");
             }
             int shown = 0;
             for (int i = 0; i < g_setN && shown < 3; ++i)

@@ -502,16 +502,9 @@ namespace
                    around[pick].name[0] ? around[pick].name : "?", around[pick].eid, pickAngle * 57.2958f,
                    std::sqrt(dx * dx + dz * dz));
             {
-                // Both models, so a pin in the wrong place says which one
-                // put it there.
-                const float ccx = around[pick].cx, ccz = around[pick].cz;
-                const float cdx = ccx - pp.x, cdz = ccz - pp.z;
-                GS_LOG("[auto]   composed%s (%.1f, %.1f, %.1f), %.1f metres away; the cached world position says (%.1f, %.1f, %.1f), %.1f metres away",
-                       around[pick].parented ? ", through its parent," : ",",
-                       around[pick].x, around[pick].y, around[pick].z, std::sqrt(dx * dx + dz * dz),
-                       ccx, around[pick].cy, ccz, (ccx || ccz) ? std::sqrt(cdx * cdx + cdz * cdz) : 0.0f);
                 const float north = around[pick].z - pp.z, east = around[pick].x - pp.x;
-                GS_LOG("[auto]   that is %.0f metres %s and %.0f metres %s of you",
+                GS_LOG("[auto]   its position came from %s; that is %.0f metres %s and %.0f metres %s of you",
+                       around[pick].how ? around[pick].how : "?",
                        std::fabs(north), north >= 0 ? "north" : "south", std::fabs(east), east >= 0 ? "east" : "west");
             }
             PlaceAt(around[pick].x, around[pick].y, around[pick].z, "automatic, the node under the crosshair", "Glint", pp, 8.0f);

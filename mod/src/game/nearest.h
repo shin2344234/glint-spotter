@@ -35,8 +35,7 @@ namespace gs::nearest
         bool pickup = false;         // a gimmick that yields an item
         bool knowledge = false;      // carries a knowledge component
         bool locked = false;
-        bool parented = false;
-        float cx = 0, cy = 0, cz = 0;   // the cached world position, for the log
+        const char* how = "";
         char name[48]{};             // the gimmick's node name
         char cls[80]{};
     };
