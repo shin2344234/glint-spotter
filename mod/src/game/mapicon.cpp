@@ -341,7 +341,7 @@ namespace gs::mapicon
         return true;
     }
 
-    void* PlacePinNow(void* worldRoot, float x, float z, const char* labelText)
+    void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* labelText)
     {
         if (!worldRoot || !g_orig[0])
         {
@@ -355,14 +355,14 @@ namespace gs::mapicon
         struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{1000 + static_cast<int64_t>(n), 0x15, {}};
         uint32_t dword4 = 0;
         float float5 = 0.0f;
-        float pos[3] = {x, 0.0f, z};
+        float pos[3] = {x, y, z};
         char label[48];
         CopyString(label, sizeof(label), labelText ? labelText : "Marker");
         char name[64] = "MapIcon_Pin_Marker";
         uint8_t struct10[36]{};
 
-        GS_LOG("[pin #%llu] slot 170 on 0x%p: key=%lld/0x15 pos=(%.3f, 0, %.3f) label=\"%s\" thread %lu",
-               static_cast<unsigned long long>(n), worldRoot, static_cast<long long>(key.id), x, z, label,
+        GS_LOG("[pin #%llu] slot 170 on 0x%p: key=%lld/0x15 pos=(%.3f, %.3f, %.3f) label=\"%s\" thread %lu",
+               static_cast<unsigned long long>(n), worldRoot, static_cast<long long>(key.id), x, y, z, label,
                GetCurrentThreadId());
         void* r = g_orig[0](worldRoot, &type, &key, &dword4, &float5, pos, label, name,
                             reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,

@@ -77,7 +77,13 @@ namespace gs::mapicon
     // means from the tick. Uses the constants session ten proved: type 1, kind
     // 0x15, name MapIcon_Pin_Marker, and a key id of our own from 1001 up.
     // Returns what slot 170 returned.
-    void* PlacePinNow(void* worldRoot, float x, float z, const char* label);
+    // `y` is the node's real height. Session ten's replay copied a captured
+    // call whose height was zero and the mod kept passing zero ever since;
+    // session forty-eight caught the game creating its own player marker at
+    // (-9730.99, 562.29, -4303.08) while the player stood at (-9731.9,
+    // 562.2, -4301.8), so the game gives its icons a real height and a pin
+    // at zero is a pin the map has to guess at.
+    void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* label);
 
     // True if the mod has already placed a pin within `radius` of (x, z).
     // The spec: one marker per area, never a second one on top of it.
