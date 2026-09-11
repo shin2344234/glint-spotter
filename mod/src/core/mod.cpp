@@ -194,10 +194,35 @@ namespace
             if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x100)) continue;
             char tag[24];
             _snprintf_s(tag, sizeof(tag), _TRUNCATE, "lgso%u", i);
+            // A record is 0x70 bytes: session sixty-three's three records sat
+            // at 0x...1EA0, 0x...1F10 and 0x...1F80. Only its own bytes are
+            // dumped, so the next record is not read as part of it.
             GS_LOG("[lgso] record %u at 0x%p", i, reinterpret_cast<void*>(rec));
-            gs::dump::Pointers(tag, rec, 0x200);
-            gs::dump::Object(tag, rec, 0x200);
-            gs::dump::Vectors(tag, rec, 0x200, pp.valid ? pp.x : 0.0f, pp.valid ? pp.z : 0.0f);
+            gs::dump::Object(tag, rec, 0x70);
+
+            // The lists it owns. The world positions are in here: session
+            // sixty-three found (-11896.211, 713.938, -2027.171) and
+            // (-10702.497, 631.127, -3833.859) at a fixed 0x74 from an array's
+            // base, which is a couple of kilometres from the player and beside
+            // the gimmick map icons the game itself creates out there. What is
+            // not known is the element stride or where the prefab path sits,
+            // and a raw dump of the array answers both.
+            for (uintptr_t off = 0; off + 16 <= 0x70; off += 8)
+            {
+                const uintptr_t arr2 = *reinterpret_cast<const uintptr_t*>(rec + off);
+                const uint32_t n2 = *reinterpret_cast<const uint32_t*>(rec + off + 8);
+                const uint32_t c2 = *reinterpret_cast<const uint32_t*>(rec + off + 12);
+                if (arr2 < 0x10000 || (arr2 & 7) != 0) continue;
+                if (n2 == 0 || n2 > c2 || c2 > 100000) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(arr2), 0x100)) continue;
+                char t2[28];
+                _snprintf_s(t2, sizeof(t2), _TRUNCATE, "lgso%u.%02llX", i,
+                            static_cast<unsigned long long>(off));
+                GS_LOG("[lgso] record %u list at +%02llX -> 0x%p, %u of %u", i,
+                       static_cast<unsigned long long>(off), reinterpret_cast<void*>(arr2), n2, c2);
+                gs::dump::Object(t2, arr2, 0x180);
+                gs::dump::Pointers(t2, arr2, 0x180);
+            }
         }
     }
 
