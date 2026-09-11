@@ -203,37 +203,117 @@ namespace gs::lgso
         return false;
     }
 
+    void LogCatalog(int maxRecords, int maxPerRecord)
+    {
+        const uintptr_t mgr = Manager();
+        if (!mgr) { GS_LOG("[cat] no manager"); return; }
+        __try
+        {
+            const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
+            const uintptr_t recs = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Records);
+            if (!count || recs < 0x10000) return;
+            const auto* arr = reinterpret_cast<const uintptr_t*>(recs);
+            int shownRecords = 0;
+            for (uint32_t i = 0; i < count && shownRecords < maxRecords; ++i)
+            {
+                const uintptr_t rec = arr[i];
+                if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x70)) continue;
+                for (uintptr_t off = 0; off + 16 <= 0x70; off += 8)
+                {
+                    const uintptr_t a2 = *reinterpret_cast<const uintptr_t*>(rec + off);
+                    const uint32_t c = *reinterpret_cast<const uint32_t*>(rec + off + 8);
+                    const uint32_t cp = *reinterpret_cast<const uint32_t*>(rec + off + 12);
+                    if (a2 < 0x10000 || (a2 & 7) != 0) continue;
+                    if (c == 0 || c > cp || cp > 100000) continue;
+                    if (!gs::rtti::Readable(reinterpret_cast<const void*>(a2), gs::sig::kOff_LgsoData_Stride))
+                        continue;
+                    // The string table the record's elements share.
+                    const uintptr_t el = a2;
+                    for (uintptr_t k = 0; k + 8 <= 0x40; k += 8)
+                    {
+                        const uintptr_t tab = *reinterpret_cast<const uintptr_t*>(el + k);
+                        if (tab < 0x10000 || (tab & 7) != 0) continue;
+                        if (!gs::rtti::Readable(reinterpret_cast<const void*>(tab), 0x20)) continue;
+                        int wrote = 0;
+                        for (int e = 0; e < maxPerRecord; ++e)
+                        {
+                            const uintptr_t d = tab + static_cast<uintptr_t>(e) * 0x20;
+                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(d), 16)) break;
+                            const uintptr_t cs = *reinterpret_cast<const uintptr_t*>(d);
+                            const uint32_t len = *reinterpret_cast<const uint32_t*>(d + 8);
+                            if (cs < 0x10000 || len == 0 || len > 200) break;
+                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(cs), len)) break;
+                            char text[208];
+                            uint32_t w = 0;
+                            bool ok = true;
+                            for (; w < len && w + 1 < sizeof(text); ++w)
+                            {
+                                const char ch = *reinterpret_cast<const volatile char*>(cs + w);
+                                if (ch == 0) break;
+                                if (static_cast<unsigned char>(ch) < 0x20 ||
+                                    static_cast<unsigned char>(ch) > 0x7E) { ok = false; break; }
+                                text[w] = ch;
+                            }
+                            text[w] = 0;
+                            if (!ok || w < 2) break;
+                            if (!wrote) GS_LOG("[cat] record %u, list at +%02llX, %u element(s), table 0x%p",
+                                               i, static_cast<unsigned long long>(off), c,
+                                               reinterpret_cast<void*>(tab));
+                            GS_LOG("[cat]   [%3d] %s", e, text);
+                            ++wrote;
+                        }
+                        if (wrote) { ++shownRecords; break; }
+                    }
+                    if (shownRecords >= maxRecords) break;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
     void LogKinds()
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        // Distinct names, counted. Held in a small fixed table because this
-        // runs on the worker thread and should not allocate.
-        struct Kind { char name[56]; int count; uint16_t record; };
-        static Kind kinds[256];
-        int kn = 0;
-        int unnamed = 0;
+        // By record, not by name.
+        //
+        // Session seventy-three showed why. The counts came out at one to
+        // eleven each across two hundred and fifty-six names, against 17,728
+        // placements, and the names repeat inside a record: every element of
+        // record 5 reads "AbyssIsland_0083_Phase00_00" or a sibling. The
+        // string the probe reads is the record's, not the element's, because
+        // it takes the first descriptor from a table the whole record shares
+        // and nothing yet says which entry an element wants.
+        //
+        // That makes the record the unit worth knowing. Record 13 is
+        // "Challenge_Sealed_Artifact_Her", which is Seth's glint, and record 5
+        // is an abyss island. A list of 171 records with their names and
+        // counts is short enough to read and is what a real Kinds default has
+        // to be written against.
+        struct Rec { char name[56]; int count; };
+        static Rec recs[512];
+        int rn = 0;
         for (int i = 0; i < g_n; ++i)
         {
-            if (!g_places[i].name[0]) { ++unnamed; continue; }
-            int k = 0;
-            for (; k < kn; ++k) if (strcmp(kinds[k].name, g_places[i].name) == 0) break;
-            if (k == kn)
-            {
-                if (kn >= 256) continue;
-                strncpy_s(kinds[kn].name, sizeof(kinds[kn].name), g_places[i].name, _TRUNCATE);
-                kinds[kn].count = 0;
-                kinds[kn].record = g_places[i].record;
-                ++kn;
-            }
-            ++kinds[k].count;
+            const uint16_t r = g_places[i].record;
+            if (r >= 512) continue;
+            if (r + 1 > rn) rn = r + 1;
+            if (!recs[r].count && g_places[i].name[0])
+                strncpy_s(recs[r].name, sizeof(recs[r].name), g_places[i].name, _TRUNCATE);
+            ++recs[r].count;
         }
         int worth = 0;
         for (int i = 0; i < g_n; ++i) if (Worth(g_places[i].name)) ++worth;
-        GS_LOG("[lgso] %d distinct name(s) across %d placement(s), %d with no name at all; "
-               "%d placement(s) are worth a pin", kn, g_n, unnamed, worth);
-        for (int k = 0; k < kn; ++k)
-            GS_LOG("[lgso]   %5d  record %3u  %-46s %s", kinds[k].count, kinds[k].record,
-                   kinds[k].name, Worth(kinds[k].name) ? "" : "(refused)");
+        GS_LOG("[lgso] %d placement(s) across %d record(s); %d worth a pin under the current Kinds",
+               g_n, rn, worth);
+        for (int r = 0; r < rn; ++r)
+        {
+            if (!recs[r].count) continue;
+            GS_LOG("[lgso]   record %3d  %5d placement(s)  %-46s %s", r, recs[r].count,
+                   recs[r].name[0] ? recs[r].name : "(no name)",
+                   Worth(recs[r].name) ? "" : "(refused)");
+        }
     }
 
     int Near(float px, float pz, Place* out, int n)

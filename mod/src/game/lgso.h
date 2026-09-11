@@ -81,6 +81,16 @@ namespace gs::lgso
     // The placements nearest a point, for the log.
     int Near(float px, float pz, Place* out, int n);
 
+    // Every string each record's table holds, with its index.
+    //
+    // A record shares one string table and an element points at it. Session
+    // seventy-three read the first entry for every element and so gave a whole
+    // record one name, which is why 17,728 placements came back as 256 names
+    // with counts of one to eleven. The table itself is the catalogue: an
+    // array of 0x20-byte descriptors, a character pointer then a length then a
+    // hash, walked until one stops reading as a string.
+    void LogCatalog(int maxRecords, int maxPerRecord);
+
     // Is this name something worth a pin?
     //
     // A name beginning "sector_" is one of the chunks the world is cut into
