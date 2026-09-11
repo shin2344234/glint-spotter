@@ -517,11 +517,13 @@ extern "C" void gs_OnMinimapTick(void* self)
         else
         {
             // A real ray against the world's collision, from the camera along
-            // the view. The first press tries a handful of layer words and
-            // remembers the first that reports a hit; a hit closer than the
-            // pivot is the player's own body and the ray is cast again from
-            // just past the pivot.
-            static int knownLayer = -1;
+            // the view. Session thirty: layer 0 hit a vertical face 74 units
+            // out that was not the ground Seth pointed at. So every press
+            // casts on every candidate layer word, with the flag both ways,
+            // and logs each hit; a ground-like hit (normal pointing up) is
+            // preferred, then the farthest hit. A hit nearer than the pivot
+            // is the player's own body and the ray is cast again from just
+            // past the pivot.
             const gs::camera::Pose cam = gs::camera::Read();
             const float camDist = (cam.valid && cam.dist > 0.5f && cam.dist < 30.0f) ? cam.dist : 6.0f;
             gs::physics::LogState();
@@ -529,34 +531,37 @@ extern "C" void gs_OnMinimapTick(void* self)
             const float dir[3] = {v.fx, v.fy, v.fz};
             gs::physics::Hit best;
             int usedLayer = -1;
-            const int layers[] = {0, 1, 2, 3, 4, 5, 6, 8, 0x3B, 0x3C};
+            float bestScore = -1e9f;
+            const int layers[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 0x3B, 0x3C, 0x3D, 0x3E};
+            for (int fl = 0; fl < 2; ++fl)
             for (int li = 0; li < static_cast<int>(sizeof(layers) / sizeof(layers[0])); ++li)
             {
-                const int layer = knownLayer >= 0 ? knownLayer : layers[li];
-                gs::physics::Hit h = gs::physics::Cast(origin, dir, 600.0f, layer, false);
+                const int layer = layers[li];
+                const bool flag = fl == 1;
+                gs::physics::Hit h = gs::physics::Cast(origin, dir, 600.0f, layer, flag);
                 if (h.hit && h.dist < camDist + 1.0f)
                 {
-                    // Past the player's body.
                     const float o2[3] = {v.ox + v.fx * (camDist + 1.0f), v.oy + v.fy * (camDist + 1.0f), v.oz + v.fz * (camDist + 1.0f)};
-                    gs::physics::Hit h2 = gs::physics::Cast(o2, dir, 600.0f, layer, false);
-                    GS_LOG("[mark] layer %d: hit at %.1f (the body); from past the pivot: %s %.1f", layer, h.dist,
-                           h2.hit ? "hit at" : "no hit", h2.hit ? h2.dist + camDist + 1.0f : 0.0f);
+                    gs::physics::Hit h2 = gs::physics::Cast(o2, dir, 600.0f, layer, flag);
                     if (h2.hit) { h2.dist += camDist + 1.0f; h = h2; }
                     else h.hit = false;
                 }
-                else
-                    GS_LOG("[mark] layer %d: %s %.1f, normal (%.2f, %.2f, %.2f), flag %d", layer,
-                           h.hit ? "hit at" : "no hit", h.dist, h.normal[0], h.normal[1], h.normal[2], h.flag ? 1 : 0);
-                if (h.hit) { best = h; usedLayer = layer; break; }
-                if (knownLayer >= 0) break;
+                if (!h.hit) continue;
+                GS_LOG("[mark] layer %d flag %d: hit at %.1f, normal (%.2f, %.2f, %.2f), out flag %d, lands (%.1f, %.1f, %.1f)",
+                       layer, flag ? 1 : 0, h.dist, h.normal[0], h.normal[1], h.normal[2], h.flag ? 1 : 0,
+                       v.ox + v.fx * h.dist, v.oy + v.fy * h.dist, v.oz + v.fz * h.dist);
+                // Ground-like first, then far.
+                const float score = (h.normal[1] > 0.3f ? 10000.0f : 0.0f) + h.dist;
+                if (score > bestScore) { bestScore = score; best = h; usedLayer = layer; }
             }
+            static int knownLayer = -1;
             if (best.hit)
             {
-                if (knownLayer < 0) knownLayer = usedLayer;
+                knownLayer = usedLayer;
                 tx = v.ox + v.fx * best.dist; ty = v.oy + v.fy * best.dist; tz = v.oz + v.fz * best.dist;
                 have = true;
                 how = "the world ray";
-                GS_LOG("[mark] the world ray lands %.1f units out at (%.1f, %.1f, %.1f)", best.dist, tx, ty, tz);
+                GS_LOG("[mark] chosen: layer %d, the world ray lands %.1f units out at (%.1f, %.1f, %.1f)", knownLayer, best.dist, tx, ty, tz);
             }
             else
             {
