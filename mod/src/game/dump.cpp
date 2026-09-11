@@ -45,15 +45,74 @@ namespace gs::dump
     }
 
     // Does this look like a world position near the player?
+    //
+    // Session sixty's version accepted anything within twenty kilometres that
+    // was not exactly zero, and every hit it reported printed as (0.0, 0.0,
+    // 0.0) because the values were tiny rather than zero. Play coordinates in
+    // this game run to thousands of units on both horizontal axes, so a real
+    // one is far from the origin as well as near the player.
     bool Worldish(const float* v, float px, float pz)
     {
         for (int i = 0; i < 3; ++i)
             if (!(v[i] == v[i]) || v[i] > 1e6f || v[i] < -1e6f) return false;
+        if (std::fabs(v[0]) < 100.0f && std::fabs(v[2]) < 100.0f) return false;
+        if (std::fabs(v[1]) > 20000.0f) return false;
         const float dx = v[0] - px, dz = v[2] - pz;
-        return std::sqrt(dx * dx + dz * dz) < 20000.0f && (v[0] != 0.0f || v[2] != 0.0f);
+        return std::sqrt(dx * dx + dz * dz) < 20000.0f;
+    }
+
+    // One array's elements, looked at as records and as pointers to records.
+    // Reports a world position and a nested vector, which is how a record that
+    // owns its own list gets found.
+    void Elements(const char* tag, uintptr_t arr, uint32_t count, int depth,
+                  float px, float pz);
+
+    void VectorsDepth(const char* tag, uintptr_t obj, size_t bytes, int depth, float px, float pz);
+
+    void Elements(const char* tag, uintptr_t arr, uint32_t count, int depth,
+                  float px, float pz)
+    {
+        // Records sit in the array either whole or behind a pointer, and the
+        // stride of a whole one is not known, so both readings are tried on the
+        // first few and whatever answers is reported.
+        const uint32_t look = count < 3 ? count : 3;
+        for (uint32_t elem = 0; elem < look; ++elem)
+        {
+            const uintptr_t slot = arr + static_cast<uintptr_t>(elem) * 8;
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(slot), 8)) break;
+            const uintptr_t via = *reinterpret_cast<const uintptr_t*>(slot);
+            const uintptr_t bases[2] = {slot, via};
+            for (int b = 0; b < 2; ++b)
+            {
+                const uintptr_t rec = bases[b];
+                if (rec < 0x10000 || (rec & 3) != 0) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x100)) continue;
+                const char* how = b ? "through its pointer" : "inline";
+                for (uintptr_t k = 0; k + 12 <= 0x100; k += 4)
+                {
+                    const float* v = reinterpret_cast<const float*>(rec + k);
+                    if (!Worldish(v, px, pz)) continue;
+                    GS_LOG("[%s]   element %u %s +%02llX world (%.3f, %.3f, %.3f)",
+                           tag, elem, how, static_cast<unsigned long long>(k), v[0], v[1], v[2]);
+                }
+                // A record that owns its own list is the shape the reflection
+                // tables describe, so one level down is worth the look.
+                if (depth > 0)
+                {
+                    char sub[40];
+                    _snprintf_s(sub, sizeof(sub), _TRUNCATE, "%s.%u%s", tag, elem, b ? "p" : "i");
+                    VectorsDepth(sub, rec, 0x100, depth - 1, px, pz);
+                }
+            }
+        }
     }
 
     void Vectors(const char* tag, uintptr_t obj, size_t bytes, float px, float pz)
+    {
+        VectorsDepth(tag, obj, bytes, 1, px, pz);
+    }
+
+    void VectorsDepth(const char* tag, uintptr_t obj, size_t bytes, int depth, float px, float pz)
     {
         __try
         {
@@ -69,31 +128,7 @@ namespace gs::dump
                 if (!gs::rtti::Readable(reinterpret_cast<const void*>(arr), 64)) continue;
                 ++found;
                 GS_LOG("[%s] +%03zX -> 0x%p, %u of %u", tag, off, reinterpret_cast<void*>(arr), count, cap);
-                // An element is either the record itself or a pointer to one.
-                // Both are tried, and anything holding a world-looking float3
-                // is called out because that is the thing worth having.
-                for (int elem = 0; elem < 2; ++elem)
-                {
-                    const uintptr_t direct = arr + static_cast<uintptr_t>(elem) * 8;
-                    if (!gs::rtti::Readable(reinterpret_cast<const void*>(direct), 8)) break;
-                    const uintptr_t via = *reinterpret_cast<const uintptr_t*>(direct);
-                    const uintptr_t bases[2] = {direct, via};
-                    for (int b = 0; b < 2; ++b)
-                    {
-                        const uintptr_t rec = bases[b];
-                        if (rec < 0x10000 || (rec & 3) != 0) continue;
-                        if (!gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x80)) continue;
-                        for (uintptr_t k = 0; k + 12 <= 0x80; k += 4)
-                        {
-                            const float* v = reinterpret_cast<const float*>(rec + k);
-                            if (!Worldish(v, px, pz)) continue;
-                            GS_LOG("[%s]   element %d %s +%02llX has a world float3 (%.1f, %.1f, %.1f)",
-                                   tag, elem, b ? "through its pointer" : "inline",
-                                   static_cast<unsigned long long>(k), v[0], v[1], v[2]);
-                            break;
-                        }
-                    }
-                }
+                Elements(tag, arr, count, depth, px, pz);
             }
             if (!found) GS_LOG("[%s] nothing in the first %zu bytes reads as a vector", tag, bytes);
         }
