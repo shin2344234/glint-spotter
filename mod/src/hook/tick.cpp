@@ -255,6 +255,8 @@ namespace
         bool camera = false;
     };
 
+    int g_sayOriginLeft = 6;
+
     bool ViewRay(const gs::player::Pos& pp, View* v)
     {
         v->ox = pp.x; v->oy = pp.y + 1.6f; v->oz = pp.z;
@@ -270,9 +272,24 @@ namespace
             // minus local offset moves it to the map's.
             if (cam.dist > 0.5f && cam.dist < 30.0f)
             {
-                v->ox = cam.pivot[0] + (pp.x - pp.lx) - cam.fwd[0] * cam.dist;
-                v->oy = cam.pivot[1] + (pp.y - pp.ly) - cam.fwd[1] * cam.dist + 0.6f;
-                v->oz = cam.pivot[2] + (pp.z - pp.lz) - cam.fwd[2] * cam.dist;
+                const float cx = cam.pivot[0] + (pp.x - pp.lx) - cam.fwd[0] * cam.dist;
+                const float cy = cam.pivot[1] + (pp.y - pp.ly) - cam.fwd[1] * cam.dist + 0.6f;
+                const float cz = cam.pivot[2] + (pp.z - pp.lz) - cam.fwd[2] * cam.dist;
+                // The pivot is in the sub-level's frame and the player's world
+                // minus local offset moves it to the map's, which is right only
+                // while both are in the same frame. When the answer lands far
+                // from the player it is not the camera, so the eye is used.
+                const float dx = cx - pp.x, dy = cy - pp.y, dz = cz - pp.z;
+                if (dx * dx + dy * dy + dz * dz <= 40.0f * 40.0f)
+                {
+                    v->ox = cx; v->oy = cy; v->oz = cz;
+                }
+                else if (g_sayOriginLeft > 0)
+                {
+                    --g_sayOriginLeft;
+                    GS_LOG("[auto] the camera origin came out at (%.1f, %.1f, %.1f), %.0f from the player at (%.1f, %.1f, %.1f); using the eye",
+                           cx, cy, cz, std::sqrt(dx * dx + dy * dy + dz * dz), pp.x, pp.y, pp.z);
+                }
             }
             return true;
         }
@@ -296,11 +313,12 @@ namespace
     }
 
     int CastView(const View& v, float maxAlong, float radius, float spread, bool glintOnly,
-                 gs::nearest::Candidate* c, int n, gs::nearest::Candidate* miss, int missN)
+                 gs::nearest::Candidate* c, int n, gs::nearest::Candidate* miss, int missN,
+                 float nearAll = 0.0f)
     {
         if (v.camera)
             return gs::nearest::Cast3D(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fy, v.fz,
-                                       maxAlong, radius, spread, glintOnly, c, n, miss, missN);
+                                       maxAlong, radius, spread, glintOnly, c, n, miss, missN, nearAll);
         return gs::nearest::Cast(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fz,
                                  maxAlong, radius, spread, glintOnly, c, n, miss, missN);
     }
@@ -408,7 +426,7 @@ namespace
 
         // Pickups near the view, any range.
         gs::nearest::Candidate c[8];
-        const int n = CastView(v, 400.0f, 4.0f, 0.14f, true, c, 8, nullptr, 0);
+        const int n = CastView(v, 400.0f, 4.0f, 0.14f, true, c, 8, nullptr, 0, 6.0f);
         const int pick = PickByAngle(c, n, 0.14f);   // eight degrees
 
         // While the flash is on, a line every two seconds, sixty at most.
@@ -416,8 +434,8 @@ namespace
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on, view from the %s (pitch %.0f deg); set %d, %d pickups, %d lit, %d pickups near the view",
-                   v.camera ? "camera" : "body, level", std::asin(v.fy) * 57.2958f,
+            GS_LOG("[auto] flash on, ray from the %s at (%.1f, %.1f, %.1f) along (%.2f, %.2f, %.2f), player at (%.1f, %.1f, %.1f); set %d, %d pickups, %d lit, %d near the view",
+                   v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, pp.x, pp.y, pp.z,
                    gs::actors::Count(), gs::actors::PickupCount(), gs::actors::LitCount(), n);
             for (int i = 0; i < n && i < 4; ++i)
                 GS_LOG("[auto]   %s%s\"%s\" eid %08X at %.1f along, %.1f deg, %+.1f up%s", i == pick ? "PICK " : "",
@@ -469,23 +487,38 @@ namespace
             }
         }
 
-        if (pick < 0 || c[pick].eid == 0)
+        int chosen = pick;
+        if (chosen < 0)
+        {
+            // Nothing within eight degrees, but something within arm's
+            // reach counts: the nearest of those, if any.
+            float best = 1e9f;
+            for (int i = 0; i < n; ++i)
+            {
+                const float dx = c[i].x - pp.x, dy = c[i].y - pp.y, dz = c[i].z - pp.z;
+                const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (d <= 6.0f && d < best) { best = d; chosen = i; }
+            }
+        }
+        if (chosen < 0 || c[chosen].eid == 0)
         {
             g_autoEid = 0;
             g_autoSinceMs = 0;
             return;
         }
-        if (c[pick].eid != g_autoEid)
+        const int pickIdx = chosen;
+        if (c[pickIdx].eid != g_autoEid)
         {
-            g_autoEid = c[pick].eid;
+            g_autoEid = c[pickIdx].eid;
             g_autoSinceMs = now;
             return;
         }
         if (now - g_autoSinceMs < 1000 || now < g_autoCooldownUntil) return;
         g_autoCooldownUntil = now + 5000;
-        GS_LOG("[auto] pickup \"%s\" eid %08X held under the crosshair for a second at %.1f units%s",
-               c[pick].name[0] ? c[pick].name : c[pick].cls, c[pick].eid, c[pick].along, c[pick].lit ? ", lit" : "");
-        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, a pickup under the crosshair with the flash on", "Glint", pp, 8.0f);
+        GS_LOG("[auto] pickup \"%s\" eid %08X held for a second at %.1f along%s",
+               c[pickIdx].name[0] ? c[pickIdx].name : c[pickIdx].cls, c[pickIdx].eid, c[pickIdx].along,
+               c[pickIdx].lit ? ", lit" : "");
+        PlaceAt(c[pickIdx].x, c[pickIdx].y, c[pickIdx].z, "automatic, a pickup in view with the flash on", "Glint", pp, 8.0f);
     }
 }
 

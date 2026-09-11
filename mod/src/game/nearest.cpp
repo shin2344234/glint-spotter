@@ -215,7 +215,7 @@ namespace gs::nearest
     int Cast3D(uintptr_t playerActor,
                float ox, float oy, float oz, float fx, float fy, float fz,
                float maxAlong, float radius, float spread, bool glintOnly,
-               Candidate* out, int n, Candidate* miss, int missN)
+               Candidate* out, int n, Candidate* miss, int missN, float nearAll)
     {
         if (!out || n <= 0) return 0;
         static gs::actors::Entity set[4096];
@@ -235,10 +235,12 @@ namespace gs::nearest
 
             const float dx = e.x - ox, dy = e.y - oy, dz = e.z - oz;
             const float along = dx * fx + dy * fy + dz * fz;
-            if (along < 0.5f || along > maxAlong) continue;
+            const float range = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const bool withinReach = nearAll > 0.0f && range <= nearAll;
+            if (!withinReach && (along < 0.5f || along > maxAlong)) continue;
             const float px = dx - along * fx, py = dy - along * fy, pz = dz - along * fz;
             const float off = std::sqrt(px * px + py * py + pz * pz);
-            const bool hit = off <= radius + spread * along;
+            const bool hit = withinReach || off <= radius + spread * along;
             if (!hit && (!miss || missN <= 0 || off > 3.0f * (radius + spread * along))) continue;
 
             Candidate cand;

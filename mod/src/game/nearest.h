@@ -51,12 +51,17 @@ namespace gs::nearest
              float maxAlong, float radius, float spread, bool glintOnly,
              Candidate* out, int n, Candidate* miss = nullptr, int missN = 0);
 
-    // Beam around a unit direction. Accepts when the 3D distance from the ray
-    // is within radius + spread * along.
+    // Beam around a unit direction. Accepts when the 3D distance from the
+    // ray is within radius + spread * along, which is a cylinder that
+    // widens, or when the object is within `nearAll` units of the origin
+    // whatever its direction: session thirty-seven had firewood two metres
+    // from the player and six below it, outside a cylinder drawn from a
+    // camera eight metres back, and it is plainly what the player means.
     int Cast3D(uintptr_t playerActor,
                float ox, float oy, float oz, float fx, float fy, float fz,
                float maxAlong, float radius, float spread, bool glintOnly,
-               Candidate* out, int n, Candidate* miss = nullptr, int missN = 0);
+               Candidate* out, int n, Candidate* miss = nullptr, int missN = 0,
+               float nearAll = 0.0f);
 
     // How far the set reaches from a point: counts within 30, 60, 120, 300
     // units and beyond, and the farthest entity. Session twenty-seven's
