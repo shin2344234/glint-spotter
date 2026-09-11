@@ -52,6 +52,7 @@ namespace
         fputs("gather,ore,herb,flower,mushroom,useartifact,puzzle_attach,dial,crank,lever\n", f);
         fputs("; An optional cap in metres on how far a node can be. Zero means\n", f);
         fputs("; everything the game has loaded around you, which is the natural limit.\n", f);
+        fputs("Reach=1200\n", f);
         fputs("Radius=0\n", f);
         fclose(f);
     }
@@ -113,6 +114,12 @@ namespace gs::Settings
             {
                 g_values.survey = atoi(val) != 0;
             }
+            else if (_stricmp(key, "Reach") == 0)
+            {
+                const float r = static_cast<float>(atof(val));
+                if (r >= 50.0f && r <= 5000.0f) g_values.reach = r;
+                else GS_LOG_ERR("settings: Reach=%s is out of range, keeping %.0f", val, g_values.reach);
+            }
             else if (_stricmp(key, "Radius") == 0)
             {
                 const float r = static_cast<float>(atof(val));
@@ -132,6 +139,7 @@ namespace gs::Settings
         else
             GS_LOG("settings: Key=%02X (%s), Spy=%d, no radius cap: everything the game has loaded",
                    g_values.key, KeyName(g_values.key), g_values.spy ? 1 : 0);
+        GS_LOG("settings: Reach=%.0f metres, Kinds=%s", g_values.reach, g_values.kinds);
         GS_LOG("settings: Mark=%s", g_values.mark);
         return g_values;
     }

@@ -626,8 +626,7 @@ namespace
                 // metres at four hundred and twenty-seven at nine hundred,
                 // which is roughly how steady a crosshair is at those ranges.
                 tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             8.0f, 5.0f,
-                                             cap > 0.0f ? cap : 900.0f,
+                                             8.0f, 5.0f, gs::Settings::Get().reach,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
@@ -872,15 +871,19 @@ namespace
             g_heldX = chosen.x;
             g_heldZ = chosen.z;
         }
-        // Half a kilometre is past anything the crosshair can pick out, and a
-        // node that resolves farther than that resolved in the wrong frame.
+        // The ceiling is the ini's Reach now, and it had to move. Half a
+        // kilometre was written down when the only glint anyone had measured
+        // sat a hundred and nineteen metres away, and session seventy-five
+        // caught it refusing the feature: the table found one placement on
+        // the line, the right kind of object, and the gate binned it eighty
+        // times because it was five hundred and ninety-eight metres out.
         const float chosenDist = chosen.valid
             ? std::sqrt((chosen.x - pp.x) * (chosen.x - pp.x) + (chosen.z - pp.z) * (chosen.z - pp.z))
             : 0.0f;
-        if (chosen.valid && chosenDist > 500.0f)
+        if (chosen.valid && chosenDist > gs::Settings::Get().reach)
         {
-            GS_LOG("[auto] \"%s\" resolved %0.f metres away, which is too far to be what the crosshair "
-                   "is on; not pinned", chosen.name, chosenDist);
+            GS_LOG("[auto] \"%s\" resolved %0.f metres away, past the ini's Reach of %.0f; not pinned",
+                   chosen.name, chosenDist, gs::Settings::Get().reach);
             chosen.valid = false;
         }
         if (chosen.valid && g_heldSinceMs && now - g_heldSinceMs >= 1000 && now >= g_cooldownUntil &&

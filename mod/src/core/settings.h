@@ -16,6 +16,8 @@
 //                 ; before the level gimmick table; off by default now.
 //   Guess=0       ; pin the node nearest the crosshair when the game has not
 //                 ; marked anything. Off: only what the game marks is pinned.
+//   Reach=1200    ; how far out a level gimmick may be and still count as
+//                 ; the thing the crosshair is on.
 //   Radius=0      ; optional cap in metres on how far a node can be. Zero,
 //                 ; the default, means everything the game has loaded, which
 //                 ; is already a few hundred metres and no more.
@@ -44,6 +46,22 @@ namespace gs::Settings
         // nothing beyond it, so a radius is a second limit doing the first
         // one's job. It stays for anyone who wants fewer pins.
         float radius = 0.0f;
+        // How far a placement may be and still be what the crosshair is on.
+        //
+        // This was a flat five hundred written in when the test glint was a
+        // hundred and nineteen metres away. Session seventy-five is that
+        // number refusing the feature: Seth aimed at a glint, the table
+        // found exactly one placement on the line, record 13 element 100
+        // "Challenge_Sealed_Artifact_Her" at five hundred and ninety-eight
+        // metres, and the gate threw it away eighty times in a row. The
+        // camera yaw that session, 137.3 degrees, is the bearing to that
+        // placement to within a fifth of a degree, so the pick was right and
+        // only the ceiling was wrong.
+        //
+        // Seth's requirement is the range a glint is visible at, four or
+        // five times a hundred and nineteen. Twelve hundred leaves room
+        // above that without letting the far side of the map in.
+        float reach = 1200.0f;
         // One press at each place pins every candidate inside the cone,
         // labelled with its distance, so the glint can be named by reading
         // one number off the map. Set Survey=0 once that is settled.
