@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "game/aim.h"
 #include "game/player.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
@@ -201,6 +202,8 @@ namespace
             memcpy(out, reinterpret_cast<const void*>(tf + kOff_Tf_WorldPos), 12);
             if (!std::isfinite(out[0]) || !std::isfinite(out[1]) || !std::isfinite(out[2])) return false;
             if (std::fabs(out[0]) + std::fabs(out[1]) + std::fabs(out[2]) > 1.0e6f) return false;
+            // Not placed yet: session twenty-six had entities at the origin.
+            if (out[0] == 0.0f && out[1] == 0.0f && out[2] == 0.0f) return false;
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -444,13 +447,13 @@ namespace gs::actors
             if (en.gimmickComp && GlintByte(en.gimmickComp, &g))
             {
                 static int flipsLeft = 20;
-                if (g && !en.glint && flipsLeft > 0)
+                if (g != en.glint && flipsLeft > 0)
                 {
                     --flipsLeft;
                     const uintptr_t vt = Deref(en.ptr);
                     const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
-                    GS_LOG("[actors] glint byte set on eid %08X %s at (%.1f, %.1f, %.1f)", en.eid,
-                           cn ? (cn[0] == '.' ? cn + 4 : cn) : "?", en.x, en.y, en.z);
+                    GS_LOG("[actors] glint byte %s on eid %08X %s at (%.1f, %.1f, %.1f), flash %s", g ? "set" : "cleared", en.eid,
+                           cn ? (cn[0] == '.' ? cn + 4 : cn) : "?", en.x, en.y, en.z, gs::aim::FlashActive() ? "on" : "off");
                 }
                 en.glint = g;
             }

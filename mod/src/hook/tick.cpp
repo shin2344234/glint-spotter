@@ -17,6 +17,7 @@
 #include "game/nearest.h"
 #include "game/actors.h"
 #include "game/camera.h"
+#include "game/dump.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
 extern "C" void* gs_minimapOriginal = nullptr;
@@ -318,15 +319,37 @@ namespace
         GS_LOG("[mark]     %s components:%s", tag, line);
     }
 
-    // Flash on: among the objects whose gimmick component carries the detect
-    // mode target byte, the one nearest the view ray within a cone. When the
-    // same one stays the pick for a second it gets a Glint pin, once per
-    // area, and no other automatic pin for five seconds.
+    // Flash on: the object under the crosshair, the one nearest the view
+    // ray by angle within six degrees, held for a second and a half, gets a
+    // Glint pin once per area, and no other automatic pin for five seconds.
+    //
+    // No glint test yet. Session twenty-six showed the glint Seth aims at
+    // is a character, not a gimmick, so the detect mode target byte on the
+    // gimmick component cannot see it. The object's components are dumped
+    // when the pin is placed with the flash on, and once more after the
+    // flash ends, so the state that means "being revealed" can be read off
+    // the diff and become the test.
     uint32_t g_autoEid = 0;
     uint32_t g_autoSinceMs = 0;
     uint32_t g_autoCooldownUntil = 0;
     int g_autoLogsLeft = 40;
     uint32_t g_autoLastLogMs = 0;
+    uintptr_t g_autoDumpEntity = 0;   // dumped again once the flash is off
+    uint32_t g_autoDumpEid = 0;
+    uint32_t g_autoFlashOffMs = 0;
+    int g_autoDumpsLeft = 3;
+
+    int PickByAngle(const gs::nearest::Candidate* c, int n, float maxAngle)
+    {
+        int pick = -1;
+        float best = maxAngle;
+        for (int i = 0; i < n; ++i)
+        {
+            const float angle = c[i].off / (c[i].along > 1.0f ? c[i].along : 1.0f);
+            if (angle < best) { best = angle; pick = i; }
+        }
+        return pick;
+    }
 
     void AutoMark(uint32_t now)
     {
@@ -334,22 +357,27 @@ namespace
         {
             g_autoEid = 0;
             g_autoSinceMs = 0;
+            // The second dump, two seconds after the flash ended.
+            if (g_autoDumpEntity)
+            {
+                if (!g_autoFlashOffMs) g_autoFlashOffMs = now;
+                else if (now - g_autoFlashOffMs > 2000)
+                {
+                    GS_LOG("[auto] flash off for two seconds; dumping eid %08X again", g_autoDumpEid);
+                    gs::dump::EntityComponents("off", g_autoDumpEntity, 0x200);
+                    g_autoDumpEntity = 0;
+                    g_autoFlashOffMs = 0;
+                }
+            }
             return;
         }
+        g_autoFlashOffMs = 0;
         const gs::player::Pos pp = gs::player::Read();
         View v;
         if (!pp.valid || !ViewRay(pp, &v)) return;
         gs::nearest::Candidate c[8];
-        const int n = CastView(v, 45.0f, 2.0f, 0.12f, true, c, 8, nullptr, 0);
-
-        // Nearest the ray by angle, not by distance along it.
-        int pick = -1;
-        float bestAngle = 1e9f;
-        for (int i = 0; i < n; ++i)
-        {
-            const float angle = c[i].off / (c[i].along > 1.0f ? c[i].along : 1.0f);
-            if (angle < bestAngle) { bestAngle = angle; pick = i; }
-        }
+        const int n = CastView(v, 45.0f, 2.0f, 0.12f, false, c, 8, nullptr, 0);
+        const int pick = PickByAngle(c, n, 0.105f);   // six degrees
 
         // While the flash is on, a line every two seconds saying what the
         // cone holds, forty lines at most.
@@ -357,23 +385,13 @@ namespace
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on, view from the %s (pitch %.0f deg); set %d, %d gimmicks, %d glinting, %d glinting in the cone",
+            GS_LOG("[auto] flash on, view from the %s (pitch %.0f deg); set %d, %d gimmicks, %d with the byte, %d in the cone",
                    v.camera ? "camera" : "body, level", std::asin(v.fy) * 57.2958f,
                    gs::actors::Count(), gs::actors::GimmickCount(), gs::actors::GlintCount(), n);
             for (int i = 0; i < n && i < 4; ++i)
-                GS_LOG("[auto]   %s%s eid %08X at %.1f along, %.2f off, %+.1f up", i == pick ? "PICK " : "",
-                       c[i].cls, c[i].eid, c[i].along, c[i].off, c[i].dy);
-            if (n == 0)
-            {
-                // What the flash is on, glinting or not, so the log says
-                // what a glint object is made of.
-                gs::nearest::Candidate any[3];
-                const int m = CastView(v, 45.0f, 2.0f, 0.12f, false, any, 3, nullptr, 0);
-                for (int i = 0; i < m; ++i)
-                    GS_LOG("[auto]   in view, not glinting: %s%s eid %08X at %.1f along, %.2f off",
-                           any[i].gimmick ? "gimmick " : "", any[i].cls, any[i].eid, any[i].along, any[i].off);
-                if (m > 0) DescribeComponents("in view", any[0].entity);
-            }
+                GS_LOG("[auto]   %s%s%s%s eid %08X at %.1f along, %.2f off, %.1f deg, %+.1f up", i == pick ? "PICK " : "",
+                       c[i].glint ? "BYTE " : "", c[i].gimmick ? "gimmick " : "", c[i].cls, c[i].eid, c[i].along, c[i].off,
+                       std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy);
         }
 
         if (pick < 0 || c[pick].eid == 0)
@@ -388,10 +406,19 @@ namespace
             g_autoSinceMs = now;
             return;
         }
-        if (now - g_autoSinceMs < 1000 || now < g_autoCooldownUntil) return;
+        if (now - g_autoSinceMs < 1500 || now < g_autoCooldownUntil) return;
         g_autoCooldownUntil = now + 5000;
-        GS_LOG("[auto] %s eid %08X, glinting, held in view for a second at %.1f units", c[pick].cls, c[pick].eid, c[pick].along);
-        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, glinting object held in view", "Glint", pp, 8.0f);
+        GS_LOG("[auto] %s%s eid %08X held under the crosshair for a second and a half at %.1f units",
+               c[pick].gimmick ? "gimmick " : "", c[pick].cls, c[pick].eid, c[pick].along);
+        PlaceAt(c[pick].x, c[pick].y, c[pick].z, "automatic, held under the crosshair with the flash on", "Glint", pp, 8.0f);
+        if (g_autoDumpsLeft > 0 && !g_autoDumpEntity)
+        {
+            --g_autoDumpsLeft;
+            GS_LOG("[auto] dumping eid %08X with the flash on", c[pick].eid);
+            gs::dump::EntityComponents("on", c[pick].entity, 0x200);
+            g_autoDumpEntity = c[pick].entity;
+            g_autoDumpEid = c[pick].eid;
+        }
     }
 }
 
@@ -509,12 +536,17 @@ extern "C" void gs_OnMinimapTick(void* self)
                 else GS_LOG("[mark] no ground point: %s", v.camera ? "looking level or up" : "no camera pitch");
             }
 
-            // An object the ray hits before it reaches the ground wins;
-            // otherwise the ground point; otherwise nothing.
-            if (n > 0 && (!ground || c[0].along <= gt + 3.0f))
+            // The object nearest the crosshair by angle wins, within six
+            // degrees; session twenty-six's aimed character sat four degrees
+            // off at 32 units while a gimmick sat fourteen degrees off at 13
+            // and would have won on distance. Otherwise the ground point.
+            const int pick = PickByAngle(c, n, 0.105f);
+            if (pick >= 0 && (!ground || c[pick].along <= gt + 3.0f))
             {
-                have = true; tx = c[0].x; ty = c[0].y; tz = c[0].z;
-                how = "first object on the view ray";
+                have = true; tx = c[pick].x; ty = c[pick].y; tz = c[pick].z;
+                how = "the object under the crosshair";
+                GS_LOG("[mark] crosshair pick: hit %d, %.1f degrees off the view ray", pick + 1,
+                       std::atan2(c[pick].off, c[pick].along) * 57.2958f);
             }
             else if (ground)
             {
