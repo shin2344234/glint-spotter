@@ -424,78 +424,43 @@ namespace
         View v;
         if (!pp.valid || !ViewRay(pp, &v)) return;
 
-        // Pickups near the view, any range.
+        // Marked nodes whose bearing matches the crosshair's, nearest the
+        // bearing first. Height decides nothing here: session forty had
+        // firewood a metre away reading six and a half metres below the
+        // player's feet, so the heights are not to be trusted for aim.
         gs::nearest::Candidate c[8];
-        const int n = CastView(v, 400.0f, 8.0f, 0.60f, true, c, 8, nullptr, 0);
-        const int pick = PickByAngle(c, n, 0.70f);   // thirty five degrees
+        const int n = gs::nearest::CastBearing(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fz,
+                                               400.0f, 0.26f, 40.0f, true, c, 8);   // fifteen degrees
+        const int pick = n > 0 ? 0 : -1;   // CastBearing orders by bearing
 
         // While the flash is on, a line every two seconds, sixty at most.
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
         {
             g_autoLastLogMs = now;
             --g_autoLogsLeft;
-            GS_LOG("[auto] flash on, ray from the %s at (%.1f, %.1f, %.1f) along (%.2f, %.2f, %.2f), player at (%.1f, %.1f, %.1f); set %d, %d pickups, %d lit, %d near the view",
-                   v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fy, v.fz, pp.x, pp.y, pp.z,
-                   gs::actors::Count(), gs::actors::PickupCount(), gs::actors::LitCount(), n);
-            {
-                int nearest = -1;
-                float bestAngle = 1e9f;
-                for (int i = 0; i < n; ++i)
-                {
-                    const float a = std::atan2(c[i].off, c[i].along);
-                    if (a < bestAngle) { bestAngle = a; nearest = i; }
-                }
-                if (nearest >= 0)
-                    GS_LOG("[auto]   the marked node nearest the crosshair is \"%s\" at %.1f deg, %.1f along%s",
-                           c[nearest].name[0] ? c[nearest].name : c[nearest].cls, bestAngle * 57.2958f,
-                           c[nearest].along, pick >= 0 ? ", inside the cone" : ", outside the cone");
-            }
+            GS_LOG("[auto] flash on, ray from the %s at (%.1f, %.1f, %.1f) bearing (%.2f, %.2f), player at (%.1f, %.1f, %.1f); set %d, %d marked, %d on the bearing",
+                   v.camera ? "camera" : "body, level", v.ox, v.oy, v.oz, v.fx, v.fz, pp.x, pp.y, pp.z,
+                   gs::actors::Count(), gs::actors::PickupCount(), n);
             for (int i = 0; i < n && i < 4; ++i)
-                GS_LOG("[auto]   %s%s\"%s\" eid %08X at %.1f along, %.1f deg, %+.1f up%s", i == pick ? "PICK " : "",
-                       c[i].lit ? "LIT " : "", c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, c[i].along,
-                       std::atan2(c[i].off, c[i].along) * 57.2958f, c[i].dy, c[i].locked ? ", locked" : "");
-            {
-                // Whatever the crosshair is nearest, marked or not, named.
-                gs::nearest::Candidate all[6];
-                const int an = CastView(v, 400.0f, 8.0f, 0.60f, false, all, 6, nullptr, 0);
-                const int abest = PickByAngle(all, an, 0.70f);
-                for (int i = 0; i < an && i < 4; ++i)
-                    GS_LOG("[auto]   in view%s: \"%s\" eid %08X at %.1f along, %.1f deg%s",
-                           i == abest ? ", nearest the crosshair" : "",
-                           all[i].name[0] ? all[i].name : all[i].cls, all[i].eid, all[i].along,
-                           std::atan2(all[i].off, all[i].along) * 57.2958f,
-                           all[i].pickup ? ", marked" : "");
-            }
-            if (n == 0)
-            {
-                // No pickup near the view: say what is there, and dump the
-                // three nearest with the flash on so the flash-off pass can
-                // be diffed against them. That diff is what will name the
-                // reveal state, once the glint is one of the three.
-                gs::nearest::Candidate any[3];
-                const int m = CastView(v, 400.0f, 4.0f, 0.14f, false, any, 3, nullptr, 0);
-                for (int i = 0; i < m; ++i)
-                    GS_LOG("[auto]   near the view, no item data: %s%s eid %08X at %.1f along, %.1f deg",
-                           any[i].gimmick ? "gimmick " : "", any[i].cls, any[i].eid, any[i].along,
-                           std::atan2(any[i].off, any[i].along) * 57.2958f);
-                static uint32_t lastDumpMs = 0;
-                if (m > 0 && g_autoDumpsLeft > 0 && now - lastDumpMs > 6000 && !g_autoDumpN)
-                {
-                    lastDumpMs = now;
-                    --g_autoDumpsLeft;
-                    g_autoDumpN = m < 3 ? m : 3;
-                    for (int i = 0; i < g_autoDumpN; ++i)
-                    {
-                        g_autoDumpEnts[i] = any[i].entity;
-                        g_autoDumpEids[i] = any[i].eid;
-                        char tag[24];
-                        _snprintf_s(tag, sizeof(tag), _TRUNCATE, "on%d", i + 1);
-                        GS_LOG("[auto] dumping eid %08X (%s), %.1f deg off the view, with the flash on",
-                               any[i].eid, any[i].cls, std::atan2(any[i].off, any[i].along) * 57.2958f);
-                        gs::dump::EntityComponents(tag, any[i].entity, 0x300);
-                    }
-                }
-            }
+                GS_LOG("[auto]   %s\"%s\" eid %08X at %.1f away, %.1f deg off the bearing, %+.1f up%s", i == pick ? "PICK " : "",
+                       c[i].name[0] ? c[i].name : c[i].cls, c[i].eid, c[i].along, c[i].off * 57.2958f, c[i].dy,
+                       c[i].lit ? ", lit" : "");
+            // What is on the bearing at all, marked or not, so a session says
+            // what the crosshair was on.
+            gs::nearest::Candidate all[6];
+            const int an = gs::nearest::CastBearing(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fz,
+                                                    400.0f, 0.26f, 40.0f, false, all, 6);
+            for (int i = 0; i < an && i < 4; ++i)
+                GS_LOG("[auto]   on the bearing: \"%s\" eid %08X at %.1f away, %.1f deg, %+.1f up%s",
+                       all[i].name[0] ? all[i].name : all[i].cls, all[i].eid, all[i].along,
+                       all[i].off * 57.2958f, all[i].dy, all[i].pickup ? ", marked" : "");
+            // The height disagreement, which is the open bug: what the nearest
+            // few entities say their height is against the player's own.
+            gs::nearest::Candidate close[3];
+            const int cn = gs::nearest::Closest(gs::player::Actor(), pp.x, pp.y, pp.z, close, 3);
+            for (int i = 0; i < cn; ++i)
+                GS_LOG("[auto]   nearby: \"%s\" %.1f away, its height %.1f against the player's %.1f, a gap of %+.1f",
+                       close[i].name[0] ? close[i].name : close[i].cls, close[i].along, close[i].y, pp.y, close[i].y - pp.y);
         }
 
         // Only what the crosshair is on. A node at the player's feet is
