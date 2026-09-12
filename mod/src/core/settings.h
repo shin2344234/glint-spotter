@@ -19,7 +19,8 @@
 //   Chord=RB+LB+A ; controller buttons that place a mark, held together.
 //                 ; Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START
 //   Hold=0        ; milliseconds the chord must be held before it fires
-//   MiniPin=1     ; also copy each pin onto the minimap
+//   MiniPin=0     ; also copy each pin onto the minimap. Crashed the game in
+//                 ; session eighty-two; leave it alone.
 //   Rumble=1      ; buzz the pad when a pin lands
 //   Cone=1.5      ; how many degrees off the crosshair a press will look
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
@@ -155,8 +156,27 @@ namespace gs::Settings
         // marker on the screen he is already looking at.
         bool rumble = true;
 
-        // A copy of each pin on the minimap. On now: the captures showed this
-        // is exactly what the game does with its own markers.
+        // A copy of each pin on the minimap. Off, and this time for a reason
+        // that is not a theory.
+        //
+        // Session eighty-two turned it on and the game died. The log ends one
+        // line after the copy:
+        //
+        //   [pin #1] returned 0x0000000000000001
+        //   [pin #1] minimap copy key=100001 returned 0x0000000000000001
+        //
+        // and nothing follows, no tick, no probe, no next pass a quarter of a
+        // second later. The call returned, so it did not fault inside itself.
+        // What it did was leave something behind that the next frame drew.
+        // That fits the surfaces: the world map is only drawn when it is open,
+        // the minimap is drawn every frame, so a bad icon on the minimap is a
+        // crash on the very next one.
+        //
+        // The captures do say the game creates each of its own markers on both
+        // surfaces. They do not say the mod can, and twice now this has been
+        // the thing that broke a working build. It needs its own session with
+        // the minimap root re-verified at the moment of the call, not another
+        // switch flipped on the way past.
         //
         // The idea was immediate feedback: a mark you can see without opening
         // the map. It went in untested and the first session with it is the
@@ -166,7 +186,7 @@ namespace gs::Settings
         // the minimap call returned a live object pointer once and 1 the next,
         // so the two are not doing the same thing. Until that is understood
         // the proven path is the only one on by default.
-        bool miniPin = true;
+        bool miniPin = false;
         // One press at each place pins every candidate inside the cone,
         // labelled with its distance, so the glint can be named by reading
         // one number off the map. Set Survey=0 once that is settled.

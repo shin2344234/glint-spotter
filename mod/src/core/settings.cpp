@@ -88,9 +88,9 @@ namespace
         fputs("; milliseconds. Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START.\n", f);
         fputs("Chord=RB+LB+A\n", f);
         fputs("Hold=0\n", f);
-        fputs("; 1 also copies every pin onto the minimap, which is what the game does\n", f);
-        fputs("; with its own markers.\n", f);
-        fputs("MiniPin=1\n", f);
+        fputs("; 1 also copies every pin onto the minimap. This crashed the game in\n", f);
+        fputs("; session eighty-two, one frame after the call returned. Leave it off.\n", f);
+        fputs("MiniPin=0\n", f);
         fputs("; 1 buzzes the controller when a pin lands.\n", f);
         fputs("Rumble=1\n", f);
         fputs("; How many degrees off the crosshair a press will look. Small is good:\n", f);

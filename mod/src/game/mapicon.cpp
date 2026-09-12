@@ -403,6 +403,12 @@ namespace gs::mapicon
                             nullptr, nullptr, nullptr);
         GS_LOG_OK("[pin #%llu] returned 0x%p", static_cast<unsigned long long>(n), r);
 
+        // Said immediately, before anything optional runs. The map is not on
+        // screen when a pin lands, so this buzz is the only thing that tells
+        // Seth it happened, and it should not be waiting behind a feature that
+        // might not survive the frame.
+        if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 220);
+
         // The same icon on the minimap, only when the ini asks.
         //
         // Its own key id, a hundred thousand above the world map's. The two
@@ -424,9 +430,6 @@ namespace gs::mapicon
             GS_LOG("[pin #%llu] minimap copy key=%lld returned 0x%p",
                    static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
         }
-        // And say so, because the map is not on screen when this happens.
-        if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 220);
-
         const int i = g_placedN.load();
         if (i < kMaxPins) { g_placed[i] = {x, z}; g_placedN.store(i + 1); }
         return r;
