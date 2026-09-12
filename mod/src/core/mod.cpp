@@ -941,43 +941,56 @@ namespace
                     gs::player::SetSpecialComponent(nullptr);
                 }
             }
-            // The scan is a fallback and it has to behave like one.
+            // One walk for every candidate vtable, not one walk each.
             //
-            // Session ninety-four is the whole argument. The actor manager was
-            // not ready on the first attempt, which is normal because the save
-            // was still loading, so the fallback ran immediately and spent
-            // twelve seconds walking the heap. Then it ran again and spent
-            // seventeen. That is the stutter Seth gets when the mod comes
-            // alive, and the manager would have answered for free a few
-            // seconds later if anything had waited for it.
+            // Waiting thirty seconds for the actor manager was the wrong
+            // trade and session ninety-five paid for it: the manager offered
+            // nine hundred and ninety entities at exactly the thirty second
+            // mark and every one of them was without a position, so it could
+            // not name the player anyway, and the mod took seventy-nine
+            // seconds to come alive instead of thirty.
             //
-            // Thirty attempts at half a second each is thirty seconds of
-            // asking the cheap way before paying the expensive one. If the
-            // manager never answers, the fallback still runs and the mod still
-            // works, just later.
-            const int kAskManagerUntil = 60;
-            for (size_t i = 0; i < g_count && !done && attempt >= kAskManagerUntil; ++i)
+            // The waste was never the timing. The class has more than one
+            // vtable, this loop scanned for them one at a time, and each walk
+            // is seventeen seconds over five gigabytes. Two of them ran, found
+            // one object each, and the first was somebody else's component.
+            // The scanner takes an array of needles and covers them in a single
+            // walk, which is what the comment on FindPointers says to do and
+            // what the general sweep already does.
+            if (!done)
             {
-            Target& t = g_targets[i];
-            if (!strstr(t.info.name, "ClientSpecialModeActorComponent")) continue;
-            if (t.object) { done = true; break; }
-            const uintptr_t needle = t.info.vtableVa;
-            const size_t bytes = t.objectBytes;
+            uintptr_t needles[16]{};
+            size_t bytes[16]{};
+            size_t slotOf[16]{};
+            size_t nn = 0;
+            for (size_t i = 0; i < g_count && nn < 16; ++i)
+            {
+                if (!strstr(g_targets[i].info.name, "ClientSpecialModeActorComponent")) continue;
+                if (g_targets[i].object) { done = true; break; }
+                needles[nn] = g_targets[i].info.vtableVa;
+                bytes[nn] = g_targets[i].objectBytes;
+                slotOf[nn] = i;
+                ++nn;
+            }
+            if (nn == 0 || done) goto afterFastPass;
+            {
             gs::scan::Options opt;
-            opt.needleBytes = &bytes;
+            opt.needleBytes = bytes;
             opt.timeBudgetMs = 20000;
             opt.maxRegionBytes = 1024ull * 1024 * 1024;
             // Session seventeen's fast pass took a 48 KB registry entry for the
             // player's component. Real heap arenas are megabytes.
             opt.minRegionBytes = 1024 * 1024;
             std::vector<gs::scan::Hit> hits;
-            const gs::scan::Report rep = gs::scan::FindPointers(&needle, 1, hits, opt);
-            GS_LOG("fast pass %d for the special mode component: %zu hit(s) in %llu ms", attempt + 1,
-                   hits.size(), static_cast<unsigned long long>(rep.microseconds / 1000));
+            const gs::scan::Report rep = gs::scan::FindPointers(needles, nn, hits, opt);
+            GS_LOG("fast pass %d: %zu candidate vtable(s), %zu hit(s) in %llu ms", attempt + 1,
+                   nn, hits.size(), static_cast<unsigned long long>(rep.microseconds / 1000));
             DropPointerTables(hits);
             for (const gs::scan::Hit& h : hits)
             {
                 if (!h.object) continue;
+                if (h.needle < 0 || static_cast<size_t>(h.needle) >= nn) continue;
+                Target& t = g_targets[slotOf[h.needle]];
                 t.object = h.object;
                 if (!Describe(t)) { t.object = nullptr; continue; }
                 // Every character has one of these. The player's is the one
@@ -1010,13 +1023,11 @@ namespace
                 break;
             }
             }
+            }
+            afterFastPass:
             if (done) break;
-            // Quiet while it waits. Sixty attempts of half a second is thirty
-            // seconds, and saying so once beats saying it sixty times.
-            if (attempt == 0)
-                GS_LOG("no world yet; asking the actor manager twice a second for thirty seconds "
-                       "before falling back to a heap scan");
-            for (int i = 0; i < 1 && !g_stop.load(); ++i) Sleep(500);
+            if (attempt == 0) GS_LOG("no world yet, looking again in a second");
+            for (int i = 0; i < 2 && !g_stop.load(); ++i) Sleep(500);
         }
 
         int pass = 0;
