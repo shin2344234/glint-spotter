@@ -20,6 +20,31 @@ namespace
     bool g_checked = false;
     bool g_bytesOk = false;
 
+    // A call that raises is still a call that wrote the record, so the reason
+    // to stop is a run of them rather than one. Three, and then the drawn pin
+    // is all that is left.
+    int g_faultsLeft = 3;
+    unsigned long g_faultCode = 0;
+    uintptr_t g_faultAt = 0;
+
+    // Where it died, which the old handler threw away. The address is the
+    // instruction that raised, so subtracting the module base names the line
+    // in the disassembly.
+    int FaultFilter(EXCEPTION_POINTERS* ep)
+    {
+        __try
+        {
+            g_faultCode = ep->ExceptionRecord->ExceptionCode;
+            g_faultAt = reinterpret_cast<uintptr_t>(ep->ExceptionRecord->ExceptionAddress);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_faultCode = 0;
+            g_faultAt = 0;
+        }
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+
     bool Base()
     {
         if (g_base) return true;
@@ -127,8 +152,8 @@ namespace
         }
     }
 
-    // The last record's id, which is the one the create just appended.
-    bool LastId(int64_t* out)
+    // The last record, which is the one the create just appended.
+    bool LastRecord(int64_t* id, float* x, float* z)
     {
         const gs::pinmodel::List l = gs::pinmodel::Read(gs::sig::kPinListKind);
         if (!l.ok || l.count == 0) return false;
@@ -136,13 +161,25 @@ namespace
         {
             const auto* r = reinterpret_cast<const uint8_t*>(l.data) +
                             static_cast<size_t>(l.count - 1) * gs::sig::kPinRecord;
-            memcpy(out, r, 8);
+            memcpy(id, r, 8);
+            memcpy(x, r + 8, 4);
+            memcpy(z, r + 16, 4);
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return false;
         }
+    }
+
+    // The record we asked for, rather than any record. Two marks in a row at
+    // the same place would otherwise report the first one's id forever.
+    bool Landed(float wantX, float wantZ, int64_t* id)
+    {
+        float gotX = 0.0f, gotZ = 0.0f;
+        if (!LastRecord(id, &gotX, &gotZ)) return false;
+        const float dx = gotX - wantX, dz = gotZ - wantZ;
+        return dx * dx + dz * dz < 1.0f;
     }
 }
 
@@ -151,9 +188,11 @@ namespace gs::realpin
     bool Ready(const char** why)
     {
         static const char* kNoBytes = "the game has been patched away from these addresses";
+        static const char* kNoTries = "the call raised three times, so it is not being made again";
         static const char* kNoChain = "the player's marker list has not been found yet";
         static const char* kNoActor = "the game itself would refuse to place a marker right now";
         if (!BytesMatch()) { if (why) *why = kNoBytes; return false; }
+        if (g_faultsLeft <= 0) { if (why) *why = kNoTries; return false; }
         uintptr_t sub = 0;
         if (!Chain(&sub)) { if (why) *why = kNoChain; return false; }
         if (!ActorAllows()) { if (why) *why = kNoActor; return false; }
@@ -189,34 +228,44 @@ namespace gs::realpin
 
         GS_LOG("[real] asking the game for a marker at (%.1f, %.1f); it is holding %d",
                x, z, before);
+        bool raised = false;
+        g_faultCode = 0;
+        g_faultAt = 0;
         __try
         {
             fn(reinterpret_cast<void*>(sub), nullptr, pos, &b1, &b2, 0);
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        __except (FaultFilter(GetExceptionInformation()))
         {
-            GS_LOG_ERR("[real] the create call faulted. Nothing else will call it this session.");
-            g_bytesOk = false;
-            return 0;
+            raised = true;
+            --g_faultsLeft;
         }
 
+        // The record first, because session a hundred and three had the call
+        // raise and the record land anyway: list 0 held it, at the position
+        // asked for, with an id of the game's choosing. Whatever raised did so
+        // after the append, and an id in hand is worth more than a tidy return
+        // path.
         const int after = Count();
         int64_t id = 0;
-        if (after > before && LastId(&id))
+        const bool landed = Landed(x, z, &id);
+
+        if (raised)
         {
-            GS_LOG_OK("[real] the game holds %d marker(s) now; the new one is id %lld",
-                      after, static_cast<long long>(id));
+            const uintptr_t rva = (g_faultAt > g_base) ? g_faultAt - g_base : 0;
+            GS_LOG_ERR("[real] the call raised 0x%08lX at +0x%08llX, %d attempt(s) left. The list "
+                       "holds %d and the record %s.", g_faultCode,
+                       static_cast<unsigned long long>(rva), g_faultsLeft, after,
+                       landed ? "is there" : "is not");
+        }
+
+        if (landed)
+        {
+            GS_LOG_OK("[real] the game holds %d marker(s); this one is id %lld", after,
+                      static_cast<long long>(id));
             return id;
         }
-        if (after == before && before > 0 && LastId(&id))
-        {
-            // At the cap the game drops its oldest to make room, so the count
-            // does not move and the record is still ours.
-            GS_LOG_OK("[real] the list was full at %d, so the game dropped its oldest; the new one "
-                      "is id %lld", after, static_cast<long long>(id));
-            return id;
-        }
-        GS_LOG_ERR("[real] the call returned but the list still holds %d. Falling back to a drawn pin.",
+        GS_LOG_ERR("[real] no record for this mark; the list holds %d. Falling back to a drawn pin.",
                    after);
         return 0;
     }

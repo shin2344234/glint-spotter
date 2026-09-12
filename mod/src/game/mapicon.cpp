@@ -36,7 +36,7 @@ namespace
 
     // Every pin this mod placed this session, for the one-per-area rule.
     constexpr int kMaxPins = 256;
-    struct Placed { float x, y, z; char label[16]; bool drawn; };
+    struct Placed { float x, y, z; char label[16]; bool drawn; int64_t id; };
     Placed g_placed[kMaxPins];
     std::atomic<int> g_placedN{0};
     std::atomic<bool> g_repinWanted{false};
@@ -514,7 +514,8 @@ namespace gs::mapicon
         return true;
     }
 
-    void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* labelText)
+    void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* labelText,
+                      int64_t keyId)
     {
         if (!worldRoot || !g_orig[0])
         {
@@ -532,7 +533,8 @@ namespace gs::mapicon
 
         // Session ten, byte for byte, except the position and the key id.
         uint16_t type = 0x0001;
-        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{1000 + static_cast<int64_t>(n), 0x15, {}};
+        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{
+            keyId != 0 ? keyId : 1000 + static_cast<int64_t>(n), 0x15, {}};
         uint32_t dword4 = 0;
         float float5 = 0.0f;
         // Height zero, because that is what the game passes for this icon.
@@ -587,16 +589,17 @@ namespace gs::mapicon
             GS_LOG("[pin #%llu] minimap copy key=%lld returned 0x%p",
                    static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
         }
-        Remember(x, y, z, label, true);
+        Remember(x, y, z, label, true, key.id);
         return r;
     }
 
-    void Remember(float x, float y, float z, const char* label, bool drawn)
+    void Remember(float x, float y, float z, const char* label, bool drawn, int64_t keyId)
     {
         const int i = g_placedN.load();
         if (i >= kMaxPins) return;
         g_placed[i].x = x; g_placed[i].y = y; g_placed[i].z = z;
         g_placed[i].drawn = drawn;
+        g_placed[i].id = keyId;
         CopyString(g_placed[i].label, sizeof(g_placed[i].label), label ? label : "Marker");
         g_placedN.store(i + 1);
     }
@@ -659,7 +662,7 @@ namespace gs::mapicon
             if (!g_placed[i].drawn) continue;
             uint16_t type = 0x0001;
             struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{
-                2000 + static_cast<int64_t>(i), 0x15, {}};
+                g_placed[i].id != 0 ? g_placed[i].id : 2000 + static_cast<int64_t>(i), 0x15, {}};
             uint32_t dword4 = 0;
             float float5 = 0.0f;
             float pos[3] = {g_placed[i].x, 0.0f, g_placed[i].z};

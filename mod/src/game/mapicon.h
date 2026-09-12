@@ -97,7 +97,12 @@ namespace gs::mapicon
     // (-9730.99, 562.29, -4303.08) while the player stood at (-9731.9,
     // 562.2, -4301.8), so the game gives its icons a real height and a pin
     // at zero is a pin the map has to guess at.
-    void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* label);
+    // `keyId` is the icon's key. Zero mints one of the mod's own, from 1001
+    // up. A real record's id goes here instead when there is one, because
+    // the map's delete acts on the key it finds under the cursor and only a
+    // key the game's own marker list knows can lead anywhere.
+    void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* label,
+                      int64_t keyId);
 
     // Put every pin this session back on the map.
     //
@@ -125,7 +130,7 @@ namespace gs::mapicon
     // drawn onto the map by the icon call, or a real marker the game owns and
     // redraws itself. Only ours are put back when the map is rebuilt; putting
     // the game's back would leave two icons on one spot.
-    void Remember(float x, float y, float z, const char* label, bool drawn);
+    void Remember(float x, float y, float z, const char* label, bool drawn, int64_t keyId);
 
     // The world map root the spy last saw a call on, or null. The tick uses
     // this when the scan has not located the object yet.
