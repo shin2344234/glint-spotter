@@ -93,6 +93,12 @@ namespace
         fputs("; moment, so this is usually the only thing that tells you it worked.\n", f);
         fputs("Rumble=1\n", f);
         fputs("\n", f);
+        fputs("; 1 asks the game for a real marker, the same kind you place by hand, so the\n", f);
+        fputs("; delete button on the map removes it. The game keeps fifteen of those and\n", f);
+        fputs("; drops the oldest to make room. 0 draws the mod's own pins instead: as many\n", f);
+        fputs("; as you like, and none of them can be deleted.\n", f);
+        fputs("RealMarkers=1\n", f);
+        fputs("\n", f);
         fputs("; ------------------------------------------------------------------ aiming\n", f);
         fputs("\n", f);
         fputs("; How far either side of the sight line a press looks, in metres, the same\n", f);
@@ -260,6 +266,10 @@ namespace gs::Settings
             else if (_stricmp(key, "Rumble") == 0)
             {
                 g_values.rumble = atoi(val) != 0;
+            }
+            else if (_stricmp(key, "RealMarkers") == 0)
+            {
+                g_values.realMarkers = atoi(val) != 0;
             }
             else if (_stricmp(key, "MiniPin") == 0)
             {

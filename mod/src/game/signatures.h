@@ -80,19 +80,50 @@ namespace gs::sig
     //   submodule = *(*(actor + 0x68) + 0x168)
     //   the list for a kind is at submodule + 0xC8 + kind * 16
     //   a record is 24 bytes: int64 id, float x, y, z, then two flag bytes
-    // Kind 0x15 is the player's pin marker, which vanilla code writes as a
-    // literal, and is the same 0x15 the mod already passes to the icon call.
-    //
-    // Nothing here is called yet. This build reads the list and prints it, so
-    // the offsets can be checked against markers Seth placed by hand before a
-    // single byte is written.
-    constexpr uintptr_t kPinUpsert = 0x004260C0;   // (submodule, ?, kind, &{records, count})
-    constexpr uintptr_t kPinRemove = 0x00426360;   // (submodule, &err, kind, &id, &flag)
+    // Which list holds them was wrong here for four builds. 0x15 is real, but
+    // it is the icon key's kind and a fixed tag in a notification, not an
+    // index into this submodule: the only code that ever creates a marker
+    // reaches list 0 or list 1 and no other, and 0x15 fails the range checks
+    // that same function applies to its own inputs. List 0 is a marker, list 1
+    // is a traced marker, and list 0x15 was empty every session because
+    // nothing writes to it.
+    constexpr uintptr_t kPinUpsert = 0x004260C0;   // (submodule, &err, kind, &{records, count})
+    constexpr uintptr_t kPinRemove = 0x00426360;   // (submodule, &err, &id, kind)
     constexpr uintptr_t kOff_Actor_Components = 0x68;
     constexpr uintptr_t kOff_Comp_PinSubmodule = 0x168;
     constexpr uintptr_t kOff_Pin_Lists         = 0xC8;
-    constexpr int       kPinKind               = 0x15;
+    constexpr int       kPinKind               = 0x15;  // the icon key's kind
+    constexpr int       kPinListKind           = 0;     // the list a marker lives in
     constexpr size_t    kPinRecord             = 24;
+
+    // And the two calls that write it, which is what makes a marker real.
+    //
+    // Create takes the submodule, a dead second argument, the position, two
+    // style bytes by pointer, and a byte choosing list 0 or list 1. It range
+    // checks the style bytes, evicts the oldest record when the list is full,
+    // assigns the id itself, appends the record and publishes the change. The
+    // remove is the same shape with an id instead of a position. Both are
+    // reached from the in-process wire and from nowhere else, which is why
+    // neither has a caller a search of the image can find.
+    //
+    // The prologues below are checked against the running game before either
+    // address is called. A patched exe fails the check and the mod goes back
+    // to drawing pins it cannot delete.
+    constexpr uintptr_t kPinCreate       = 0x027FE130;
+    constexpr uintptr_t kPinServerRemove = 0x027FE600;
+    constexpr uint8_t   kPinCreatePrologue[15] = {
+        0x4C, 0x89, 0x4C, 0x24, 0x20,   // mov [rsp+0x20], r9
+        0x4C, 0x89, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8
+        0x48, 0x89, 0x54, 0x24, 0x10,   // mov [rsp+0x10], rdx
+    };
+    constexpr uint8_t   kPinRemovePrologue[10] = {
+        0x44, 0x88, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8b
+        0x48, 0x89, 0x54, 0x24, 0x10,   // mov [rsp+0x10], rdx
+    };
+    // Clear and the create keeps fifteen markers, set and it keeps five
+    // hundred. Read only, and only so the log can say which cap applies.
+    constexpr uintptr_t kPinOnlineFlag   = 0x06BA5DA8;
+    constexpr uintptr_t kOff_Pin_Owner   = 0x08;   // submodule + 8, the notify target
 
     // Size the factory allocates for a root control (2760); a sanity bound.
     constexpr size_t kRootControlSize = 0xC48;

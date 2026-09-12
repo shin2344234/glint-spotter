@@ -38,9 +38,10 @@ namespace gs::pinmodel
         bool ok = false;
     };
 
-    // Read one kind's list. Kind 0x15 is the player's own pin marker.
+    // Read one list. List 0 holds the player's markers and list 1 the traced
+    // one; every other list belongs to something else and most are empty.
     List Read(int kind);
 
-    // Print every kind's header, and the records of kind 0x15. Microseconds.
+    // Which lists have anything in them. Microseconds.
     void LogState(const char* why);
 }

@@ -36,7 +36,7 @@ namespace
 
     // Every pin this mod placed this session, for the one-per-area rule.
     constexpr int kMaxPins = 256;
-    struct Placed { float x, y, z; char label[16]; };
+    struct Placed { float x, y, z; char label[16]; bool drawn; };
     Placed g_placed[kMaxPins];
     std::atomic<int> g_placedN{0};
     std::atomic<bool> g_repinWanted{false};
@@ -587,14 +587,18 @@ namespace gs::mapicon
             GS_LOG("[pin #%llu] minimap copy key=%lld returned 0x%p",
                    static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
         }
-        const int i = g_placedN.load();
-        if (i < kMaxPins)
-        {
-            g_placed[i].x = x; g_placed[i].y = y; g_placed[i].z = z;
-            CopyString(g_placed[i].label, sizeof(g_placed[i].label), label);
-            g_placedN.store(i + 1);
-        }
+        Remember(x, y, z, label, true);
         return r;
+    }
+
+    void Remember(float x, float y, float z, const char* label, bool drawn)
+    {
+        const int i = g_placedN.load();
+        if (i >= kMaxPins) return;
+        g_placed[i].x = x; g_placed[i].y = y; g_placed[i].z = z;
+        g_placed[i].drawn = drawn;
+        CopyString(g_placed[i].label, sizeof(g_placed[i].label), label ? label : "Marker");
+        g_placedN.store(i + 1);
     }
 
     bool PinNear(float x, float z, float radius)
@@ -650,6 +654,9 @@ namespace gs::mapicon
         GS_LOG("[pin] the game rebuilt its icons; drawing this session's %d pin(s) again", n);
         for (int i = 0; i < n && i < kMaxPins; ++i)
         {
+            // A real marker is in the game's own list and comes back with
+            // everything else it rebuilt.
+            if (!g_placed[i].drawn) continue;
             uint16_t type = 0x0001;
             struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{
                 2000 + static_cast<int64_t>(i), 0x15, {}};

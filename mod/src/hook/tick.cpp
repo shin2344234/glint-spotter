@@ -21,6 +21,7 @@
 #include "game/dump.h"
 #include "game/physics.h"
 #include "game/pinmodel.h"
+#include "game/realpin.h"
 #include "hook/pad.h"
 #include "core/settings.h"
 
@@ -231,6 +232,23 @@ namespace
         const float dx = tx - pp.x, dz = tz - pp.z;
         GS_LOG("[mark] target %.1f units away via %s; placing a %s pin at (%.1f, %.1f, %.1f)",
                std::sqrt(dx * dx + dz * dz), how, label, tx, ty, tz);
+
+        // The game's own marker first, because that is the one Seth can
+        // delete. It wants no map root and no world map: the record goes into
+        // the player's marker list and the map draws it from there the next
+        // time it draws anything at all. Everything below this is the old
+        // route, kept for a patched game and for RealMarkers=0.
+        if (gs::Settings::Get().realMarkers)
+        {
+            const int64_t id = gs::realpin::Place(tx, tz);
+            if (id != 0)
+            {
+                gs::mapicon::Remember(tx, ty, tz, label, false);
+                if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 220);
+                return;
+            }
+        }
+
         // Only a root the spy has seen the game call slot 170 on. The
         // sweep's candidate is never used for a call.
         void* root = gs::mapicon::LastWorldRoot();
@@ -1274,6 +1292,7 @@ extern "C" void gs_OnMinimapTick(void* self)
         {
             --g_pinModelLogsLeft;
             gs::pinmodel::LogState("on a press");
+            gs::realpin::LogState("before the press");
         }
 
         View v;

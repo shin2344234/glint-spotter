@@ -12,20 +12,11 @@
 
 namespace
 {
-    // The forty icon kinds, from the enum registration at RVA 0x15262A0. The
-    // list is here so the log names what it prints rather than numbering it.
-    const char* const kKindNames[] = {
-        "Knowledge", "KnowledgeGauge", "UnKnownKnowledge", "Quest", "QuestDiscovered",
-        "Item", "Toast", "Mission", "Challenge", "ChallengeQuestGroup",
-        "Wanted", "Friendly", "Artifact", "SkillLevelUp", "ExpandInventory",
-        "ExpandMercenary", "HireMercenary", "ChangeMercenary", "AutoSave", "LevelUp",
-        "FactionRelation", "FactionBlockade", "FactionOperation", "ConnectFactionNodeBuff",
-        "FactionResearch", "BountyHunter", "SubLevel", "CallMercenaryCoolTimeEnd",
-        "CallHyosiCoolTimeEnd", "RegionChange", "ChallengeComplete", "RandomBox",
-        "MissionGauge", "DiscoverInspect", "SharpnessResult", "PopSocket",
-        "Debug", "GetLostDropItem", "SequencerTimerGauge", "FactionOperation_Start",
-    };
-    constexpr int kKindCount = static_cast<int>(sizeof(kKindNames) / sizeof(kKindNames[0]));
+    // Forty lists, sixteen bytes of header each, which is what the create
+    // call's own arithmetic reaches. They were printed with names for a
+    // while, from an alert kind enum that has nothing to do with this
+    // submodule, and the names are gone because they were fiction.
+    constexpr int kKindCount = 40;
 }
 
 namespace gs::pinmodel
@@ -106,42 +97,18 @@ namespace gs::pinmodel
         GS_LOG("[pins] %s: submodule 0x%p%s%s", why, reinterpret_cast<void*>(sub),
                cls ? ", class " : "", cls ? cls : "");
 
+        // Numbered, not named. Only lists 0 and 1 ever hold markers, and
+        // printing "FactionBlockade" beside list 21 sent four builds
+        // looking in the wrong place.
         int nonEmpty = 0;
         for (int k = 0; k < kKindCount; ++k)
         {
             const List l = Read(k);
             if (!l.ok || l.count == 0) continue;
             ++nonEmpty;
-            GS_LOG("[pins]   kind %2d %-22s %u record(s) at 0x%p", k, kKindNames[k],
-                   l.count, reinterpret_cast<void*>(l.data));
+            GS_LOG("[pins]   list %2d: %u record(s) at 0x%p", k, l.count,
+                   reinterpret_cast<void*>(l.data));
         }
-        if (!nonEmpty) GS_LOG("[pins]   every kind's list is empty");
-
-        const List pins = Read(gs::sig::kPinKind);
-        if (!pins.ok)
-        {
-            GS_LOG("[pins] kind 0x15 does not read as a list; header 0x%p holds 0x%p and %u",
-                   reinterpret_cast<void*>(pins.header), reinterpret_cast<void*>(pins.data),
-                   pins.count);
-            return;
-        }
-        GS_LOG("[pins] kind 0x15, the player's own markers: %u", pins.count);
-        __try
-        {
-            for (uint32_t i = 0; i < pins.count && i < 40; ++i)
-            {
-                const auto* r = reinterpret_cast<const uint8_t*>(pins.data) +
-                                static_cast<size_t>(i) * gs::sig::kPinRecord;
-                int64_t id; float x, y, z;
-                memcpy(&id, r, 8);
-                memcpy(&x, r + 8, 4); memcpy(&y, r + 12, 4); memcpy(&z, r + 16, 4);
-                GS_LOG("[pins]   [%u] id %lld at (%.1f, %.1f, %.1f) flags %02X %02X",
-                       i, static_cast<long long>(id), x, y, z, r[20], r[21]);
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            GS_LOG_ERR("[pins] a record faulted while printing");
-        }
+        if (!nonEmpty) GS_LOG("[pins]   every list is empty");
     }
 }

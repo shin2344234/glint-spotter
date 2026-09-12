@@ -27,6 +27,7 @@ add_library(GlintSpotter SHARED
     src/game/mapicon.cpp
     src/game/alert.cpp
     src/game/pinmodel.cpp
+    src/game/realpin.cpp
     src/game/player.cpp
     src/game/aim.cpp
     src/game/actors.cpp

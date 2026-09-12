@@ -264,6 +264,27 @@ namespace gs::Settings
         // marker on the screen he is already looking at.
         bool rumble = true;
 
+        // Whether a mark asks the game for a real marker instead of drawing
+        // one.
+        //
+        // On, and this is the answer to the one complaint that has outlived
+        // every other fix: Seth cannot delete the mod's pins. He never could,
+        // because they were never markers. The mod drew straight onto the map
+        // and the delete button had nothing to act on.
+        //
+        // The game's own create takes a position and two style bytes, writes a
+        // twenty-four byte record into the player's marker list and publishes
+        // the change, and the map draws the icon itself. A record put there by
+        // this call is indistinguishable from one the player placed by hand,
+        // so the delete button finds it, the map keeps it across an open and
+        // close, and none of the mod's redrawing machinery is needed.
+        //
+        // What comes with it is the game's cap. Fifteen markers, and the
+        // oldest is dropped to make room, which is the game's rule and not
+        // one the mod gets to argue with. Off puts the old drawn pins back:
+        // as many as you like, none of them deletable.
+        bool realMarkers = true;
+
         // A copy of each pin on the minimap. Off, and this time for a reason
         // that is not a theory.
         //

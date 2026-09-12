@@ -121,6 +121,12 @@ namespace gs::mapicon
     bool PinNear(float x, float z, float radius);
     int PinCount();
 
+    // Record a place as taken. `drawn` says whether this pin is one of ours,
+    // drawn onto the map by the icon call, or a real marker the game owns and
+    // redraws itself. Only ours are put back when the map is rebuilt; putting
+    // the game's back would leave two icons on one spot.
+    void Remember(float x, float y, float z, const char* label, bool drawn);
+
     // The world map root the spy last saw a call on, or null. The tick uses
     // this when the scan has not located the object yet.
     void* LastWorldRoot();
