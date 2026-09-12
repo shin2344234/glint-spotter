@@ -110,6 +110,19 @@ bands, so that one number is usually enough to place the mistake.
 Set `Verbose=1` before a run if something is badly broken. It writes about a
 thousand lines a minute and stutters the frame, so turn it back off afterwards.
 
+## Discord and Patreon
+
+The Discord is [Shin234's Mods 'n Stuff](https://discord.gg/AZ2ztQYy74), for a
+quick question or to see what is being worked on before it ships. Bug reports
+still do the most good on the Nexus bugs tab, where they stay attached to the
+mod.
+
+Patreon is [patreon.com/cw/Shin234](https://www.patreon.com/cw/Shin234), from $3
+a month, with the posts at
+[patreon.com/cw/Shin234/posts](https://www.patreon.com/cw/Shin234/posts) because
+the new layout hides them. Public mods stay free and no update or fix goes
+behind a paid tier.
+
 ## Compatibility
 
 Built against Crimson Desert 2.02.00, executable 1.0.0.2850. A game patch moves
