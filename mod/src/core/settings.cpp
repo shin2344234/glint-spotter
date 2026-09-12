@@ -106,6 +106,9 @@ namespace
         fputs("; 1 hunts for live objects by scanning the heap. Eighteen seconds of\n", f);
         fputs("; stall and nothing the mod still needs; off.\n", f);
         fputs("Sweep=0\n", f);
+        fputs("; 1 walks the heap for the player component instead of waiting for the\n", f);
+        fputs("; actor manager. Ready sooner, at the cost of a freeze while it walks.\n", f);
+        fputs("Scan=0\n", f);
         fputs("; 1 turns the investigation output back on: the table dump as it loads,\n", f);
         fputs("; the string catalogue, the entity listing, the per-field probe. It is\n", f);
         fputs("; a thousand lines a minute and it stutters the frame.\n", f);
@@ -201,6 +204,10 @@ namespace gs::Settings
             else if (_stricmp(key, "Verbose") == 0)
             {
                 g_values.verbose = atoi(val) != 0;
+            }
+            else if (_stricmp(key, "Scan") == 0)
+            {
+                g_values.scan = atoi(val) != 0;
             }
             else if (_stricmp(key, "Sweep") == 0)
             {

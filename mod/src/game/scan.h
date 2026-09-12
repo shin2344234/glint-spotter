@@ -81,10 +81,13 @@ namespace gs::scan
         // it as a hitch the moment the mod comes alive, through several
         // sessions and several theories about what else it might be.
         //
-        // A millisecond of sleep every four megabytes turns a seventeen second
-        // freeze into a longer walk nobody notices. Zero disables it, for the
-        // self test, which reads six megabytes and should not pause at all.
-        size_t yieldEveryBytes = 4ull * 1024 * 1024;
+        // A millisecond every four megabytes was tried and made it worse:
+        // the walk took the same seventeen seconds of work and spread it over
+        // longer, so the hitch lasted longer at the same intensity. Whatever
+        // the game is contending for, it is not something a sleeping thread
+        // gives back. Off by default; the knob stays because the measurement
+        // was worth keeping and the next theory may want it.
+        size_t yieldEveryBytes = 0;
         uint32_t yieldMs = 1;
     };
 

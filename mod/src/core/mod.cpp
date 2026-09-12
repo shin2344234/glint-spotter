@@ -913,7 +913,7 @@ namespace
         // before the general sweep reached it.
         // Retried until it lands: the world may still be loading on the first
         // attempt, and a registry entry must never be taken for the player.
-        for (int attempt = 0; attempt < 120 && !g_stop.load(); ++attempt)
+        for (int attempt = 0; attempt < 900 && !g_stop.load(); ++attempt)
         {
             bool done = false;
 
@@ -975,7 +975,7 @@ namespace
                 slotOf[nn] = i;
                 ++nn;
             }
-            if (nn == 0 || done) goto afterFastPass;
+            if (nn == 0 || done || !gs::Settings::Get().scan) goto afterFastPass;
             {
             gs::scan::Options opt;
             opt.needleBytes = bytes;
@@ -1029,7 +1029,10 @@ namespace
             }
             afterFastPass:
             if (done) break;
-            if (attempt == 0) GS_LOG("no world yet, looking again in a second");
+            if (attempt == 0)
+                GS_LOG("no world yet. Waiting for the actor manager, which answers once the save "
+                       "has finished loading; set Scan=1 in the ini to walk the heap instead and "
+                       "be ready sooner at the cost of a freeze.");
             for (int i = 0; i < 2 && !g_stop.load(); ++i) Sleep(500);
         }
 

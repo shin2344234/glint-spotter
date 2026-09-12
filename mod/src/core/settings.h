@@ -27,6 +27,8 @@
 //   RayFallback=0 ; let a press that the table cannot answer guess from terrain
 //   Sweep=0       ; hunt for live objects by scanning the heap. Slow and no longer
 //                 ; needed; it is what stalls the game a few seconds after launch
+//   Scan=0        ; the same for the player's own component. Off: the actor manager
+//                 ; hands it over for nothing, a little later
 //   Verbose=0     ; the investigation output: the record dump, the catalogue, the
 //                 ; entity listing, the field probe. Off unless something is wrong
 //   PressReach=0  ; how far out a press will look, in metres. Zero means no limit
@@ -189,6 +191,24 @@ namespace gs::Settings
         // What stays on is what explains a decision: which placement was taken
         // and why, the sight line band by band on a press, and every pin.
         bool verbose = false;
+
+        // Whether to walk the heap looking for the player's own component.
+        //
+        // Off, and this is the freeze Seth has chased for six builds. It is
+        // not the logging, not the number of passes, not the timing, and not
+        // bandwidth: a millisecond of sleep every four megabytes made it last
+        // longer at the same intensity. Reading five gigabytes of another
+        // process's live heap is simply not something that can be made
+        // polite.
+        //
+        // The actor manager gives the same component away for nothing. It is
+        // slower to answer, because it has nothing to say until the save has
+        // finished loading and the entities have positions, which the logs put
+        // at sixty to seventy-five seconds after launch against the scan's
+        // forty. Thirty seconds later and no freeze is the better trade, and
+        // it is the trade this mod should have made when the manager route
+        // went in.
+        bool scan = false;
 
         // Whether to hunt for live objects by walking the heap.
         //
