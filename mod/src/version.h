@@ -2,5 +2,5 @@
 
 #define GS_VERSION_MAJOR 1
 #define GS_VERSION_MINOR 1
-#define GS_VERSION_PATCH 8
-#define GS_VERSION_STRING "1.1.8"
+#define GS_VERSION_PATCH 9
+#define GS_VERSION_STRING "1.1.9"

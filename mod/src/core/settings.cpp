@@ -197,12 +197,6 @@ namespace
         fputs("; nobody aims carefully during a flash, and a miss there is a glint lost.\n", f);
         fputs("AutoCone=2.0\n", f);
         fputs("\n", f);
-        fputs("; Seconds before Blinding Flash may mark something again after you take its\n", f);
-        fputs("; pin off the map. Without a wait it marks it again as soon as you close the\n", f);
-        fputs("; map, because the glint is still lit. A button press ignores the wait and\n", f);
-        fputs("; brings the pin back at once. 0 turns the wait off.\n", f);
-        fputs("RemarkAfter=30\n", f);
-        fputs("\n", f);
         fputs("; A ceiling in metres on how far out the automatic marker will reach. Zero\n", f);
         fputs("; means none, which once put a pin three kilometres away.\n", f);
         fputs("Reach=1500\n", f);
@@ -354,13 +348,6 @@ namespace gs::Settings
             {
                 GS_LOG("settings: Cone is gone. A press uses Rod, in metres, the same at every "
                        "distance; AutoCone still governs the flash.");
-            }
-            else if (_stricmp(key, "RemarkAfter") == 0)
-            {
-                const int s = atoi(val);
-                if (s >= 0 && s <= 86400) g_values.remarkAfterSec = s;
-                else GS_LOG_ERR("settings: RemarkAfter=%s is out of range, keeping %d "
-                                "seconds", val, g_values.remarkAfterSec);
             }
             else if (_stricmp(key, "AutoCone") == 0)
             {

@@ -213,74 +213,63 @@ namespace
         return false;
     }
 
-    // Places the player has taken a pin off.
+    // What the flash has already marked in this world.
     //
-    // The flash marks whatever is lit in front of it, and a glint stays lit.
-    // So taking its pin off the map and then looking that way again put the
-    // pin straight back, sometimes a few metres from where the old one stood,
-    // because the mod re-resolved the same target. That is the mod arguing
-    // with the player, and the player is right.
+    // The automatic marker used to have no memory at all. The only thing
+    // stopping it marking the same glint twice was a pin sitting on the map
+    // near that place, so deleting the pin erased the memory and the still lit
+    // glint was new again: it went back on within a second, and if the target
+    // resolved a few metres differently the second time, back on in the wrong
+    // place. The first attempt at a fix wrote down where a pin had been taken
+    // off and refused to mark near there for thirty seconds, which was the
+    // same mistake in the other direction, a stop bolted to the outside of the
+    // thing that was wrong inside.
     //
-    // Sixteen places, oldest dropped, kept for the session and across a load.
-    // Only the flash consults this. A button press is somebody asking for a
-    // pin there in as many words, and it clears the refusal.
-    struct Declined { float x = 0.0f, z = 0.0f; uint32_t ms = 0; };
-    constexpr int kDeclinedMax = 16;
-    Declined g_declined[kDeclinedMax];
-    int g_declinedN = 0;
-
-    // A refusal that never lapses is its own bug. Taking a pin off and then
-    // deliberately flashing at the thing again is somebody changing their
-    // mind, and the mod refused for the rest of the session. The ini says how
-    // long, thirty seconds by default, which outlasts closing the map and does
-    // not outlast wanting the pin back.
-    bool DeclinedNear(float x, float z, float radius)
+    // What was wrong inside is that a mark is about a thing, not a place. The
+    // flash marks a thing once per world. Deleting the pin does not enter into
+    // it, because deletion was never what the rule was about.
+    //
+    // Every candidate already carries an identity: nodes have the game's
+    // entity id, and placements out of the level table have a record and an
+    // element number. Two hundred and fifty six of them, which is more glints
+    // than one world holds, and cleared when a world is built.
+    struct MarkedThing
     {
-        const int secs = gs::Settings::Get().remarkAfterSec;
-        if (secs <= 0) return false;
-        const uint32_t window = static_cast<uint32_t>(secs) * 1000u;
-        const uint32_t now = GetTickCount();
-        for (int i = 0; i < g_declinedN; ++i)
+        uint32_t eid = 0;       // a node
+        uint32_t record = 0;    // or a level table placement
+        uint32_t element = 0;
+    };
+    constexpr int kMarkedMax = 256;
+    MarkedThing g_marked[kMarkedMax];
+    int g_markedN = 0;
+
+    bool AlreadyMarked(uint32_t eid, uint32_t record, uint32_t element)
+    {
+        for (int i = 0; i < g_markedN; ++i)
         {
-            if (now - g_declined[i].ms >= window) continue;
-            const float dx = g_declined[i].x - x, dz = g_declined[i].z - z;
-            if (dx * dx + dz * dz <= radius * radius) return true;
+            if (eid) { if (g_marked[i].eid == eid) return true; continue; }
+            if (!g_marked[i].eid && g_marked[i].record == record &&
+                g_marked[i].element == element)
+                return true;
         }
         return false;
     }
 
-    void Decline(float x, float z)
+    void RememberMarked(uint32_t eid, uint32_t record, uint32_t element)
     {
-        for (int i = 0; i < g_declinedN; ++i)
+        if (AlreadyMarked(eid, record, element)) return;
+        if (g_markedN >= kMarkedMax)
         {
-            const float dx = g_declined[i].x - x, dz = g_declined[i].z - z;
-            if (dx * dx + dz * dz <= 1.0f) { g_declined[i].ms = GetTickCount(); return; }
+            for (int i = 1; i < kMarkedMax; ++i) g_marked[i - 1] = g_marked[i];
+            g_markedN = kMarkedMax - 1;
         }
-        if (g_declinedN >= kDeclinedMax)
-        {
-            for (int i = 1; i < kDeclinedMax; ++i) g_declined[i - 1] = g_declined[i];
-            g_declinedN = kDeclinedMax - 1;
-        }
-        g_declined[g_declinedN].x = x;
-        g_declined[g_declinedN].z = z;
-        g_declined[g_declinedN].ms = GetTickCount();
-        ++g_declinedN;
+        g_marked[g_markedN].eid = eid;
+        g_marked[g_markedN].record = record;
+        g_marked[g_markedN].element = element;
+        ++g_markedN;
     }
 
-    void Undecline(float x, float z, float radius)
-    {
-        for (int i = 0; i < g_declinedN;)
-        {
-            const float dx = g_declined[i].x - x, dz = g_declined[i].z - z;
-            if (dx * dx + dz * dz <= radius * radius)
-            {
-                for (int j = i + 1; j < g_declinedN; ++j) g_declined[j - 1] = g_declined[j];
-                --g_declinedN;
-                continue;
-            }
-            ++i;
-        }
-    }
+    void ForgetMarked() { g_markedN = 0; }
 
     // A record the map's own user interface can see, and an icon keyed on it.
     // Everything that puts a pin on the map goes through here.
@@ -455,6 +444,9 @@ namespace
             gs::mapicon::RemoveIcon(root, old[i]);
         }
         if (oldN) GS_LOG("[pins] %d old pin(s) taken off first", oldN);
+        // A new world has its own entity ids and its own pins, so what the
+        // flash marked in the last one means nothing here.
+        ForgetMarked();
         gs::mapicon::ForgetAll();
         g_pendingN = 0;
         if (!gs::Settings::Get().keepPins) return;
@@ -504,7 +496,6 @@ namespace
         }
         PlacePin(root, tx, ty, tz, label);
         gs::pinstore::Add(tx, ty, tz, label);
-        Undecline(tx, tz, dedupe > 0.0f ? dedupe : 4.0f);
     }
 
     // The calibration is finished, and it passed. Session fifty-four put "Me"
@@ -699,12 +690,10 @@ namespace
     // pinning one should not refuse the next one along. Four.
     constexpr float kPinApart = 4.0f;
     int g_dupLogsLeft = 20;
-    // Its own small budget rather than the duplicate message's. Fourteen lines
-    // in four minutes was the first session with the refusal in it, and every
-    // one of those was spent out of the budget that says a thing is already
-    // pinned, which is the more useful of the two.
-    int g_declineLogsLeft = 4;
-    uint32_t g_declineLastMs = 0;
+    // Its own small budget rather than the duplicate message's, which is the
+    // more useful of the two and should not be spent by this one.
+    int g_markedLogsLeft = 4;
+    uint32_t g_markedLastMs = 0;
     int g_pinModelLogsLeft = 6;
     int g_losLogsLeft = 20;
     uint32_t g_losLastMs = 0;
@@ -975,34 +964,32 @@ namespace
                 held = gs::aim::DescribeTargets(eye, sayTargets);
             }
         }
-        // Somewhere a pin was taken off is not a candidate at all.
-        //
-        // Refusing at the end instead, which is what 1.1.4 did, let one
-        // declined thing stand in front of everything else: it won the pick
-        // every pass, was refused every pass, and the three second wait that
-        // came with the refusal meant nothing else could be pinned either. A
-        // whole session marked nothing.
-        int declinedSeen = 0;
+        // Something marked once is not a candidate again, so the next thing on
+        // the line gets its turn. Filtering here rather than refusing at the
+        // end matters: 1.1.4 refused at the end, and the thing it refused went
+        // on winning the pick every pass and taking the shared three second
+        // wait with it, so nothing else could be pinned either.
+        int markedSeen = 0;
         int pick = -1;
         for (int i = 0; i < n; ++i)
         {
-            if (DeclinedNear(around[i].x, around[i].z, kPinApart)) { ++declinedSeen; continue; }
+            if (AlreadyMarked(around[i].eid, 0, 0)) { ++markedSeen; continue; }
             pick = i;
             break;
         }
         float pickAngle = pick >= 0 ? angles[pick] : 0.0f;
         int tablePick = 0;
-        while (tablePick < tableN && DeclinedNear(table[tablePick].x, table[tablePick].z, kPinApart))
+        while (tablePick < tableN &&
+               AlreadyMarked(0, table[tablePick].record, table[tablePick].element))
         {
             ++tablePick;
-            ++declinedSeen;
+            ++markedSeen;
         }
         int glintPick = 0;
-        while (glintPick < glintN &&
-               DeclinedNear(glints[glintPick].x, glints[glintPick].z, kPinApart))
+        while (glintPick < glintN && AlreadyMarked(glints[glintPick].eid, 0, 0))
         {
             ++glintPick;
-            ++declinedSeen;
+            ++markedSeen;
         }
         // Seven degrees, because the table is complete and a wide cone over a
         // complete set just invites the wrong answer. At two hundred metres
@@ -1146,6 +1133,8 @@ namespace
             float x = 0, y = 0, z = 0;
             float angleDeg = 0;
             uint32_t eid = 0;
+            uint32_t record = 0;    // a level table placement, when eid is 0
+            uint32_t element = 0;
             const char* how = "";
             char name[64]{};
             bool valid = false;
@@ -1156,6 +1145,8 @@ namespace
             chosen.z = table[tablePick].z;
             chosen.angleDeg = 0.0f;
             chosen.eid = 0;
+            chosen.record = table[tablePick].record;
+            chosen.element = table[tablePick].element;
             chosen.how = "the game's own level gimmick table";
             _snprintf_s(chosen.name, sizeof(chosen.name), _TRUNCATE, "%s",
                         table[tablePick].name[0] ? table[tablePick].name
@@ -1284,17 +1275,16 @@ namespace
             GS_LOG("[auto] \"%s\" is already pinned; the map has it from earlier this session",
                    chosen.name);
         }
-        // Something was passed over for having had its pin taken off, and
-        // nothing else on the line could take its place. Said out loud,
-        // because a flash that does nothing and says nothing reads as broken.
-        if (!chosen.valid && declinedSeen > 0 && g_declineLogsLeft > 0 &&
-            now - g_declineLastMs > 10000)
+        // Everything on the line has been marked once already and there was
+        // nothing else to take. Said out loud, because a flash that does
+        // nothing and says nothing reads as broken.
+        if (!chosen.valid && markedSeen > 0 && g_markedLogsLeft > 0 &&
+            now - g_markedLastMs > 10000)
         {
-            --g_declineLogsLeft;
-            g_declineLastMs = now;
-            GS_LOG("[auto] the only thing on the line is one you took the pin off, so the flash "
-                   "leaves it alone for %d seconds. The button brings it back now.",
-                   gs::Settings::Get().remarkAfterSec);
+            --g_markedLogsLeft;
+            g_markedLastMs = now;
+            GS_LOG("[auto] everything on the line has been marked once already, and the flash "
+                   "marks a thing once. Press the button at it for another pin.");
         }
         if (matured && now >= g_cooldownUntil &&
             !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
@@ -1337,6 +1327,7 @@ namespace
                        chosen.how, std::fabs(north), north >= 0 ? "north" : "south",
                        std::fabs(east), east >= 0 ? "east" : "west");
             }
+            RememberMarked(chosen.eid, chosen.record, chosen.element);
             PlaceAt(chosen.x, chosen.y, chosen.z,
                     byTable ? "automatic, the game's own level gimmick table"
                             : byGlint ? "automatic, the node the game marked as a detect mode target"
@@ -1384,13 +1375,7 @@ namespace
             const bool known = gs::mapicon::Forget(retire[i], &gx, &gz);
             gs::realpin::Retire(retire[i]);
             gs::mapicon::RemoveIcon(gs::mapicon::LastWorldRoot(), retire[i]);
-            if (known)
-            {
-                gs::pinstore::Drop(gx, gz);
-                // And the flash is told to leave that place alone, or it puts
-                // the pin back the moment the same glint is in front of it.
-                Decline(gx, gz);
-            }
+            if (known) gs::pinstore::Drop(gx, gz);
         }
     }
 
