@@ -296,6 +296,20 @@ namespace gs::Settings
         // in memory, where a reload loses it.
         bool keepPins = true;
 
+        // Which of the map's marker pictures a pin uses.
+        //
+        // The game's create carries two bytes and the map draws from them. A
+        // marker placed the ordinary way is 4 and 14; the one Seth picked with
+        // Change Marker came through as 1 and 4, and that is the default here
+        // because it is the one he asked for.
+        //
+        // The create refuses anything from 14 up in the first and 15 up in the
+        // second, so those are the ranges. What each value looks like is not
+        // written down anywhere the mod can read, so the way to find another
+        // is to place one by hand and read the pair out of the log.
+        uint8_t pinStyle1 = 1;
+        uint8_t pinStyle2 = 4;
+
         // A copy of each pin on the minimap. Off, and this time for a reason
         // that is not a theory.
         //

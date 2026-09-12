@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "core/log.h"
+#include "core/settings.h"
 #include "game/pinmodel.h"
 #include "game/actors.h"
 #include "game/player.h"
@@ -31,7 +32,7 @@ namespace
 
     gs::inlinehook::Hook g_createHook;
     gs::inlinehook::Hook g_removeHook;
-    int g_spyLogsLeft = 30;
+    int g_spyLogsLeft = 200;
 
     // The object the game itself writes markers into, learned the first time
     // the player places one. Until then the mod has only the one hanging off
@@ -39,11 +40,6 @@ namespace
     std::atomic<uintptr_t> g_gameSub{0};
     bool g_saidWhose = false;
 
-    // The two style bytes the game passes. Read off its own call rather than
-    // guessed: four and fourteen. The create refuses anything from 0x0E and
-    // 0x0F up, so fourteen is the last value the second one accepts.
-    constexpr uint8_t kStyle1 = 4;
-    constexpr uint8_t kStyle2 = 14;
 
     uintptr_t g_base = 0;
     size_t g_size = 0;
@@ -251,8 +247,8 @@ namespace
         memcpy(record + 8, &x, 4);
         memcpy(record + 12, &y, 4);
         memcpy(record + 16, &z, 4);
-        record[20] = kStyle1;
-        record[21] = kStyle2;
+        record[20] = gs::Settings::Get().pinStyle1;
+        record[21] = gs::Settings::Get().pinStyle2;
         struct { const void* ptr; int32_t count; int32_t pad; } desc{record, 1, 0};
         int32_t err = -1;
 

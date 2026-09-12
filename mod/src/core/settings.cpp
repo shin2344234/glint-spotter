@@ -105,6 +105,12 @@ namespace
         fputs("; character sees the first one's pins.\n", f);
         fputs("KeepPins=1\n", f);
         fputs("\n", f);
+        fputs("; Which of the map's marker pictures a pin uses, as two numbers. 1,4 is the\n", f);
+        fputs("; one on the Change Marker list Seth picked; 4,14 is the plain marker you get\n", f);
+        fputs("; by default. The first is 0 to 13 and the second 0 to 14. To find another,\n", f);
+        fputs("; place one by hand with Change Marker and read the style pair out of the log.\n", f);
+        fputs("PinStyle=1,4\n", f);
+        fputs("\n", f);
         fputs("; ------------------------------------------------------------------ aiming\n", f);
         fputs("\n", f);
         fputs("; How far either side of the sight line a press looks, in metres, the same\n", f);
@@ -280,6 +286,23 @@ namespace gs::Settings
             else if (_stricmp(key, "KeepPins") == 0)
             {
                 g_values.keepPins = atoi(val) != 0;
+            }
+            else if (_stricmp(key, "PinStyle") == 0)
+            {
+                int a = -1, b = -1;
+                if (sscanf_s(val, "%d,%d", &a, &b) == 2 &&
+                    a >= 0 && a <= 13 && b >= 0 && b <= 14)
+                {
+                    g_values.pinStyle1 = static_cast<uint8_t>(a);
+                    g_values.pinStyle2 = static_cast<uint8_t>(b);
+                }
+                else
+                {
+                    GS_LOG_ERR("settings: PinStyle=%s is not two numbers in range (0 to 13, then "
+                               "0 to 14); keeping %u,%u", val,
+                               static_cast<unsigned>(g_values.pinStyle1),
+                               static_cast<unsigned>(g_values.pinStyle2));
+                }
             }
             else if (_stricmp(key, "MiniPin") == 0)
             {
