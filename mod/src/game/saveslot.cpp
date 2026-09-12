@@ -16,16 +16,36 @@ namespace
     using CreateFile2Fn = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, DWORD,
                                           LPCREATEFILE2_EXTENDED_PARAMETERS);
 
+    using ReadFileFn = BOOL(WINAPI*)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+
     CreateFileWFn g_realCreateFileW = nullptr;
     CreateFile2Fn g_realCreateFile2 = nullptr;
+    ReadFileFn g_realReadFile = nullptr;
 
-    // Sixteen is more save opens than can happen between two ticks: a load is
-    // one, a save is one, and the tick runs many times a second.
-    constexpr int kQueue = 16;
+    // The game opened all eight of this machine's saves inside one tick, so
+    // the queue holds far more than a load and a save now. It drains from the
+    // front and keeps what does not fit in the caller's buffer.
+    constexpr int kQueue = 64;
     std::mutex g_mutex;
     gs::saveslot::Event g_queue[kQueue];
     int g_queued = 0;
     bool g_dropped = false;
+
+    // Save files with a handle open, and how much of each has been read. Small
+    // and fixed: only save.save goes in, and an entry leaves as soon as it has
+    // read enough to count as a load.
+    struct Open
+    {
+        HANDLE handle = nullptr;
+        gs::saveslot::Id id;
+        uint64_t need = 0;    // bytes that make this a load rather than a look
+        uint64_t got = 0;
+        uint32_t since = 0;   // when it was opened, so it can be given up on
+    };
+    constexpr int kOpen = 16;
+    Open g_open[kOpen];
+    int g_openNext = 0;
+    std::atomic<int> g_tracked{0};   // read by every ReadFile in the game
 
     // A handful of lines about anything opened under the save folder that this
     // does not recognise. If the game ever writes through a temp file, or
@@ -112,13 +132,77 @@ namespace
                disposition == TRUNCATE_EXISTING;
     }
 
-    void Push(const gs::saveslot::Id& id, bool write)
+    // Called with the lock held.
+    void PushLocked(const gs::saveslot::Id& id, bool write, bool full)
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
         if (g_queued >= kQueue) { g_dropped = true; return; }
         g_queue[g_queued].id = id;
         g_queue[g_queued].write = write;
+        g_queue[g_queued].full = full;
         ++g_queued;
+    }
+
+    void Push(const gs::saveslot::Id& id, bool write, bool full)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        PushLocked(id, write, full);
+    }
+
+    // A handle on a save file, and the size that says it was loaded rather
+    // than glanced at. Half the file, which no header read comes near.
+    void Track(HANDLE h, const gs::saveslot::Id& id)
+    {
+        if (!h || h == INVALID_HANDLE_VALUE) return;
+        LARGE_INTEGER size{};
+        const uint64_t bytes = GetFileSizeEx(h, &size) && size.QuadPart > 0
+                                   ? static_cast<uint64_t>(size.QuadPart)
+                                   : 0;
+        std::lock_guard<std::mutex> lock(g_mutex);
+        Open& slot = g_open[g_openNext];
+        g_openNext = (g_openNext + 1) % kOpen;
+        slot.handle = h;
+        slot.id = id;
+        slot.need = bytes ? bytes / 2 : 256u * 1024u;
+        slot.got = 0;
+        slot.since = GetTickCount();
+        g_tracked.store(1);
+    }
+
+    // Handles that were opened, read a little of, and closed without this ever
+    // hearing about it. Left in the table they would keep the read counter
+    // switched on, and that counter sits in front of every read the game
+    // makes. Called from the tick, never from a detour.
+    void Expire()
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_tracked.load()) return;
+        const uint32_t now = GetTickCount();
+        bool any = false;
+        for (Open& slot : g_open)
+        {
+            if (!slot.handle) continue;
+            if (now - slot.since > 60000) slot.handle = nullptr;
+            else any = true;
+        }
+        if (!any) g_tracked.store(0);
+    }
+
+    void Counted(HANDLE h, DWORD bytes)
+    {
+        if (!bytes) return;
+        std::lock_guard<std::mutex> lock(g_mutex);
+        for (Open& slot : g_open)
+        {
+            if (slot.handle != h) continue;
+            slot.got += bytes;
+            if (slot.got < slot.need) return;
+            PushLocked(slot.id, false, true);
+            slot.handle = nullptr;   // said its piece
+            bool any = false;
+            for (const Open& o : g_open) any = any || o.handle != nullptr;
+            if (!any) g_tracked.store(0);
+            return;
+        }
     }
 
     // Writing a log line can open a file, and opening a file arrives back
@@ -129,7 +213,7 @@ namespace
     // The flag is set and cleared by hand rather than by a small object with a
     // destructor, because a destructor and __try cannot share a function. The
     // filter swallows everything, so the clear below is always reached.
-    void Note(LPCWSTR path, DWORD access, DWORD disposition)
+    void Note(LPCWSTR path, DWORD access, DWORD disposition, HANDLE opened)
     {
         if (!path || g_inside) return;
         g_inside = true;
@@ -137,7 +221,11 @@ namespace
         __try
         {
             if (Parse(path, &id))
-                Push(id, Writing(access, disposition));
+            {
+                const bool write = Writing(access, disposition);
+                Push(id, write, false);
+                if (!write) Track(opened, id);
+            }
             else if (g_oddLogsLeft.load() > 0 && TailIs(path, wcslen(path), L".save", 5))
             {
                 --g_oddLogsLeft;
@@ -151,19 +239,34 @@ namespace
         g_inside = false;
     }
 
+    // The path is looked at after the call, not before, because the handle is
+    // half the answer: what the game does with it is what says whether this is
+    // the save being loaded.
     HANDLE WINAPI DetourCreateFileW(LPCWSTR name, DWORD access, DWORD share,
                                     LPSECURITY_ATTRIBUTES sa, DWORD disposition, DWORD flags,
                                     HANDLE tmpl)
     {
-        Note(name, access, disposition);
-        return g_realCreateFileW(name, access, share, sa, disposition, flags, tmpl);
+        const HANDLE h = g_realCreateFileW(name, access, share, sa, disposition, flags, tmpl);
+        Note(name, access, disposition, h);
+        return h;
     }
 
     HANDLE WINAPI DetourCreateFile2(LPCWSTR name, DWORD access, DWORD share, DWORD disposition,
                                     LPCREATEFILE2_EXTENDED_PARAMETERS params)
     {
-        Note(name, access, disposition);
-        return g_realCreateFile2(name, access, share, disposition, params);
+        const HANDLE h = g_realCreateFile2(name, access, share, disposition, params);
+        Note(name, access, disposition, h);
+        return h;
+    }
+
+    // Every read the game makes comes through here, so the first thing it does
+    // is an atomic load that is zero whenever no save file is open, which is
+    // all of the time except the second or two around a load.
+    BOOL WINAPI DetourReadFile(HANDLE h, LPVOID buf, DWORD want, LPDWORD got, LPOVERLAPPED ov)
+    {
+        const BOOL ok = g_realReadFile(h, buf, want, got, ov);
+        if (ok && got && g_tracked.load()) Counted(h, *got);
+        return ok;
     }
 }
 
@@ -177,6 +280,8 @@ namespace gs::saveslot
                           reinterpret_cast<void**>(&g_realCreateFileW));
         gs::iathook::Swap("KERNEL32.dll", "CreateFile2", &DetourCreateFile2,
                           reinterpret_cast<void**>(&g_realCreateFile2));
+        gs::iathook::Swap("KERNEL32.dll", "ReadFile", &DetourReadFile,
+                          reinterpret_cast<void**>(&g_realReadFile));
 
         if (!g_realCreateFileW && !g_realCreateFile2)
         {
@@ -199,6 +304,12 @@ namespace gs::saveslot
         // unload that leaves the game running, which is not something an ASI
         // loader does on its own.
         void* mine = nullptr;
+        if (g_realReadFile)
+        {
+            gs::iathook::Swap("KERNEL32.dll", "ReadFile",
+                              reinterpret_cast<void*>(g_realReadFile), &mine);
+            g_realReadFile = nullptr;
+        }
         if (g_realCreateFileW)
         {
             gs::iathook::Swap("KERNEL32.dll", "CreateFileW",
@@ -215,15 +326,20 @@ namespace gs::saveslot
 
     int Take(Event* out, int n)
     {
+        Expire();
         std::lock_guard<std::mutex> lock(g_mutex);
-        int got = 0;
-        for (int i = 0; i < g_queued && got < n; ++i) out[got++] = g_queue[i];
         if (g_dropped)
         {
             g_dropped = false;
             GS_LOG_ERR("[save] more save opens arrived than the queue holds; one was missed");
         }
-        g_queued = 0;
+        int got = 0;
+        for (; got < g_queued && got < n; ++got) out[got] = g_queue[got];
+        // What did not fit stays, in order. The first build cleared the queue
+        // whatever it had handed over, and the game opening eight saves in one
+        // tick meant the one that mattered went in the half thrown away.
+        for (int i = got; i < g_queued; ++i) g_queue[i - got] = g_queue[i];
+        g_queued -= got;
         return got;
     }
 

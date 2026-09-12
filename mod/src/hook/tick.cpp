@@ -248,35 +248,44 @@ namespace
     // Everything it drew before that belongs to a map that no longer exists.
     std::atomic<bool> g_worldRebuilt{false};
 
-    // The last save read, held rather than acted on. Reading a save file is
-    // not quite the same as playing it: the load menu may well read one to
-    // draw a row. What settles it is the world being built afterwards, so the
-    // read waits here until that happens.
-    gs::saveslot::Id g_pendingLoad;
+    // The save the world about to appear will be, held rather than acted on
+    // until it does appear. Two of them: the one whose file was read through,
+    // which is a load, and the one merely opened, which is the game taking a
+    // look and only counts when nothing was read through.
+    gs::saveslot::Id g_pendingFull;
+    gs::saveslot::Id g_pendingPeek;
     bool g_everSawLoad = false;
 
     // What the file watch caught. A write is unambiguous, since the game only
     // writes the save being played, so that one is acted on where it lands.
     void PumpSaveEvents()
     {
-        gs::saveslot::Event ev[8];
-        const int n = gs::saveslot::Take(ev, 8);
-        for (int i = 0; i < n; ++i)
+        gs::saveslot::Event ev[16];
+        for (int round = 0; round < 8; ++round)
         {
-            char text[64]{};
-            gs::saveslot::Text(ev[i].id, text, sizeof(text));
-            if (ev[i].write)
+            const int n = gs::saveslot::Take(ev, 16);
+            for (int i = 0; i < n; ++i)
             {
-                GS_LOG("[save] the game wrote %s", text);
-                gs::pinstore::SavedTo(ev[i].id.account, ev[i].id.slot);
+                char text[64]{};
+                gs::saveslot::Text(ev[i].id, text, sizeof(text));
+                if (ev[i].write)
+                {
+                    GS_LOG("[save] the game wrote %s", text);
+                    gs::pinstore::SavedTo(ev[i].id.account, ev[i].id.slot);
+                }
+                else if (ev[i].full)
+                {
+                    GS_LOG_OK("[save] the game read the whole of %s, so it is loading it", text);
+                    g_pendingFull = ev[i].id;
+                    g_everSawLoad = true;
+                }
+                else
+                {
+                    GS_LOG("[save] the game opened %s", text);
+                    g_pendingPeek = ev[i].id;
+                }
             }
-            else
-            {
-                GS_LOG("[save] the game read %s; if a world follows, that is the save being "
-                       "played", text);
-                g_pendingLoad = ev[i].id;
-                g_everSawLoad = true;
-            }
+            if (n < 16) break;
         }
     }
 
@@ -343,13 +352,17 @@ namespace
         // front of it is a new game instead, which is only trusted once the
         // watch has proved it can see a load at all: a watch that sees nothing
         // would call every world a new game and hand each one an empty set.
-        if (g_pendingLoad.ok())
+        const gs::saveslot::Id chosen = g_pendingFull.ok() ? g_pendingFull : g_pendingPeek;
+        if (chosen.ok())
         {
             char text[64]{};
-            gs::saveslot::Text(g_pendingLoad, text, sizeof(text));
-            GS_LOG_OK("[save] the world is %s", text);
-            gs::pinstore::Loaded(g_pendingLoad.account, g_pendingLoad.slot);
-            g_pendingLoad = gs::saveslot::Id{};
+            gs::saveslot::Text(chosen, text, sizeof(text));
+            GS_LOG_OK("[save] the world is %s%s", text,
+                      g_pendingFull.ok() ? "" : ", going by which file was opened last, since "
+                                                "none was read through");
+            gs::pinstore::Loaded(chosen.account, chosen.slot);
+            g_pendingFull = gs::saveslot::Id{};
+            g_pendingPeek = gs::saveslot::Id{};
         }
         else if (g_everSawLoad)
         {

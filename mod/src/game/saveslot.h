@@ -20,6 +20,13 @@
 // lobby.save is deliberately ignored. The load menu reads every slot's lobby
 // file to draw the list, so treating those as loads would say the player is in
 // whichever save they scrolled past last.
+//
+// Opening save.save is not enough either. The first session with this watch
+// caught the game opening all eight of them a moment before a world appeared,
+// which is a look at each rather than a load of one. So the bytes are counted:
+// a handle that has read most of its file is a save being loaded, and a handle
+// that read a header is a save being looked at. The look is still reported, as
+// the answer of last resort for a build where the counting sees nothing.
 
 namespace gs::saveslot
 {
@@ -35,7 +42,8 @@ namespace gs::saveslot
     struct Event
     {
         Id id;
-        bool write = false;   // false: the game read this save, so it loaded it
+        bool write = false;   // the game is saving into this slot
+        bool full = false;    // it read the whole file, so it is loading it
     };
 
     // Point the file-open imports at the detour. False when the game does not
