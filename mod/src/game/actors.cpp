@@ -733,6 +733,13 @@ namespace gs::actors
     bool Ready() { return g_mgr.load() != 0; }
     uintptr_t Manager() { return g_mgr.load(); }
 
+    int Offered(uintptr_t* out, int n)
+    {
+        const uintptr_t mgr = g_mgr.load();
+        if (!mgr || !out || n <= 0) return 0;
+        return ReadPools(mgr, out, n);
+    }
+
     uint32_t Refresh(uint32_t nowMs)
     {
         const uintptr_t mgr = g_mgr.load();

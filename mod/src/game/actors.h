@@ -59,6 +59,16 @@ namespace gs::actors
     // not the game's. Returns how many entities the pools held this call.
     uint32_t Refresh(uint32_t nowMs);
 
+    // The manager's pools as they stand, entity pointers and nothing else.
+    //
+    // The set below is the useful view and it is also a filtered one: an entry
+    // only survives if its world position can be worked out, and that needs
+    // the player's position for the sub-level origin. So the set is empty
+    // exactly when the player is missing, which is exactly when something
+    // wants to go looking for him. This is the unfiltered read for that case.
+    // Returns how many pointers were written.
+    int Offered(uintptr_t* out, int n);
+
     // The accumulated set. Entries older than twelve seconds are dropped on
     // Refresh. `out` receives up to n entries; returns how many.
     int Snapshot(Entity* out, int n);

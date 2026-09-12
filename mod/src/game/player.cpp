@@ -41,9 +41,6 @@ namespace
     int g_describeLeft = 3;   // first few reads log the whole walk
     uint32_t g_lostAtMs = 0;  // when the player last stopped answering
     int g_recoverTriesLeft = 8;  // a fault costs one; run out and it stops
-    // The player's own entity id, from the marker list's owner and from
-    // every actor listing the mod has printed.
-    constexpr uint32_t kPlayerEid = 0xA0100001;
 
     uintptr_t Deref(uintptr_t at)
     {
@@ -136,47 +133,37 @@ namespace gs::player
         if (!g_lostAtMs) { g_lostAtMs = now; return false; }
         if (now - g_lostAtMs < 3000) return false;
 
-        gs::actors::Entity set[512];
-        const int n = gs::actors::Snapshot(set, 512);
+        // The pools rather than the set. The set only holds entities whose
+        // world position could be worked out, that needs the player, and the
+        // player is what this is looking for.
+        static uintptr_t pool[1536];
+        const int n = gs::actors::Offered(pool, 1536);
         uintptr_t found = 0;
-        uint32_t foundEid = 0;
+        int looked = 0;
 
         __try
         {
-            // Two passes over the same set. The player's own id first, since
-            // it is the entity that matters and looking at one object beats
-            // looking at five hundred; then the rest, in case that id ever
-            // changes.
-            for (int pass = 0; pass < 2 && !found; ++pass)
+            for (int i = 0; i < n && !found; ++i)
             {
-                for (int i = 0; i < n && !found; ++i)
+                const uintptr_t comps = Deref(pool[i] + kOff_Ent_Comps);
+                if (!comps) continue;
+                ++looked;
+                for (uintptr_t off = 0; off < kComps_SlotsEnd; off += 8)
                 {
-                    const bool isPlayerId = set[i].eid == kPlayerEid;
-                    if ((pass == 0) != isPlayerId) continue;
-                    // The set keeps an entity for twelve seconds after it was
-                    // last seen. After a load the old ones are freed memory.
-                    if (now - set[i].lastSeenMs > 1000) continue;
-
-                    const uintptr_t comps = Deref(set[i].ptr + kOff_Ent_Comps);
-                    if (!comps) continue;
-                    for (uintptr_t off = 0; off < kComps_SlotsEnd; off += 8)
-                    {
-                        const uintptr_t c = Deref(comps + off);
-                        if (!c) continue;
-                        const char* name = NameOf(c);
-                        if (!name || !strstr(name, "ClientSpecialModeActorComponent")) continue;
-                        // Tried where it stands. The frame thread reads the
-                        // stored one several times a second and must never see
-                        // a candidate that has not answered yet.
-                        float v[3]{}, w[7]{};
-                        uintptr_t actor = 0, tf = 0;
-                        uint32_t parent = 0;
-                        if (!Walk(c, v, w, &actor, &tf, &parent)) break;
-                        if (!std::isfinite(w[0]) || !std::isfinite(w[2])) break;
-                        found = c;
-                        foundEid = set[i].eid;
-                        break;
-                    }
+                    const uintptr_t c = Deref(comps + off);
+                    if (!c) continue;
+                    const char* name = NameOf(c);
+                    if (!name || !strstr(name, "ClientSpecialModeActorComponent")) continue;
+                    // Tried where it stands. The frame thread reads the stored
+                    // one several times a second and must never see a
+                    // candidate that has not answered yet.
+                    float v[3]{}, w[7]{};
+                    uintptr_t actor = 0, tf = 0;
+                    uint32_t parent = 0;
+                    if (!Walk(c, v, w, &actor, &tf, &parent)) break;
+                    if (!std::isfinite(w[0]) || !std::isfinite(w[2])) break;
+                    found = c;
+                    break;
                 }
             }
         }
@@ -197,9 +184,9 @@ namespace gs::player
         if (!found) return false;
         g_comp.store(reinterpret_cast<void*>(found));
         g_lostAtMs = 0;
-        GS_LOG_OK("[player] found again through the actor manager: eid %08X carries the special "
-                  "mode component at 0x%p, so the mod is back without a heap walk",
-                  foundEid, reinterpret_cast<void*>(found));
+        GS_LOG_OK("[player] found again through the actor manager: the special mode component is "
+                  "at 0x%p, %d of %d entities looked at, and no heap walk",
+                  reinterpret_cast<void*>(found), looked, n);
         return true;
     }
 
