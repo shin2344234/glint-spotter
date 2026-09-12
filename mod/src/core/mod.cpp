@@ -993,6 +993,36 @@ namespace
                 ++nn;
             }
             if (nn == 0 || done || !gs::Settings::Get().scan) goto afterFastPass;
+
+            // Not until there is a player to find.
+            //
+            // Session ninety-nine walked five gigabytes for fourteen seconds
+            // and found two special mode components, both of them belonging to
+            // a ClientChildOnlyInGameActor rather than the played body, so
+            // both were thrown away and the whole walk ran again sixteen
+            // seconds later. Thirty seconds of freeze to do one walk's worth
+            // of work, because the first one happened before the player was
+            // in the world.
+            //
+            // The camera says when he is, for nothing. It carries his position
+            // in world coordinates and the reader only reports that as valid
+            // when its two copies agree and land inside the map, which cannot
+            // happen before he exists. So the walk waits for it, and when it
+            // does run there is a right answer to find.
+            {
+                const gs::camera::Pose cam = gs::camera::Read();
+                if (!cam.valid || !cam.worldValid)
+                {
+                    static bool said = false;
+                    if (!said)
+                    {
+                        said = true;
+                        GS_LOG("the heap walk is waiting for the camera to report a world "
+                               "position, which is how it knows the player exists");
+                    }
+                    goto afterFastPass;
+                }
+            }
             {
             // The neighbourhood first.
             //
