@@ -80,9 +80,10 @@ Read these before you decide whether the build is for you.
   marker the mod placed, so the mod keeps its own list in `GlintSpotter.pins`
   beside the plugin and puts them back once you open the map. Nothing it does
   touches your save file, so uninstalling leaves nothing behind. Delete that
-  file to clear every pin at once. For now it is one file for the whole game
-  rather than one per save, so a second character sees the first one's pins.
-  Tying the pins to a specific save is being worked on.
+  file to clear every pin at once. Pins belong to the save you were in when you
+  dropped them: the mod watches which save file the game opens, so a second
+  character has its own. Saving into a slot you have never used before takes
+  that save's pins along with it.
 - **The game can freeze for a second or two shortly after a save loads.** The
   mod is searching memory for your character. It happens once per launch and
   everything works afterwards. Setting `Scan=0` removes it and stops Blinding

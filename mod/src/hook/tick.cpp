@@ -684,6 +684,12 @@ namespace
     // pinning one should not refuse the next one along. Four.
     constexpr float kPinApart = 4.0f;
     int g_dupLogsLeft = 20;
+    // Its own small budget rather than the duplicate message's. Fourteen lines
+    // in four minutes was the first session with the refusal in it, and every
+    // one of those was spent out of the budget that says a thing is already
+    // pinned, which is the more useful of the two.
+    int g_declineLogsLeft = 4;
+    uint32_t g_declineLastMs = 0;
     int g_pinModelLogsLeft = 6;
     int g_losLogsLeft = 20;
     uint32_t g_losLastMs = 0;
@@ -1202,10 +1208,10 @@ namespace
             DeclinedNear(chosen.x, chosen.z, kPinApart))
         {
             g_cooldownUntil = now + 3000;
-            if (g_dupLogsLeft > 0 && now - g_dupLastMs > 3000)
+            if (g_declineLogsLeft > 0 && now - g_declineLastMs > 10000)
             {
-                --g_dupLogsLeft;
-                g_dupLastMs = now;
+                --g_declineLogsLeft;
+                g_declineLastMs = now;
                 GS_LOG("[auto] you took the pin for \"%s\" off the map, so the flash leaves it "
                        "alone. Press the button at it to have it back.", chosen.name);
             }
