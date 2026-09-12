@@ -208,8 +208,8 @@ namespace
         fputs("\n", f);
         fputs("; ------------------------------------------------------------------ startup\n", f);
         fputs("\n", f);
-        fputs("; 1 walks the heap to find the player, which takes about fifteen seconds and\n", f);
-        fputs("; hitches the game once. 0 waits for the game to offer it instead, which is\n", f);
+        fputs("; 1 walks the heap to find the player, which can freeze the game for a second\n", f);
+        fputs("; or two, once per launch. 0 waits for the game to offer it instead, which is\n", f);
         fputs("; smoother but has never actually worked, so leave this on for now.\n", f);
         fputs("Scan=1\n", f);
         fputs("\n", f);

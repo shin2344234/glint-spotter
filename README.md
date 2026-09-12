@@ -81,10 +81,10 @@ Read these before you decide whether the build is for you.
   file to clear every pin at once. For now it is one file for the whole game
   rather than one per save, so a second character sees the first one's pins.
   Tying the pins to a specific save is being worked on.
-- **The game hitches once, for about fifteen seconds, shortly after a save
-  loads.** The mod is searching memory for your character. Everything works
-  afterwards. Setting `Scan=0` removes the hitch and stops Blinding Flash
-  marking anything, so it is not much of a trade yet.
+- **The game can freeze for a second or two shortly after a save loads.** The
+  mod is searching memory for your character. It happens once per launch and
+  everything works afterwards. Setting `Scan=0` removes it and stops Blinding
+  Flash marking anything, so it is not much of a trade.
 - **Loading a save from inside the game costs a few seconds.** Your pins, the
   press marker and the map buttons come back within a second or two. Blinding
   Flash takes longer, up to about half a minute, because the piece it needs is
