@@ -22,7 +22,8 @@
 //   MiniPin=0     ; also copy each pin onto the minimap. Crashed the game in
 //                 ; session eighty-two; leave it alone.
 //   Rumble=1      ; buzz the pad when a pin lands
-//   Cone=0.2      ; how many degrees off the crosshair a press will look
+//   Rod=1.0       ; metres either side of the sight line a press will look,
+//                 ; the same at every distance
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
 //                 ; may be and still count. Zero, the default, means none.
@@ -94,49 +95,29 @@ namespace gs::Settings
         uint16_t chord = 0x1300;
         uint32_t holdMs = 0;
 
-        // How wide a press looks, in degrees off the crosshair.
+        // How far either side of the sight line a press looks, in metres,
+        // the same at every distance. A rod, not a cone.
         //
-        // Seth's words: it does not need to be big at all, it can be very
-        // small to be extremely accurate. He is right, and the reason is that
-        // a press is not a search. He has the thing on his crosshair already
-        // and is asking the mod which one it is, so the only job left is to
-        // not answer with a neighbour.
+        // Seth's reasoning, and it is better than the four cones that came
+        // before it: a press fires the instant he asks, so it does not need
+        // the slack an automatic marker needs. An angle is slack that grows,
+        // and growing slack is the wrong shape here. A fifth of a degree is
+        // thirty-five centimetres at a hundred metres and three and a half at
+        // a kilometre, so every version of this has been most generous exactly
+        // where the table is densest and a wrong answer easiest to find. Every
+        // wrong pin this feature has produced landed further away than the
+        // thing he was pointing at, and that is why.
         //
-        // Two tenths of a degree turned out to be too fine, and in a way
-        // worth writing down, because it is the opposite failure to the one
-        // before it. Seth pointed at a building and the pin went through it
-        // and landed on a shop eighteen hundred metres beyond, nineteen
-        // hundredths of a degree off the line.
+        // A metre the whole way inverts it. Up close it is a wide angle and
+        // forgiving of a building whose origin is not where you aimed on it.
+        // At a kilometre it is three hundredths of a degree, so a distant
+        // thing has to be genuinely under the crosshair to win.
         //
-        // A tight angle is biased toward far things, and it has to be. The
-        // placement the table holds for a building is one point, its origin,
-        // and the part of the building a player aims at is metres away from
-        // that point. At four hundred metres a fifteen metre offset is two
-        // degrees, so the building itself never enters a cone of a fifth of a
-        // degree while something far away that happens to line up does.
-        // Nearest wins is the right rule and it cannot help if the near thing
-        // was never a candidate.
-        //
-        // Two tenths of a degree, and it has now been tried three ways.
-        //
-        // One and a half degrees marked the building Seth aimed at, but only
-        // once he had climbed it: from the ground the cone swept in the whole
-        // horizon behind it. Eighty-five hundredths was the halfway he asked
-        // for and it stopped hitting the things the needle hit. So the needle
-        // it is. He is the one aiming and he has been right about this from
-        // the first time he said it.
-        //
-        // Thirty-five centimetres at a hundred metres, three and a half at a
-        // kilometre. Its known cost is that a wide near object whose origin is
-        // metres from where you aim on it can be missed, and the log says so
-        // when it happens: a press that finds nothing prints the table's
-        // closest placement to the line with its angle, so the miss is
-        // visible rather than silent.
-        //
-        // The automatic search keeps its own wider cone. That one fires on its
-        // own during a flash with nobody aiming deliberately, and a miss there
-        // is a glint that never got marked.
-        float coneDeg = 0.2f;
+        // The automatic search keeps its cone. That one fires on its own
+        // during a flash with nobody aiming deliberately, often from the air
+        // where the crosshair sways, and a miss there is a glint that never
+        // got marked.
+        float rodMetres = 1.0f;
 
         // And the automatic one, which stays wide on Seth's instruction.
         //

@@ -1098,16 +1098,16 @@ extern "C" void gs_OnMinimapTick(void* self)
                 {
                     gs::lgso::Place sight[4];
                     float sightDist[4];
-                    // The ini's Cone, as an angle and nothing else.
+                    // A rod: the ini's Rod metres either side of the line, the
+                    // same at every distance, which is what a growth rate of
+                    // zero means here.
                     //
-                    // A metric floor is an enormous angle up close, which is
-                    // how session eighty pressed twice and took the same thing
-                    // eight metres away at seven and a half degrees off the
-                    // crosshair while Seth was pointing at something six
-                    // hundred metres out at half a degree. Ten centimetres is
-                    // a floor only against zero.
+                    // Every cone this feature tried was widest exactly where
+                    // the table is densest, and every wrong pin it ever placed
+                    // landed further away than the thing Seth was aiming at. A
+                    // constant radius is the shape that cannot do that.
                     //
-                    // Twenty-five metres is the closest a press will look. A
+                    // Twenty-five metres is still the closest a press looks. A
                     // map marker for something four paces away is not a thing
                     // anybody wants.
                     //
@@ -1116,11 +1116,10 @@ extern "C" void gs_OnMinimapTick(void* self)
                     // three kilometres out during a flash. A press is the
                     // player asking for a specific thing, and if he can see a
                     // tower across the map he can have it.
-                    const float coneFrac =
-                        std::tan(gs::Settings::Get().coneDeg * 3.14159265f / 180.0f);
                     const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oz,
                                                        sv.fx / flen, sv.fz / flen,
-                                                       0.1f, coneFrac, 25.0f, 1.0e9f,
+                                                       gs::Settings::Get().rodMetres, 0.0f,
+                                                       25.0f, 1.0e9f,
                                                        sight, sightDist, 4, true);
                     if (sn > 0)
                     {
@@ -1162,10 +1161,10 @@ extern "C" void gs_OnMinimapTick(void* self)
                         if (gs::lgso::NearestToLine(sv.ox, sv.oz, sv.fx / flen, sv.fz / flen,
                                                     1.0e9f, &miss, &missAlong, &missPerp,
                                                     &missRefused))
-                            GS_LOG("[mark] nothing inside %.2f degrees. The closest the table has to "
-                                   "the line is record %u element %u \"%s\" at (%.1f, %.1f, %.1f), "
+                            GS_LOG("[mark] nothing within %.2f metres of the line. The closest the "
+                                   "table has is record %u element %u \"%s\" at (%.1f, %.1f, %.1f), "
                                    "%.0f metres out, %.1f off the line, %.2f degrees",
-                                   gs::Settings::Get().coneDeg, miss.record, miss.element,
+                                   gs::Settings::Get().rodMetres, miss.record, miss.element,
                                    miss.name[0] ? miss.name : "unnamed", miss.x, miss.y, miss.z,
                                    missAlong, missPerp,
                                    std::atan2(missPerp, missAlong) * 57.2958f);

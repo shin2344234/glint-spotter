@@ -93,9 +93,10 @@ namespace
         fputs("MiniPin=0\n", f);
         fputs("; 1 buzzes the controller when a pin lands.\n", f);
         fputs("Rumble=1\n", f);
-        fputs("; How many degrees off the crosshair a press will look. Small is good:\n", f);
-        fputs("; a press is you telling the mod what you are already aiming at.\n", f);
-        fputs("Cone=0.2\n", f);
+        fputs("; How far either side of the sight line a press looks, in metres, the\n", f);
+        fputs("; same at every distance. A press fires when you ask, so it does not\n", f);
+        fputs("; need the slack that grows with range the automatic marker needs.\n", f);
+        fputs("Rod=1.0\n", f);
         fputs("; The same for the automatic glint marker. Wide on purpose: nobody is\n", f);
         fputs("; aiming carefully during a flash, and a miss there is a glint lost.\n", f);
         fputs("AutoCone=2.0\n", f);
@@ -170,12 +171,17 @@ namespace gs::Settings
                 if (bits) g_values.chord = bits;
                 else GS_LOG_ERR("settings: Chord=%s named no button I know, keeping the default", val);
             }
+            else if (_stricmp(key, "Rod") == 0)
+            {
+                const float r = static_cast<float>(atof(val));
+                if (r >= 0.05f && r <= 60.0f) g_values.rodMetres = r;
+                else GS_LOG_ERR("settings: Rod=%s is out of range, keeping %.2f metres",
+                                val, g_values.rodMetres);
+            }
             else if (_stricmp(key, "Cone") == 0)
             {
-                const float c = static_cast<float>(atof(val));
-                if (c >= 0.01f && c <= 30.0f) g_values.coneDeg = c;
-                else GS_LOG_ERR("settings: Cone=%s is out of range, keeping %.2f degrees",
-                                val, g_values.coneDeg);
+                GS_LOG("settings: Cone is gone. A press uses Rod, in metres, the same at every "
+                       "distance; AutoCone still governs the flash.");
             }
             else if (_stricmp(key, "AutoCone") == 0)
             {
@@ -230,8 +236,8 @@ namespace gs::Settings
         else
             GS_LOG("settings: no reach ceiling, Chord=0x%04X held %lu ms", g_values.chord,
                    static_cast<unsigned long>(g_values.holdMs));
-        GS_LOG("settings: Cone=%.2f degrees on a press, AutoCone=%.2f on the flash",
-               g_values.coneDeg, g_values.autoConeDeg);
+        GS_LOG("settings: Rod=%.2f metres on a press, AutoCone=%.2f degrees on the flash",
+               g_values.rodMetres, g_values.autoConeDeg);
         GS_LOG("settings: Kinds=%s", g_values.kinds);
         GS_LOG("settings: Mark=%s", g_values.mark);
         return g_values;
