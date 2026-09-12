@@ -602,6 +602,21 @@ namespace
     // the expensive outcome.
     void ScanFor()
     {
+        // Off unless the ini asks. This walk reads five gigabytes and takes
+        // eighteen seconds, and it runs again whenever something is still
+        // missing, which is the stall Seth gets shortly after the mod starts
+        // working. What it hunted were live instances of the detect mode
+        // classes, and that route was retired in 0.29.0 when the level gimmick
+        // table replaced it. Everything still in use arrives another way: the
+        // map roots from the spy and from RTTI, the player from the actor
+        // manager, the camera from its own vtable, the table from a fixed
+        // global.
+        if (!gs::Settings::Get().sweep)
+        {
+            static bool said = false;
+            if (!said) { said = true; GS_LOG("scan: Sweep=0, so the heap is not walked"); }
+            return;
+        }
         uintptr_t needles[kMaxClasses]{};
         size_t bytes[kMaxClasses]{};
         size_t slotOf[kMaxClasses]{};

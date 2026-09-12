@@ -3,33 +3,44 @@
 
 // The list the game draws its own map markers from.
 //
-// Read only in this build. The point is to find out whether the chain in
-// re-pinmarker-flow.md is right before anything writes down it, and there is
-// a clean way to tell: Seth has placed markers by hand, so the list should
-// come back holding them, at coordinates that match where he put them. A
-// wrong offset gives a count of nine million and floats that are not
-// positions, which is its own answer.
+// The chain and the layout are no longer guesses. Both were read straight off
+// the disassembly of the two functions that use them, and the arithmetic in
+// the Upsert prologue is unambiguous:
 //
-// If it reads, the mod can stop drawing icons nobody owns and put its pins in
-// here instead, where the game's own delete can reach them.
+//   movzx edi, r8b        ; the icon kind
+//   shl   rdi, 4          ; times sixteen
+//   add   rcx, 0xC8       ; the submodule
+//   add   rdi, rcx        ; the header for that kind
+//   mov   r8d, [rdi + 8]  ; how many
+//   mov   r9,  [rdi]      ; where
+//   lea   rdx, [rcx+rcx*2]
+//   cmp   [r9 + rdx*8], rsi   ; stride of twenty-four, id first
+//
+// and its caller in the network Ack reaches the submodule as
+// *(*(actor + 0x68) + 0x168), which is a ClientSelfContentsMiscActorComponent
+// at runtime.
+//
+// So this build stops hunting. Session eighty-nine spent five hundred and
+// eighty milliseconds per press sweeping memory for something whose address
+// was computable all along, on the thread drawing the frame, which is the
+// freeze Seth has been living with.
 
 namespace gs::pinmodel
 {
     // The submodule off the player, or zero.
     uintptr_t Submodule();
 
-    // Print the marker list for kind 0x15, and enough of its neighbourhood to
-    // spot the right offset if 0xC8 is wrong. Safe to call from the tick.
-    void LogState(const char* why);
+    struct List
+    {
+        uintptr_t header = 0;   // submodule + 0xC8 + kind * 16
+        uintptr_t data = 0;     // records, 24 bytes each
+        uint32_t count = 0;
+        bool ok = false;
+    };
 
-    // Hunt for the list by the coordinates it must contain.
-    //
-    // Session eighty found the submodule and it is real, a
-    // ClientSelfContentsMiscActorComponent, but no list inside it holds
-    // markers. Guessing further at offsets is the wrong game when the answer
-    // is already written down: the spy captured the game building Seth's own
-    // markers from its model, so their coordinates are known. A float that
-    // matches one of them, anywhere in that component or in anything it points
-    // at, is the list, and the bytes around it are the record layout.
-    void HuntByCoordinates(const char* why);
+    // Read one kind's list. Kind 0x15 is the player's own pin marker.
+    List Read(int kind);
+
+    // Print every kind's header, and the records of kind 0x15. Microseconds.
+    void LogState(const char* why);
 }

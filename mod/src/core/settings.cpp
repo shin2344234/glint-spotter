@@ -103,6 +103,9 @@ namespace
         fputs("; 1 lets a press the table cannot answer guess a spot from terrain.\n", f);
         fputs("; Off, because past eighty metres that guess is an extrapolation.\n", f);
         fputs("RayFallback=0\n", f);
+        fputs("; 1 hunts for live objects by scanning the heap. Eighteen seconds of\n", f);
+        fputs("; stall and nothing the mod still needs; off.\n", f);
+        fputs("Sweep=0\n", f);
         fputs("; The same for the automatic glint marker. Wide on purpose: nobody is\n", f);
         fputs("; aiming carefully during a flash, and a miss there is a glint lost.\n", f);
         fputs("AutoCone=2.0\n", f);
@@ -190,6 +193,10 @@ namespace gs::Settings
                 if (r == 0.0f || (r >= 50.0f && r <= 20000.0f)) g_values.pressReach = r;
                 else GS_LOG_ERR("settings: PressReach=%s is out of range, keeping %.0f",
                                 val, g_values.pressReach);
+            }
+            else if (_stricmp(key, "Sweep") == 0)
+            {
+                g_values.sweep = atoi(val) != 0;
             }
             else if (_stricmp(key, "RayFallback") == 0)
             {

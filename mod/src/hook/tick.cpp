@@ -441,7 +441,7 @@ namespace
     // pinning one should not refuse the next one along. Four.
     constexpr float kPinApart = 4.0f;
     int g_dupLogsLeft = 20;
-    int g_pinModelLogsLeft = 3;
+    int g_pinModelLogsLeft = 6;
     int g_losLogsLeft = 20;
     uint32_t g_losLastMs = 0;
     uint32_t g_dupLastMs = 0;
@@ -1235,6 +1235,9 @@ extern "C" void gs_OnMinimapTick(void* self)
         // Read only, and only a few times. Seth cannot delete the mod's pins
         // because they were never markers, and this is the first look at where
         // real ones live.
+        // Microseconds now: four hundred bytes of header reads at a computed
+        // offset, where session eighty-nine swept megabytes for five hundred
+        // and eighty milliseconds on this thread, once per press.
         if (g_pinModelLogsLeft > 0)
         {
             --g_pinModelLogsLeft;

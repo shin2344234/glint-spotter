@@ -25,6 +25,8 @@
 //   Rod=8.0       ; metres either side of the sight line a press will look,
 //                 ; the same at every distance
 //   RayFallback=0 ; let a press that the table cannot answer guess from terrain
+//   Sweep=0       ; hunt for live objects by scanning the heap. Slow and no longer
+//                 ; needed; it is what stalls the game a few seconds after launch
 //   PressReach=0  ; how far out a press will look, in metres. Zero means no limit
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
@@ -170,6 +172,17 @@ namespace gs::Settings
         // far placements that kept stealing presses have to be genuinely under
         // the crosshair, while the nearest one on the line still wins.
         float rodMetres = 8.0f;
+
+        // Whether to hunt for live objects by walking the heap.
+        //
+        // Off. It reads five gigabytes and takes eighteen seconds, twice, and
+        // that is the freeze Seth gets shortly after the mod starts working.
+        // It was how the mod found instances of the detect mode classes, and
+        // that route was retired in 0.29.0 when the level gimmick table
+        // replaced it. Everything the mod actually uses arrives another way:
+        // the map roots from the spy and from RTTI, the player from the actor
+        // manager, the camera from its vtable, the table from a fixed global.
+        bool sweep = false;
 
         // Whether a press that the table cannot answer may guess from terrain.
         //
