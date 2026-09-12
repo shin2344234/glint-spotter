@@ -102,6 +102,19 @@ namespace gs::mapicon
     // True when the game has rebuilt its icons since the last Repin.
     bool RepinWanted();
 
+    // Take every pin this mod placed back off the map.
+    //
+    // Through slot 171 on the same control that made them, with the same key
+    // each was made with. Returns how many were asked for. Must be called on
+    // the game's UI thread.
+    //
+    // This is the answer to the thing Seth has asked for since session
+    // eighty-two. His own markers are deletable because the game owns them;
+    // the mod's were not, because the mod drew them straight onto the control
+    // and nothing but the mod knew they existed. Nothing but the mod can take
+    // them off either, so it does.
+    int ClearMine(void* worldRoot);
+
     // True if the mod has already placed a pin within `radius` of (x, z).
     // The spec: one marker per area, never a second one on top of it.
     bool PinNear(float x, float z, float radius);

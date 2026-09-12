@@ -29,6 +29,23 @@ namespace gs::sig
     constexpr int kSlotUpdate     = 35;   // void __fastcall(this, float) on the world map
     constexpr int kSlotCreateIcon = 170;  // the map icon dispatcher
 
+    // And the slot next door, which takes one away.
+    //
+    // Found by following what the mod's own pins are made of. Slot 171 is
+    // 3476 bytes at RVA 0x00D308F0 and it calls 0x00D2FED0, which takes the
+    // root and a key, finds that key's bucket in the icon map at root+0x3B0,
+    // and moves the bucket's contents out from under it. Its prologue homes
+    // the same three arguments slot 170's does, in the same order:
+    //
+    //   mov dword ptr [rsp + 0x20], r9d   ; the fourth argument, a dword
+    //   mov qword ptr [rsp + 0x18], r8    ; the key, read as sixteen bytes
+    //   mov word ptr [rsp + 0x10], dx     ; the icon type, by value here
+    //
+    // So removing a pin is the same three values the mod already passes to
+    // create one, and the mod knows every key it has ever used.
+    constexpr int kSlotRemoveIcon = 171;
+    constexpr uintptr_t kRemoveIconBody = 0x00D308F0;
+
     // The alert system root, which owns every on-screen message the game
     // shows: toasts, region changes, item pickups, level ups.
     //

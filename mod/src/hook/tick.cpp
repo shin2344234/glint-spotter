@@ -21,6 +21,7 @@
 #include "game/dump.h"
 #include "game/physics.h"
 #include "game/pinmodel.h"
+#include "hook/pad.h"
 #include "core/settings.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
@@ -61,6 +62,7 @@ namespace
 
     // A mark asked for from another thread, placed here on the game's.
     std::atomic<bool> g_markPending{false};
+    std::atomic<bool> g_clearPending{false};
     float g_markX = 0, g_markZ = 0;
     char g_markLabel[48] = "GlintSpotter";
     std::atomic<void*> g_worldRoot{nullptr};
@@ -1036,6 +1038,11 @@ extern "C" void gs_OnMinimapTick(void* self)
     {
         g_lastRefreshTick = n;
         FlushPending();
+        if (g_clearPending.exchange(false))
+        {
+            const int n = gs::mapicon::ClearMine(gs::mapicon::LastWorldRoot());
+            if (gs::Settings::Get().rumble && n > 0) gs::pad::Buzz(20000, 400);
+        }
         // A map that has just been rebuilt has none of the mod's pins on it.
         if (gs::mapicon::RepinWanted()) gs::mapicon::Repin(gs::mapicon::LastWorldRoot());
         AutoMark(GetTickCount());
@@ -1497,6 +1504,11 @@ namespace gs::tick
     {
         for (Extra& e : g_extras)
             if (e.object.load() == object) e.object.store(nullptr);
+    }
+
+    void RequestClear()
+    {
+        g_clearPending.store(true);
     }
 
     void RequestMark(float x, float z, const char* label)

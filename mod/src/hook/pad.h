@@ -21,7 +21,9 @@ namespace gs::pad
     // input lasts that long by accident.
     //
     // Buttons are XINPUT_GAMEPAD_* bits.
-    bool ChordHeld(uint16_t buttons, uint32_t holdMs);
+    // `slot` picks which chord's press-and-hold state this is, so two
+    // chords can be watched without one swallowing the other's edge.
+    bool ChordHeld(uint16_t buttons, uint32_t holdMs, int slot = 0);
 
     // Buzz the pad for a moment. Safe from any thread: it records what it
     // wants and Pump, on the polling thread, makes the XInput call.

@@ -11,8 +11,9 @@ namespace
 {
     using GetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_STATE*);
     GetStateFn g_getState = nullptr;
-    uint32_t g_sinceMs = 0;    // when the chord went down, or zero
-    bool g_fired = false;      // this hold has already had its turn
+    constexpr int kChords = 2;
+    uint32_t g_sinceMs[kChords]{};   // when each chord went down, or zero
+    bool g_fired[kChords]{};         // this hold has already had its turn
     bool g_connected = false;
     std::atomic<uint32_t> g_buzzUntil{0};
     std::atomic<uint16_t> g_buzzStrength{0};
@@ -42,24 +43,25 @@ namespace gs::pad
         return false;
     }
 
-    bool ChordHeld(uint16_t buttons, uint32_t holdMs)
+    bool ChordHeld(uint16_t buttons, uint32_t holdMs, int slot)
     {
         if (!g_getState || !buttons) return false;
+        if (slot < 0 || slot >= kChords) return false;
         XINPUT_STATE st{};
         const DWORD rc = g_getState(0, &st);
         const bool was = g_connected;
         g_connected = rc == ERROR_SUCCESS;
         if (g_connected != was) GS_LOG("pad: controller %s", g_connected ? "connected" : "gone");
-        if (!g_connected) { g_sinceMs = 0; g_fired = false; return false; }
+        if (!g_connected) { g_sinceMs[slot] = 0; g_fired[slot] = false; return false; }
 
         const bool held = (st.Gamepad.wButtons & buttons) == buttons;
-        if (!held) { g_sinceMs = 0; g_fired = false; return false; }
+        if (!held) { g_sinceMs[slot] = 0; g_fired[slot] = false; return false; }
 
         const uint32_t now = GetTickCount();
-        if (!g_sinceMs) g_sinceMs = now ? now : 1;
-        if (g_fired) return false;
-        if (now - g_sinceMs < holdMs) return false;
-        g_fired = true;
+        if (!g_sinceMs[slot]) g_sinceMs[slot] = now ? now : 1;
+        if (g_fired[slot]) return false;
+        if (now - g_sinceMs[slot] < holdMs) return false;
+        g_fired[slot] = true;
         return true;
     }
 

@@ -528,6 +528,73 @@ namespace gs::mapicon
 
     int PinCount() { return g_placedN.load(); }
 
+    int ClearMine(void* worldRoot)
+    {
+        const int n = g_placedN.load();
+        if (n <= 0) { GS_LOG("[pin] there are no pins of ours to clear"); return 0; }
+        if (!RootLooksRight(worldRoot))
+        {
+            GS_LOG_ERR("[pin] no usable world map root, so %d pin(s) stay where they are", n);
+            return 0;
+        }
+
+        // The slot is read from the control's own vtable and checked against
+        // the body the analysis named, rebased. A slot holding anything else
+        // is a different build or somebody else's hook, and either way it does
+        // not get called with arguments guessed from this one.
+        using RemoveFn = void* (*)(void*, uint16_t, void*, uint32_t);
+        RemoveFn remove = nullptr;
+        __try
+        {
+            const auto* vt = *reinterpret_cast<void* const* const*>(worldRoot);
+            if (gs::rtti::Readable(vt + gs::sig::kSlotRemoveIcon, 8))
+            {
+                void* slot = vt[gs::sig::kSlotRemoveIcon];
+                const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+                if (reinterpret_cast<uintptr_t>(slot) == base + gs::sig::kRemoveIconBody)
+                    remove = reinterpret_cast<RemoveFn>(slot);
+                else
+                    GS_LOG_ERR("[pin] slot %d holds 0x%p, not the remove at +0x%08llX; nothing cleared",
+                               gs::sig::kSlotRemoveIcon, slot,
+                               static_cast<unsigned long long>(gs::sig::kRemoveIconBody));
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            remove = nullptr;
+        }
+        if (!remove) return 0;
+
+        int asked = 0;
+        for (int i = 0; i < n && i < kMaxPins; ++i)
+        {
+            // Both ids each pin has ever been given: the one it was created
+            // with and the one a repin would have used.
+            const int64_t ids[2] = {1000 + static_cast<int64_t>(i) + 1,
+                                    2000 + static_cast<int64_t>(i)};
+            for (int64_t id : ids)
+            {
+                uint16_t type = 0x0001;
+                struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{id, 0x15, {}};
+                __try
+                {
+                    remove(worldRoot, type, &key, 0);
+                    ++asked;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    GS_LOG_ERR("[pin] the remove faulted on key %lld; stopping",
+                               static_cast<long long>(id));
+                    g_placedN.store(0);
+                    return asked;
+                }
+            }
+        }
+        GS_LOG_OK("[pin] asked the map to drop %d key(s) for %d pin(s) of ours", asked, n);
+        g_placedN.store(0);
+        return asked;
+    }
+
     bool RepinWanted() { return g_repinWanted.load(); }
 
     void Repin(void* worldRoot)
