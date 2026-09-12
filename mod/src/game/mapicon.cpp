@@ -596,6 +596,17 @@ namespace gs::mapicon
             GS_LOG("[pin #%llu] minimap copy key=%lld returned 0x%p",
                    static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
         }
+        // Only a pin that exists. The game answering null means no icon was
+        // made, and remembering it anyway leaves the mod holding a pin nothing
+        // can see: the dedupe would refuse to place there again, and the count
+        // of live pins would sit above the count of records and read as a
+        // world that had been rebuilt.
+        if (!r)
+        {
+            GS_LOG_ERR("[pin #%llu] the game made no icon, so this pin is not written down",
+                       static_cast<unsigned long long>(n));
+            return nullptr;
+        }
         Remember(x, y, z, label, true, key.id);
         return r;
     }

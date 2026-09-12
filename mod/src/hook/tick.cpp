@@ -952,8 +952,13 @@ namespace
         // streamed, which never reached past about sixty-six metres, so a
         // glint a hundred and nineteen metres out could not be chosen no
         // matter how good the aim was.
-        gs::lgso::Place table[8];
-        float tableAngles[8];
+        // Thirty two rather than eight. The query hands back the nearest few
+        // along the line and nothing beyond them, so when the filter skips
+        // what this press has already settled it can run out of candidates
+        // while an eligible one sits just outside the answer. Room enough that
+        // it takes thirty two settled things on one bearing to do that.
+        gs::lgso::Place table[32];
+        float tableAngles[32];
         int tableN = 0;
 
         gs::actors::Entity around[8];
@@ -1003,7 +1008,7 @@ namespace
                                              v.fx / flen, v.fz / flen, v.fy / flen,
                                              8.0f, autoFrac, 25.0f,
                                              5.0f, reach > 0.0f ? reach : 1.0e9f,
-                                             table, tableAngles, 8);
+                                             table, tableAngles, 32);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
                 // the thing I am looking at.
