@@ -42,6 +42,12 @@ namespace gs::pinmodel
     // one; every other list belongs to something else and most are empty.
     List Read(int kind);
 
+    // The same, off an object given rather than found. The game keeps its
+    // markers in one of these hanging off something the mod's own actor
+    // search does not reach, so once that object is known every read has
+    // to go to it instead.
+    List ReadAt(uintptr_t submodule, int kind);
+
     // Which lists have anything in them. Microseconds.
     void LogState(const char* why);
 }

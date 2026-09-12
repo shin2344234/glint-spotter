@@ -93,11 +93,10 @@ namespace
         fputs("; moment, so this is usually the only thing that tells you it worked.\n", f);
         fputs("Rumble=1\n", f);
         fputs("\n", f);
-        fputs("; 1 also writes a record into the marker list hanging off your character.\n", f);
-        fputs("; It works and it changes nothing you can see: the marker you place by hand\n", f);
-        fputs("; does not live in that list, so the map and the delete key do not read it.\n", f);
-        fputs("; Left here because the writing is sound and something may yet read it.\n", f);
-        fputs("RealMarkers=0\n", f);
+        fputs("; 1 writes a real marker record for each mark, so the map's own Remove Marker\n", f);
+        fputs("; takes the pin away. The mod has to see you place one marker of your own\n", f);
+        fputs("; first: that is how it learns which object the game keeps markers in.\n", f);
+        fputs("RealMarkers=1\n", f);
         fputs("\n", f);
         fputs("; ------------------------------------------------------------------ aiming\n", f);
         fputs("\n", f);

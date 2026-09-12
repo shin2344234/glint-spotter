@@ -264,25 +264,19 @@ namespace gs::Settings
         // marker on the screen he is already looking at.
         bool rumble = true;
 
-        // Whether a mark also writes a record into the marker list on the
-        // player's component.
+        // Whether a mark writes a real marker record, so the map's own Remove
+        // Marker can take the pin away.
         //
-        // Off, and three sessions bought that answer. The record lands every
-        // time: the right position, an id the game chose, the list growing by
-        // one. It buys nothing. The marker the player places by hand does not
-        // go into that list at all, which its own id proves, since it came
-        // back as zero while the first three bits of that list's allocator
-        // were already taken by the mod. So the list is a separate feature,
-        // probably the networked one, and a record in it is not a marker the
-        // map or the delete key has ever heard of.
+        // On, and this is the whole feature. Session a hundred and six caught
+        // the game placing a marker of its own from inside the call: the same
+        // function the mod was calling, the same list, and a different object.
+        // The mod had been writing into a marker list hanging off the actor it
+        // found, and the game writes into one hanging off something else. Two
+        // lists of the same shape, and every session until now wrote to the
+        // empty one.
         //
-        // It also costs something. The ids start at zero, and zero is the key
-        // the game uses for the player's own marker, so a hand-placed marker
-        // replaces the mod's pin that shares the key.
-        //
-        // On is still there because the record itself is sound, and whatever
-        // finally reads that list will want it.
-        bool realMarkers = false;
+        // Off goes back to pins that are drawn and nothing more.
+        bool realMarkers = true;
 
         // A copy of each pin on the minimap. Off, and this time for a reason
         // that is not a theory.

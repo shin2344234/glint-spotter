@@ -47,10 +47,11 @@ namespace gs::pinmodel
         }
     }
 
-    List Read(int kind)
+    List Read(int kind) { return ReadAt(Submodule(), kind); }
+
+    List ReadAt(uintptr_t sub, int kind)
     {
         List out;
-        const uintptr_t sub = Submodule();
         if (!sub || kind < 0 || kind >= 64) return out;
         __try
         {

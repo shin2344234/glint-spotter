@@ -1,6 +1,7 @@
 #include "game/realpin.h"
 
 #include <Windows.h>
+#include <atomic>
 #include <intrin.h>
 #include <cstring>
 
@@ -24,6 +25,18 @@ namespace
     gs::inlinehook::Hook g_createHook;
     gs::inlinehook::Hook g_removeHook;
     int g_spyLogsLeft = 30;
+
+    // The object the game itself writes markers into, learned the first time
+    // the player places one. Until then the mod has only the one hanging off
+    // the actor it found, which is a different object and the wrong one.
+    std::atomic<uintptr_t> g_gameSub{0};
+    bool g_saidWhose = false;
+
+    // The two style bytes the game passes. Read off its own call rather than
+    // guessed: four and fourteen. The create refuses anything from 0x0E and
+    // 0x0F up, so fourteen is the last value the second one accepts.
+    constexpr uint8_t kStyle1 = 4;
+    constexpr uint8_t kStyle2 = 14;
 
     uintptr_t g_base = 0;
     size_t g_size = 0;
@@ -127,10 +140,15 @@ namespace
     // then that owner's first member, so both have to be there before the call
     // is worth making. The game never sees a null one; the mod might, half a
     // second after a load.
+    // Validate whichever object we are about to hand the create. The game's
+    // own, once seen, beats the one off the player every time.
     bool Chain(uintptr_t* outSub)
     {
-        const uintptr_t sub = gs::pinmodel::Submodule();
+        uintptr_t sub = g_gameSub.load();
+        if (!sub) sub = gs::pinmodel::Submodule();
         if (!sub) return false;
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(sub),
+                                gs::sig::kOff_Pin_Lists + 40 * 16)) return false;
         __try
         {
             const uintptr_t owner =
@@ -165,10 +183,17 @@ namespace
         }
     }
 
+    // The lists, off whichever object is in play.
+    gs::pinmodel::List ReadList(int kind)
+    {
+        const uintptr_t sub = g_gameSub.load();
+        return sub ? gs::pinmodel::ReadAt(sub, kind) : gs::pinmodel::Read(kind);
+    }
+
     // The last record, which is the one the create just appended.
     bool LastRecord(int64_t* id, float* x, float* z)
     {
-        const gs::pinmodel::List l = gs::pinmodel::Read(gs::sig::kPinListKind);
+        const gs::pinmodel::List l = ReadList(gs::sig::kPinListKind);
         if (!l.ok || l.count == 0) return false;
         __try
         {
@@ -202,16 +227,64 @@ namespace
     // and get out of the way. The object is the whole point. If it is not the
     // one the mod computes off the player, the mod has been writing to the
     // wrong list for four builds and the right one is one pointer away.
+    // Which actor, if any, owns a given marker list. Knowing that is how the
+    // bootstrap goes away: today the mod has to watch the player place one
+    // marker before it knows where to write, and an actor it can name is an
+    // actor it can find on its own next session.
+    void NameOwner(uintptr_t sub)
+    {
+        gs::actors::Entity set[512];
+        const int n = gs::actors::Snapshot(set, 512);
+        for (int i = 0; i < n; ++i)
+        {
+            __try
+            {
+                const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(
+                    set[i].ptr + gs::sig::kOff_Actor_Components);
+                if (comps < 0x10000) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(
+                        comps + gs::sig::kOff_Comp_PinSubmodule), 8)) continue;
+                if (*reinterpret_cast<const uintptr_t*>(comps + gs::sig::kOff_Comp_PinSubmodule) != sub)
+                    continue;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                continue;
+            }
+            GS_LOG_OK("[mspy]   that list belongs to eid %08X, actor 0x%p, which is in the set",
+                      set[i].eid, reinterpret_cast<void*>(set[i].ptr));
+            return;
+        }
+        GS_LOG("[mspy]   no actor in the set of %d owns that list, so whatever holds it is not "
+               "something the pools offer", n);
+    }
+
     void Say(const char* what, uintptr_t ret, uintptr_t sub)
     {
+        const uintptr_t mine = gs::pinmodel::Submodule();
+        if (sub >= 0x10000 && sub != mine) g_gameSub.store(sub);
         if (g_spyLogsLeft <= 0) return;
         --g_spyLogsLeft;
-        const uintptr_t mine = gs::pinmodel::Submodule();
         GS_LOG_OK("[mspy] the game called %s on 0x%p, from +0x%08llX. The mod's own submodule is "
                   "0x%p, so this is %s object.", what, reinterpret_cast<void*>(sub),
                   static_cast<unsigned long long>(ret > g_base ? ret - g_base : 0),
                   reinterpret_cast<void*>(mine),
                   (mine && mine == sub) ? "the same" : "a different");
+        if (!g_saidWhose)
+        {
+            g_saidWhose = true;
+            const char* cls = nullptr;
+            __try
+            {
+                cls = gs::rtti::VtableClassName(*reinterpret_cast<const void* const*>(sub));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            GS_LOG_OK("[mspy]   it is a %s, and every mark from here on writes into it",
+                      cls ? cls : "class with no readable name");
+            NameOwner(sub);
+        }
     }
 
     void DetourCreate(void* sub, void* unused, const float* pos, const uint8_t* b1,
@@ -285,14 +358,14 @@ namespace gs::realpin
         if (g_faultsLeft <= 0) { if (why) *why = kNoTries; return false; }
         uintptr_t sub = 0;
         if (!Chain(&sub)) { if (why) *why = kNoChain; return false; }
-        if (!ActorAllows()) { if (why) *why = kNoActor; return false; }
+        if (g_gameSub.load() == 0 && !ActorAllows()) { if (why) *why = kNoActor; return false; }
         if (why) *why = "";
         return true;
     }
 
     int Count()
     {
-        const gs::pinmodel::List l = gs::pinmodel::Read(gs::sig::kPinListKind);
+        const gs::pinmodel::List l = ReadList(gs::sig::kPinListKind);
         return l.ok ? static_cast<int>(l.count) : -1;
     }
 
@@ -314,11 +387,12 @@ namespace gs::realpin
         // one in the two argument slots these end up in. The create refuses
         // anything from 0x0E and 0x0F up, so both are well inside.
         float pos[3] = {x, 0.0f, z};
-        uint8_t b1 = 0, b2 = 1;
+        uint8_t b1 = kStyle1, b2 = kStyle2;
         const auto fn = reinterpret_cast<CreateFn>(g_base + gs::sig::kPinCreate);
 
-        GS_LOG("[real] asking the game for a marker at (%.1f, %.1f); it is holding %d",
-               x, z, before);
+        GS_LOG("[real] asking the game for a marker at (%.1f, %.1f) on 0x%p, %s; it is holding %d",
+               x, z, reinterpret_cast<void*>(sub),
+               g_gameSub.load() ? "the object the game uses" : "the one off the player", before);
         bool raised = false;
         g_faultCode = 0;
         g_faultAt = 0;
@@ -440,7 +514,7 @@ namespace gs::realpin
             GS_LOG("[real] %s: the game keeps %s markers here", why, online ? "500" : "15");
         for (int k = 0; k <= 1; ++k)
         {
-            const gs::pinmodel::List l = gs::pinmodel::Read(k);
+            const gs::pinmodel::List l = ReadList(k);
             if (!l.ok)
             {
                 GS_LOG("[real]   list %d does not read", k);
