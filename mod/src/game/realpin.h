@@ -58,6 +58,14 @@ namespace gs::realpin
     // removal instead. Call from the game's UI thread, drain, act.
     int TakeRetired(int64_t* out, int n);
 
+    // How many of the mod's own records the client copy still holds, or -1
+    // when it cannot be read. A world rebuilt underneath the pins shows up
+    // here as a number that has fallen.
+    int MineInList();
+
+    // The id every record the mod writes is at or above.
+    int64_t IdBase();
+
     // Erase one of the mod's records from the client copy. The icon is the
     // caller's business.
     bool Retire(int64_t id);

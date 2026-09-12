@@ -250,14 +250,34 @@ namespace
         static uintptr_t seen = 0;
         static uint32_t lastMs = 0;
         const uintptr_t sub = gs::pinmodel::Submodule();
-        if (!sub || sub == seen) return;
-        // Twenty seconds between restores. The pointer moving is meant to be a
-        // world being built, and if it ever moves for some other reason this
-        // keeps one flicker from putting a second copy of every pin on the map.
+        if (!sub) return;
+
+        // Two ways to know a world has been built. The marker copy sitting at
+        // an address the mod has not seen is the obvious one, and it catches a
+        // fresh launch because the process starts over. The other is the
+        // records going missing underneath pins that are still on the map,
+        // which is what loading a save without leaving the game does: session
+        // a hundred and fourteen did exactly that, the map threw away three
+        // hundred icons and built seven hundred and fifty, and the marker copy
+        // came back at the same address, so the first test saw nothing.
+        const bool fresh = sub != seen;
+        bool lost = false;
+        if (!fresh && gs::Settings::Get().realMarkers)
+        {
+            const int live = gs::mapicon::LivePinsAtOrAbove(gs::realpin::IdBase());
+            const int mine = gs::realpin::MineInList();
+            lost = live > 0 && mine >= 0 && mine < live;
+            if (lost)
+                GS_LOG("[pins] %d pin(s) on the map and %d record(s) left behind them, so the "
+                       "world has been rebuilt", live, mine);
+        }
+        if (!fresh && !lost) return;
+
+        // Twenty seconds between restores, so that whatever the cause, one bad
+        // reading cannot put a second copy of every pin on the map.
         const uint32_t now = GetTickCount();
         if (lastMs && now - lastMs < 20000) return;
         lastMs = now;
-        const bool first = seen == 0;
         seen = sub;
         gs::mapicon::ForgetAll();
         g_pendingN = 0;
@@ -267,7 +287,7 @@ namespace
         if (n == 0) return;
         for (int i = 0; i < n; ++i) QueuePin(saved[i].x, saved[i].y, saved[i].z, saved[i].label);
         GS_LOG_OK("[pins] %s; %d pin(s) from the file are queued and go on as soon as the map has "
-                  "been opened once", first ? "a world" : "a different world", n);
+                  "been opened once", fresh ? "a world" : "the world was rebuilt", n);
     }
 
     void PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp, float dedupe)

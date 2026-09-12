@@ -126,6 +126,10 @@ namespace gs::mapicon
     bool PinNear(float x, float z, float radius);
     int PinCount();
 
+    // How many pins are still on the map carrying a key at or above `minId`,
+    // which is how the mod counts the ones that have a record behind them.
+    int LivePinsAtOrAbove(int64_t minId);
+
     // Record a place as taken. `drawn` says whether this pin is one of ours,
     // drawn onto the map by the icon call, or a real marker the game owns and
     // redraws itself. Only ours are put back when the map is rebuilt; putting

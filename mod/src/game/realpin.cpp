@@ -478,6 +478,30 @@ namespace gs::realpin
         return true;
     }
 
+    int64_t IdBase() { return gs::sig::kModIdBase; }
+
+    int MineInList()
+    {
+        const gs::pinmodel::List l = ReadList(gs::sig::kPinListKind);
+        if (!l.ok) return -1;
+        int mine = 0;
+        __try
+        {
+            for (uint32_t i = 0; i < l.count; ++i)
+            {
+                int64_t id = 0;
+                memcpy(&id, reinterpret_cast<const uint8_t*>(l.data) +
+                                static_cast<size_t>(i) * gs::sig::kPinRecord, 8);
+                if (id >= gs::sig::kModIdBase) ++mine;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+        return mine;
+    }
+
     int TakeRetired(int64_t* out, int n)
     {
         int got = 0;

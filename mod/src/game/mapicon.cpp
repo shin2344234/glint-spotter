@@ -626,6 +626,15 @@ namespace gs::mapicon
 
     int PinCount() { return g_placedN.load(); }
 
+    int LivePinsAtOrAbove(int64_t minId)
+    {
+        const int n = g_placedN.load();
+        int live = 0;
+        for (int i = 0; i < n && i < kMaxPins; ++i)
+            if (!g_placed[i].gone && g_placed[i].id >= minId) ++live;
+        return live;
+    }
+
     int InstallRemoveSpy(uintptr_t worldVtable, uintptr_t miniVtable)
     {
         const uintptr_t vts[2] = {worldVtable, miniVtable};
