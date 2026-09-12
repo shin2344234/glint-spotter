@@ -180,10 +180,15 @@ namespace gs::pinstore
         // Start in a group that belongs to no save, so a pin dropped before
         // the game has loaded anything has somewhere to go, and so the pins
         // written before this feature existed are still waiting to be adopted
-        // however many launches later.
+        // however many launches later. The one with pins in it wins: an empty
+        // unattached group is just a spare, and picking the spare is what
+        // stranded the first session's pins in a group nothing could reach.
         g_cur = g_groups.size();
         for (size_t i = 0; i < g_groups.size(); ++i)
-            if (g_groups[i].slots.empty()) { g_cur = i; break; }
+            if (g_groups[i].slots.empty() && !g_groups[i].pins.empty()) { g_cur = i; break; }
+        if (g_cur == g_groups.size())
+            for (size_t i = 0; i < g_groups.size(); ++i)
+                if (g_groups[i].slots.empty()) { g_cur = i; break; }
         if (g_cur == g_groups.size()) g_groups.emplace_back();
 
         const size_t loose = g_groups[g_cur].pins.size();

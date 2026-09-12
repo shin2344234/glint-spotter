@@ -67,14 +67,18 @@ namespace
         return true;
     }
 
-    // ...\save\<digits>\slot<digits>\save.save, and nothing else.
+    // .../save/<digits>/slot<digits>/save.save, and nothing else. The game
+    // builds this path with forward slashes, which is what its own format
+    // string says and what the first session with this watch proved by
+    // matching nothing at all, so neither separator can be assumed.
     bool Parse(const wchar_t* path, gs::saveslot::Id* out)
     {
         const size_t len = wcslen(path);
-        if (!TailIs(path, len, L"\\save.save", 10)) return false;
+        if (!TailIs(path, len, L"save.save", 9)) return false;
 
         const wchar_t* file = Back(path, path + len);       // "save.save"
         if (file <= path) return false;
+        if (file != path + len - 9) return false;           // not "mysave.save"
         const wchar_t* slotDir = Back(path, file - 1);      // "slot<N>"
         const wchar_t* slotEnd = file - 1;
         if (slotEnd - slotDir < 5) return false;
@@ -134,10 +138,10 @@ namespace
         {
             if (Parse(path, &id))
                 Push(id, Writing(access, disposition));
-            else if (g_oddLogsLeft.load() > 0 && wcsstr(path, L"\\CD\\save\\"))
+            else if (g_oddLogsLeft.load() > 0 && TailIs(path, wcslen(path), L".save", 5))
             {
                 --g_oddLogsLeft;
-                GS_LOG("[save] something else under the save folder: %ls (access 0x%08lX, "
+                GS_LOG("[save] a .save file this does not recognise: %ls (access 0x%08lX, "
                        "disposition %lu)", path, access, disposition);
             }
         }

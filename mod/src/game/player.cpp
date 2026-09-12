@@ -268,7 +268,34 @@ namespace gs::player
         {
             g_actor.store(actor);
             gs::aim::SetPlayerActor(actor);
-            gs::aim::SetSpecialComponent(comp);
+        }
+        if (comp) gs::aim::SetSpecialComponent(comp);
+
+        // Look through the actor's components once per actor, and again every
+        // second while the flash's own component is still missing.
+        //
+        // The test here used to be the actor pointer changing. The recovery
+        // through the actor manager stores that pointer itself, so after a
+        // recovery this never ran: the flash spent the rest of the session
+        // with no detect component and marked nothing, which is what happened
+        // in the first 1.1.0 session from the moment the world loaded.
+        static std::atomic<uintptr_t> g_scannedActor{0};
+        static std::atomic<uint32_t> g_scannedMs{0};
+        const uint32_t nowMs = GetTickCount();
+        const bool actorIsNew = g_scannedActor.load() != actor;
+        const bool stillMissing = g_detect.load() == 0;
+        if (actorIsNew || (stillMissing && nowMs - g_scannedMs.load() > 1000))
+        {
+            g_scannedActor.store(actor);
+            g_scannedMs.store(nowMs);
+            // A new actor means the old world's components are gone, so the
+            // one held is dropped before looking rather than kept as a
+            // pointer into whatever the game has put there since.
+            if (actorIsNew)
+            {
+                g_detect.store(0);
+                gs::aim::SetDetectComponent(0);
+            }
             // The flash's own component sits in the same block. Found by
             // name, because slots can move between patches and names do not.
             const uintptr_t comps = Deref(actor + kOff_Ent_Comps);
