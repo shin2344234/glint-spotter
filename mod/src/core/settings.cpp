@@ -96,7 +96,7 @@ namespace
         fputs("; How far either side of the sight line a press looks, in metres, the\n", f);
         fputs("; same at every distance. A press fires when you ask, so it does not\n", f);
         fputs("; need the slack that grows with range the automatic marker needs.\n", f);
-        fputs("Rod=0.35\n", f);
+        fputs("Rod=5.0\n", f);
         fputs("; 1 lets a press the table cannot answer guess a spot from terrain.\n", f);
         fputs("; Off, because past eighty metres that guess is an extrapolation.\n", f);
         fputs("RayFallback=0\n", f);

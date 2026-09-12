@@ -22,7 +22,7 @@
 //   MiniPin=0     ; also copy each pin onto the minimap. Crashed the game in
 //                 ; session eighty-two; leave it alone.
 //   Rumble=1      ; buzz the pad when a pin lands
-//   Rod=0.35      ; metres either side of the sight line a press will look,
+//   Rod=5.0       ; metres either side of the sight line a press will look,
 //                 ; the same at every distance
 //   RayFallback=0 ; let a press that the table cannot answer guess from terrain
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
@@ -118,9 +118,26 @@ namespace gs::Settings
         // during a flash with nobody aiming deliberately, often from the air
         // where the crosshair sways, and a miss there is a glint that never
         // got marked.
-        // Thirty-five centimetres: the needle's width at a hundred metres,
-        // held at every distance, which is what Seth asked for.
-        float rodMetres = 0.35f;
+        // Five metres, and this one is arithmetic rather than another guess.
+        //
+        // Seth says the things he was missing sat between three hundred and
+        // five hundred metres out, and past five hundred. Thirty-five
+        // centimetres at four hundred metres is five hundredths of a degree.
+        // Nobody aims that well, on a controller, in the air, and the once it
+        // hit exactly was luck. A rod that narrow can only work at the ranges
+        // where it is a wide angle, which is the twenty-five metres a press
+        // refuses to look at anyway.
+        //
+        // So the width has to come from how steadily a hand holds a crosshair,
+        // and that is somewhere around half a degree. At four hundred metres
+        // half a degree is three and a half, at five hundred four and a half,
+        // so five metres covers the range he actually works at.
+        //
+        // The rod shape is still the point and it still does the work. Five
+        // metres at sixteen hundred is eighteen hundredths of a degree, so the
+        // far placements that kept stealing presses have to be genuinely under
+        // the crosshair, while the nearest one on the line still wins.
+        float rodMetres = 5.0f;
 
         // Whether a press that the table cannot answer may guess from terrain.
         //
