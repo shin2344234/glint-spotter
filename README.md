@@ -2,7 +2,7 @@
 
 Puts a map marker on the thing you are looking at, in Crimson Desert 2.02.00.
 
-Aim the blinding flash at a glint and the mod pins the object the flash is
+Aim blinding flash at a glint and the mod pins the object it is
 lighting, out to the range you can actually see one. Or point at anything at
 all and press a button, and it pins that instead. The pin lands on the world
 map where the thing stands, so you can walk away and come back to it.
@@ -11,7 +11,7 @@ This is a test build. Read the limitations before you install it.
 
 ## What it does
 
-- **Marks a glint automatically.** Hold the blinding flash with a glint on your
+- **Marks a glint automatically.** Hold blinding flash with a glint on your
   crosshair and a pin appears where it is, once the crosshair has held it for a
   second. Distance is not the limit it used to be: a glint six hundred metres
   out marks as readily as one at twenty.
@@ -40,7 +40,7 @@ while it does. That is a known problem, see below.
 
 Both triggers do the same thing, and it is worth knowing which one you want.
 
-**The blinding flash** marks glints and only glints. Use it, put the
+**Blinding flash** marks glints and only glints. Use it, put the
 crosshair on the glint, and hold it there for about a second. The pad buzzes
 when the pin lands. It is deliberately generous about aim, because nobody holds
 a crosshair still while flying.
@@ -52,8 +52,8 @@ the line the nearest thing was, and `Rod` in the ini is that number.
 
 Everything is in `GlintSpotter.ini` beside the plugin, and every key has a
 comment saying what it does. The two worth knowing are `Rod`, which is how
-precisely a press has to be aimed, and `Kinds`, which is what the flash is
-willing to mark.
+precisely a press has to be aimed, and `Kinds`, which is what blinding flash
+is willing to mark.
 
 ## Limitations
 
@@ -65,7 +65,7 @@ Read these before you decide whether the build is for you.
   thing being worked on.
 - **The game hitches once, for about fifteen seconds, shortly after a save
   loads.** The mod is searching memory for your character. Everything works
-  afterwards. Setting `Scan=0` removes the hitch and stops the flash from
+  afterwards. Setting `Scan=0` removes the hitch and stops blinding flash
   marking anything, so it is not much of a trade yet.
 - **A press can mark the wrong thing.** It picks the nearest object in the
   table that your sight line passes near, and if what you are pointing at is not

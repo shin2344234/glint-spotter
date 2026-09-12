@@ -114,8 +114,8 @@ namespace
         fputs("\n", f);
         fputs("; What the automatic marker will pin, matched anywhere in the name of the\n", f);
         fputs("; thing, case insensitive. Empty accepts anything that is not a level chunk.\n", f);
-        fputs("; Widen it if the blinding flash finds things it will not mark, narrow it if\n", f);
-        fputs("; it marks things you do not want. Every candidate is named in the log.\n", f);
+        fputs("; Widen it if blinding flash finds things it will not mark, narrow it if it\n", f);
+        fputs("; marks things you do not want. Every candidate is named in the log.\n", f);
         fputs("Kinds=vein_,challenge,mission,artifact,treasure,relic,clue,visione,titan,puzzle,standstone,socket\n", f);
         fputs("\n", f);
         fputs("; ------------------------------------------------------------------ startup\n", f);
