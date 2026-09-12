@@ -20,6 +20,10 @@ namespace
 
     gs::vtable::Swap g_swap[2];
     CreateFn g_orig[2] = {nullptr, nullptr};
+    gs::vtable::Swap g_rmSwap[2];
+    CreateFn g_rmOrig[2] = {nullptr, nullptr};
+    std::atomic<uint64_t> g_rmSeen[2];
+    int g_rmLogsLeft = 24;
 
     std::atomic<uint64_t> g_seen[2];
     std::mutex g_lastMutex;
@@ -335,6 +339,76 @@ namespace
                   static_cast<unsigned long long>(n), result);
     }
 
+    // Slot 171, watched and forwarded unchanged.
+    //
+    // Its prologue homes a dword, a sixteen byte key and a word, in the same
+    // order slot 170 homes its first three, so the reader below prints them
+    // that way. Everything is forwarded regardless, so a wrong reading costs a
+    // confusing log line and nothing else.
+    void RecordRemove(int surface, void* const* a, uintptr_t ret)
+    {
+        const uint64_t n = ++g_rmSeen[surface];
+        if (g_rmLogsLeft <= 0) return;
+        --g_rmLogsLeft;
+        __try
+        {
+            const uint16_t type = static_cast<uint16_t>(reinterpret_cast<uintptr_t>(a[1]));
+            const uint32_t d4 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(a[3]));
+            int64_t id = 0; uint8_t kind = 0;
+            bool keyOk = false;
+            if (a[2] && gs::rtti::Readable(a[2], 16))
+            {
+                memcpy(&id, a[2], 8);
+                memcpy(&kind, static_cast<const uint8_t*>(a[2]) + 8, 1);
+                keyOk = true;
+            }
+            const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+            GS_LOG("[rmspy %s #%llu] this=0x%p type=0x%04X key=%lld/0x%02X dword4=%u, called from "
+                   "+0x%08llX", surface == 0 ? "world" : "mini",
+                   static_cast<unsigned long long>(n), a[0], type,
+                   keyOk ? static_cast<long long>(id) : -1, kind, d4,
+                   static_cast<unsigned long long>(ret > base ? ret - base : 0));
+            GS_LOG("[rmspy]   raw: %p %p %p %p %p %p", a[0], a[1], a[2], a[3], a[4], a[5]);
+
+            void* frames[8]{};
+            const USHORT got = RtlCaptureStackBackTrace(1, 8, frames, nullptr);
+            char line[300];
+            int w = 0;
+            for (USHORT f = 0; f < got && w + 20 < static_cast<int>(sizeof(line)); ++f)
+            {
+                const uintptr_t x = reinterpret_cast<uintptr_t>(frames[f]);
+                const int k = (x > base && x - base < 0x18000000)
+                    ? _snprintf_s(line + w, sizeof(line) - w, _TRUNCATE, " +%llX",
+                                  static_cast<unsigned long long>(x - base))
+                    : _snprintf_s(line + w, sizeof(line) - w, _TRUNCATE, " [%p]", frames[f]);
+                if (k < 0) break;
+                w += k;
+            }
+            line[w] = 0;
+            GS_LOG("[rmspy]   frames:%s", line);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            GS_LOG_ERR("[rmspy] a read faulted describing a removal; the call itself is untouched");
+        }
+    }
+
+    void* DetourRemoveWorld(void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* a7,
+                            void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
+    {
+        void* const a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
+        RecordRemove(0, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        return g_rmOrig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+    }
+
+    void* DetourRemoveMini(void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* a7,
+                           void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
+    {
+        void* const a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
+        RecordRemove(1, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        return g_rmOrig[1](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+    }
+
     void* DetourWorld(void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* a7,
                       void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
     {
@@ -527,6 +601,30 @@ namespace gs::mapicon
     }
 
     int PinCount() { return g_placedN.load(); }
+
+    int InstallRemoveSpy(uintptr_t worldVtable, uintptr_t miniVtable)
+    {
+        const uintptr_t vts[2] = {worldVtable, miniVtable};
+        int n = 0;
+        for (int i = 0; i < 2; ++i)
+        {
+            if (!vts[i]) continue;
+            void* replacement = i == 0 ? reinterpret_cast<void*>(&DetourRemoveWorld)
+                                       : reinterpret_cast<void*>(&DetourRemoveMini);
+            if (!gs::vtable::Install(vts[i], gs::sig::kSlotRemoveIcon, replacement, g_rmSwap[i]))
+            {
+                GS_LOG_ERR("[rmspy] could not take slot %d on surface %d",
+                           gs::sig::kSlotRemoveIcon, i);
+                continue;
+            }
+            g_rmOrig[i] = reinterpret_cast<CreateFn>(g_rmSwap[i].original);
+            ++n;
+        }
+        if (n) GS_LOG_OK("[rmspy] slot %d taken on %d surface(s). Delete a marker on the map and "
+                         "the log says exactly what the game asked for.",
+                         gs::sig::kSlotRemoveIcon, n);
+        return n;
+    }
 
     int ClearMine(void* worldRoot)
     {

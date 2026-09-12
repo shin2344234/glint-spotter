@@ -880,6 +880,7 @@ namespace
         if (cfg.spy)
         {
             const int n = gs::mapicon::InstallSpy(g_worldVt, g_miniVt);
+            gs::mapicon::InstallRemoveSpy(g_worldVt, g_miniVt);
             GS_LOG("spy: %d of 2 slots taken. Open the map and every icon the game creates is logged.", n);
         }
         else

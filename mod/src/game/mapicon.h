@@ -56,6 +56,20 @@ namespace gs::mapicon
     // Swap slot 170 on both vtables. Both must be RTTI-verified before this is
     // called. Returns how many of the two were installed.
     int InstallSpy(uintptr_t worldVtable, uintptr_t miniVtable);
+
+    // And a spy on slot 171, the remove.
+    //
+    // Seth wants the map's own delete key to take the mod's pins off, the way
+    // it takes his own markers off. That cannot work while the mod's pins are
+    // only icons: the game deletes what it knows about, and it does not know
+    // about them.
+    //
+    // So the question is what the game does when he presses delete, and the
+    // cheapest way to find out is to watch. Slot 171 is where a removal has to
+    // end up, whatever decided on it. One deletion of one of his own markers
+    // prints the key the game used, the arguments beside it, and the stack
+    // above it, which is the same trick that found the create.
+    int InstallRemoveSpy(uintptr_t worldVtable, uintptr_t miniVtable);
     void RemoveSpy();
 
     // Counts and the most recent capture per surface, for the hotkey dry run.
