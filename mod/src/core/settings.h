@@ -201,14 +201,19 @@ namespace gs::Settings
         // process's live heap is simply not something that can be made
         // polite.
         //
-        // The actor manager gives the same component away for nothing. It is
-        // slower to answer, because it has nothing to say until the save has
-        // finished loading and the entities have positions, which the logs put
-        // at sixty to seventy-five seconds after launch against the scan's
-        // forty. Thirty seconds later and no freeze is the better trade, and
-        // it is the trade this mod should have made when the manager route
-        // went in.
-        bool scan = false;
+        // On, and I was wrong to turn it off. The claim was that the actor
+        // manager hands the same component over for nothing, only later. The
+        // manager does find the player and the mod uses it for the entity set,
+        // but it has never once produced this component: no session in the log
+        // has ever printed the line it would print, and switching the walk off
+        // meant the flash marked nothing at all.
+        //
+        // So the freeze stays until something better is found, because a mod
+        // that freezes once and then works beats a mod that never does. What
+        // is new is that the walk now looks in the regions holding objects we
+        // already have before it looks at everything, which may end it in
+        // milliseconds.
+        bool scan = true;
 
         // Whether to hunt for live objects by walking the heap.
         //

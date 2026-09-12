@@ -917,6 +917,23 @@ namespace
         {
             bool done = false;
 
+            // The level gimmick table, which is what a press actually reads.
+            //
+            // It hung off the end of this loop until 0.50.1, which was fine
+            // while the loop always finished in forty seconds. With the heap
+            // walk switched off the loop can wait minutes, and session
+            // ninety-eight is the result: the camera gave a press a perfect
+            // position, and the press had nothing to look in. Nothing was
+            // marked all session.
+            //
+            // The table needs a module global and nothing else. It has no
+            // business waiting for the player.
+            if (gs::lgso::Count() == 0 && gs::lgso::Load() > 0 && gs::Settings::Get().verbose)
+            {
+                gs::lgso::LogKinds();
+                gs::lgso::LogCatalog(40, 64);
+            }
+
             // The manager knows where the player is, and it costs nothing to
             // ask. Session forty-seven spent forty-seven seconds before the
             // first pin was possible, nearly all of it in two heap scans of
@@ -977,6 +994,54 @@ namespace
             }
             if (nn == 0 || done || !gs::Settings::Get().scan) goto afterFastPass;
             {
+            // The neighbourhood first.
+            //
+            // The scan is a freeze because it reads five gigabytes. It does not
+            // have to start there: the mod already holds live pointers into the
+            // game's heap, and objects allocated by the same allocator tend to
+            // share arenas. One region is a few tens of megabytes and takes
+            // milliseconds, so trying the four we know costs nothing and may
+            // save the whole walk.
+            const uintptr_t known[] = {
+                gs::camera::This(),
+                reinterpret_cast<uintptr_t>(gs::mapicon::LastWorldRoot()),
+                gs::actors::Manager(),
+            };
+            for (uintptr_t k : known)
+            {
+                if (!k || done) continue;
+                gs::scan::Options near_;
+                near_.needleBytes = bytes;
+                near_.timeBudgetMs = 2000;
+                near_.onlyRegionContaining = k;
+                std::vector<gs::scan::Hit> nearHits;
+                gs::scan::FindPointers(needles, nn, nearHits, near_);
+                DropPointerTables(nearHits);
+                for (const gs::scan::Hit& h : nearHits)
+                {
+                    if (!h.object) continue;
+                    if (h.needle < 0 || static_cast<size_t>(h.needle) >= nn) continue;
+                    Target& t = g_targets[slotOf[h.needle]];
+                    t.object = h.object;
+                    if (!Describe(t)) { t.object = nullptr; continue; }
+                    gs::player::SetSpecialComponent(t.object);
+                    const gs::player::Pos probe = gs::player::Read();
+                    if (!probe.valid || !gs::player::OwnerIsPlayedBody() ||
+                        std::fabs(probe.x) + std::fabs(probe.z) <= 1.0f)
+                    {
+                        gs::player::SetSpecialComponent(nullptr);
+                        t.object = nullptr;
+                        continue;
+                    }
+                    GS_LOG_OK("the player's component was in the same region as an object we "
+                              "already had, so no walk was needed");
+                    gs::tick::AddProbe("special", t.object, 0x400);
+                    done = true;
+                    break;
+                }
+            }
+            if (done) goto afterFastPass;
+
             gs::scan::Options opt;
             opt.needleBytes = bytes;
             opt.timeBudgetMs = 20000;

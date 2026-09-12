@@ -108,7 +108,7 @@ namespace
         fputs("Sweep=0\n", f);
         fputs("; 1 walks the heap for the player component instead of waiting for the\n", f);
         fputs("; actor manager. Ready sooner, at the cost of a freeze while it walks.\n", f);
-        fputs("Scan=0\n", f);
+        fputs("Scan=1\n", f);
         fputs("; 1 turns the investigation output back on: the table dump as it loads,\n", f);
         fputs("; the string catalogue, the entity listing, the per-field probe. It is\n", f);
         fputs("; a thousand lines a minute and it stutters the frame.\n", f);

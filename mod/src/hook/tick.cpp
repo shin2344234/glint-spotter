@@ -1257,7 +1257,11 @@ extern "C" void gs_OnMinimapTick(void* self)
             GS_LOG("[mark] game aim field local (%.2f, %.2f, %.2f) -> world (%.2f, %.2f, %.2f)",
                    a[0], a[1], a[2], a[0] + pp.ox, a[1] + pp.oy, a[2] + pp.oz);
 
-        gs::camera::LogAtPress(2.0f * std::atan2(pp.q[1], pp.q[3]));
+        // Seventy-seven lines a press, most of them the camera object and its
+        // owner dumped whole. That was how the camera's fields were named and
+        // it has no business running on every press of a working feature.
+        if (gs::Settings::Get().verbose)
+            gs::camera::LogAtPress(2.0f * std::atan2(pp.q[1], pp.q[3]));
 
         // Read only, and only a few times. Seth cannot delete the mod's pins
         // because they were never markers, and this is the first look at where
