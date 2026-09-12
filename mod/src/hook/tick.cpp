@@ -238,10 +238,17 @@ namespace
     // table placements have a record and an element number. The position comes
     // along as well, because the same object can arrive by either route and
     // the two identities cannot be matched to each other.
+    // Three kinds of thing end up in here, and only two of a kind can be
+    // compared. An entity id means nothing to a level table record, so where
+    // they stand is all those two have in common, and a place on its own is
+    // what a deleted pin leaves behind.
+    enum class MarkKind { Node, Table, Place };
+
     struct MarkedThing
     {
-        uint32_t eid = 0;       // a node
-        uint32_t record = 0;    // or a level table placement
+        MarkKind kind = MarkKind::Place;
+        uint32_t eid = 0;       // Node
+        uint32_t record = 0;    // Table
         uint32_t element = 0;
         float x = 0.0f, z = 0.0f;
     };
@@ -257,36 +264,54 @@ namespace
     // allocating at all.
     std::vector<MarkedThing> g_marked;
 
-    bool AlreadyMarked(uint32_t eid, uint32_t record, uint32_t element, float x, float z)
+    bool AlreadyMarked(MarkKind kind, uint32_t eid, uint32_t record, uint32_t element,
+                       float x, float z)
     {
         for (const MarkedThing& m : g_marked)
         {
             // Two of a kind answer for themselves. Two entities three metres
             // apart are two entities, and a position test between them would
             // silence one for no reason.
-            if (eid && m.eid) { if (m.eid == eid) return true; continue; }
-            if (!eid && !m.eid)
+            if (kind == MarkKind::Node && m.kind == MarkKind::Node)
+            {
+                if (m.eid == eid) return true;
+                continue;
+            }
+            if (kind == MarkKind::Table && m.kind == MarkKind::Table)
             {
                 if (m.record == record && m.element == element) return true;
                 continue;
             }
-            // One of each, and an entity id cannot be compared with a table
-            // record, so where they stand is all there is to go on.
             const float dx = m.x - x, dz = m.z - z;
             if (dx * dx + dz * dz <= kPinApart * kPinApart) return true;
         }
         return false;
     }
 
-    void RememberMarked(uint32_t eid, uint32_t record, uint32_t element, float x, float z)
+    void RememberMarked(MarkKind kind, uint32_t eid, uint32_t record, uint32_t element,
+                        float x, float z)
     {
         MarkedThing m;
+        m.kind = kind;
         m.eid = eid;
         m.record = record;
         m.element = element;
         m.x = x;
         m.z = z;
         g_marked.push_back(m);
+    }
+
+    // A pin taken off the map is settled for this press too. Without it the
+    // one case that started all of this comes back: mark a glint, let the
+    // flash end, press it again, and delete the old pin while that second
+    // press is still lit. Nothing had marked the glint during this press, and
+    // the pin that was suppressing it has just gone, so it went straight back
+    // on. The next press clears this like everything else, so the glint can be
+    // marked again by asking again.
+    void SettleAt(float x, float z)
+    {
+        if (AlreadyMarked(MarkKind::Place, 0, 0, 0, x, z)) return;
+        RememberMarked(MarkKind::Place, 0, 0, 0, x, z);
     }
 
     void ForgetMarked() { g_marked.clear(); }
@@ -1028,7 +1053,7 @@ namespace
         int pick = -1;
         for (int i = 0; i < n; ++i)
         {
-            if (AlreadyMarked(around[i].eid, 0, 0, around[i].x, around[i].z))
+            if (AlreadyMarked(MarkKind::Node, around[i].eid, 0, 0, around[i].x, around[i].z))
             {
                 ++markedSeen;
                 continue;
@@ -1039,15 +1064,16 @@ namespace
         float pickAngle = pick >= 0 ? angles[pick] : 0.0f;
         int tablePick = 0;
         while (tablePick < tableN &&
-               AlreadyMarked(0, table[tablePick].record, table[tablePick].element,
-                             table[tablePick].x, table[tablePick].z))
+               AlreadyMarked(MarkKind::Table, 0, table[tablePick].record,
+                             table[tablePick].element, table[tablePick].x, table[tablePick].z))
         {
             ++tablePick;
             ++markedSeen;
         }
         int glintPick = 0;
-        while (glintPick < glintN && AlreadyMarked(glints[glintPick].eid, 0, 0,
-                                                  glints[glintPick].x, glints[glintPick].z))
+        while (glintPick < glintN &&
+               AlreadyMarked(MarkKind::Node, glints[glintPick].eid, 0, 0,
+                             glints[glintPick].x, glints[glintPick].z))
         {
             ++glintPick;
             ++markedSeen;
@@ -1395,7 +1421,9 @@ namespace
                                 : (byTarget ? "automatic, what the game's detect system is holding"
                                             : "automatic, the node under the crosshair"),
                         "Glint", pp, kPinApart);
-            if (landed) RememberMarked(chosen.eid, chosen.record, chosen.element, chosen.x, chosen.z);
+            if (landed)
+                RememberMarked(byTable ? MarkKind::Table : MarkKind::Node, chosen.eid,
+                               chosen.record, chosen.element, chosen.x, chosen.z);
         }
 
         // The measurement, once the flash has been on for a moment.
@@ -1437,7 +1465,11 @@ namespace
             const bool known = gs::mapicon::Forget(retire[i], &gx, &gz);
             gs::realpin::Retire(retire[i]);
             gs::mapicon::RemoveIcon(gs::mapicon::LastWorldRoot(), retire[i]);
-            if (known) gs::pinstore::Drop(gx, gz);
+            if (known)
+            {
+                gs::pinstore::Drop(gx, gz);
+                SettleAt(gx, gz);
+            }
         }
     }
 
