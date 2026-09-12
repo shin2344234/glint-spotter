@@ -23,7 +23,7 @@ from vtscan import read_key  # same environment-then-keyfile lookup
 
 API = "https://api.nexusmods.com/v3"
 GAME = "crimsondesert"
-PAGE_ID = ""              # the number in the mod page URL, once there is one
+PAGE_ID = "3472"          # the number in the mod page URL
 
 
 def get(key, path):

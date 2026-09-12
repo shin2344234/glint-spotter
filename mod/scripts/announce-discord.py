@@ -27,7 +27,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 KEYFILE = os.path.join(HERE, "keys.local.env")
-NEXUS_FILES = ""   # https://www.nexusmods.com/crimsondesert/mods/<id>?tab=files
+NEXUS_FILES = "https://www.nexusmods.com/crimsondesert/mods/3472?tab=files"
 GITHUB_RELEASE = "https://github.com/shin2344234/glint-spotter/releases/tag/v%s"
 LIMIT = 1900
 
