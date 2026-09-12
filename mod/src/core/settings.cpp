@@ -106,6 +106,10 @@ namespace
         fputs("; 1 hunts for live objects by scanning the heap. Eighteen seconds of\n", f);
         fputs("; stall and nothing the mod still needs; off.\n", f);
         fputs("Sweep=0\n", f);
+        fputs("; 1 turns the investigation output back on: the table dump as it loads,\n", f);
+        fputs("; the string catalogue, the entity listing, the per-field probe. It is\n", f);
+        fputs("; a thousand lines a minute and it stutters the frame.\n", f);
+        fputs("Verbose=0\n", f);
         fputs("; The same for the automatic glint marker. Wide on purpose: nobody is\n", f);
         fputs("; aiming carefully during a flash, and a miss there is a glint lost.\n", f);
         fputs("AutoCone=2.0\n", f);
@@ -193,6 +197,10 @@ namespace gs::Settings
                 if (r == 0.0f || (r >= 50.0f && r <= 20000.0f)) g_values.pressReach = r;
                 else GS_LOG_ERR("settings: PressReach=%s is out of range, keeping %.0f",
                                 val, g_values.pressReach);
+            }
+            else if (_stricmp(key, "Verbose") == 0)
+            {
+                g_values.verbose = atoi(val) != 0;
             }
             else if (_stricmp(key, "Sweep") == 0)
             {

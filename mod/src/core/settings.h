@@ -27,6 +27,8 @@
 //   RayFallback=0 ; let a press that the table cannot answer guess from terrain
 //   Sweep=0       ; hunt for live objects by scanning the heap. Slow and no longer
 //                 ; needed; it is what stalls the game a few seconds after launch
+//   Verbose=0     ; the investigation output: the record dump, the catalogue, the
+//                 ; entity listing, the field probe. Off unless something is wrong
 //   PressReach=0  ; how far out a press will look, in metres. Zero means no limit
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
@@ -172,6 +174,21 @@ namespace gs::Settings
         // far placements that kept stealing presses have to be genuinely under
         // the crosshair, while the nearest one on the line still wins.
         float rodMetres = 8.0f;
+
+        // The investigation output, off.
+        //
+        // Sixty-six sessions of this mod were an investigation, and everything
+        // that made it one is still running: a per record dump of the level
+        // gimmick table as it loads, a four hundred line string catalogue, a
+        // hundred and twenty entity listings per press, and a field probe that
+        // writes dozens of lines every three seconds on the thread drawing the
+        // frame. That is the stutter Seth gets when the mod comes alive after
+        // a save loads, and it is a thousand log lines a minute for a feature
+        // that works.
+        //
+        // What stays on is what explains a decision: which placement was taken
+        // and why, the sight line band by band on a press, and every pin.
+        bool verbose = false;
 
         // Whether to hunt for live objects by walking the heap.
         //

@@ -886,7 +886,7 @@ namespace
         // update, with the diff probe on for this discovery session.
         if (gs::tick::Install(g_miniVt))
         {
-            gs::tick::SetProbe(true);
+            gs::tick::SetProbe(cfg.verbose);
             GS_LOG("[tick] probe on: root fields that change are logged every 3 s");
         }
 
@@ -1031,7 +1031,11 @@ namespace
             {
                 lgsoProbed = true;
                 ProbeLevelGimmicks();
-                if (gs::lgso::Load() > 0) { gs::lgso::LogKinds(); gs::lgso::LogCatalog(40, 64); }
+                if (gs::lgso::Load() > 0 && gs::Settings::Get().verbose)
+                {
+                    gs::lgso::LogKinds();
+                    gs::lgso::LogCatalog(40, 64);
+                }
             }
 
             // How long to wait before the next sweep. A sweep reads gigabytes

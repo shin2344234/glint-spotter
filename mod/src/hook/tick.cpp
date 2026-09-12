@@ -678,7 +678,7 @@ namespace
                 // glint was in it. Once per place: session fifty-three spent
                 // both its listings on the first glint and had none left for
                 // the one it teleported to.
-                if (g_setListingsLeft > 0 && now - g_flashOnMs > 700 &&
+                if (gs::Settings::Get().verbose && g_setListingsLeft > 0 && now - g_flashOnMs > 700 &&
                     (!g_setListedOnce || FarFrom(pp.x, pp.z, g_setListedX, g_setListedZ, 50.0f)))
                 {
                     --g_setListingsLeft;

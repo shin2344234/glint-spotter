@@ -192,6 +192,31 @@ namespace
                        leaf ? leaf + 1 : path,
                        static_cast<unsigned long long>(ret - reinterpret_cast<uintptr_t>(owner)),
                        surface, static_cast<long long>(c.keyId));
+
+                // And the frames above it, because one return address only
+                // names the function that made the call and not the one that
+                // decided to. CrimsonDesert.exe+0xD66C86 turned out to be a
+                // per icon creator taking a key it was handed; whoever walks
+                // the marker list and hands them out is further up, and
+                // chasing that a frame per session is a session per frame.
+                void* frames[10]{};
+                const USHORT got = RtlCaptureStackBackTrace(1, 10, frames, nullptr);
+                const uintptr_t exeBase =
+                    reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+                char line[400];
+                int w = 0;
+                for (USHORT f = 0; f < got && w + 24 < static_cast<int>(sizeof(line)); ++f)
+                {
+                    const uintptr_t a = reinterpret_cast<uintptr_t>(frames[f]);
+                    const int k = (a > exeBase && a - exeBase < 0x18000000)
+                        ? _snprintf_s(line + w, sizeof(line) - w, _TRUNCATE, " +%llX",
+                                      static_cast<unsigned long long>(a - exeBase))
+                        : _snprintf_s(line + w, sizeof(line) - w, _TRUNCATE, " [%p]", frames[f]);
+                    if (k < 0) break;
+                    w += k;
+                }
+                line[w] = 0;
+                GS_LOG("[spy]   the frames above it:%s", line);
             }
             else
             {
