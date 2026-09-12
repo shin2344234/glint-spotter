@@ -569,6 +569,17 @@ namespace gs::mapicon
                             nullptr, nullptr, nullptr);
         GS_LOG_OK("[pin #%llu] returned 0x%p", static_cast<unsigned long long>(n), r);
 
+        // Nothing else happens when the game made no icon. Not the buzz, which
+        // would report a pin that is not there; not the minimap copy, which
+        // would be left behind when the caller retries; and not the record
+        // below, which would leave the mod holding a pin nothing can see.
+        if (!r)
+        {
+            GS_LOG_ERR("[pin #%llu] the game made no icon, so this pin is not written down",
+                       static_cast<unsigned long long>(n));
+            return nullptr;
+        }
+
         // Said immediately, before anything optional runs. The map is not on
         // screen when a pin lands, so this buzz is the only thing that tells
         // it happened, and it should not be waiting behind a feature that
@@ -595,17 +606,6 @@ namespace gs::mapicon
                                  nullptr, nullptr, nullptr);
             GS_LOG("[pin #%llu] minimap copy key=%lld returned 0x%p",
                    static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
-        }
-        // Only a pin that exists. The game answering null means no icon was
-        // made, and remembering it anyway leaves the mod holding a pin nothing
-        // can see: the dedupe would refuse to place there again, and the count
-        // of live pins would sit above the count of records and read as a
-        // world that had been rebuilt.
-        if (!r)
-        {
-            GS_LOG_ERR("[pin #%llu] the game made no icon, so this pin is not written down",
-                       static_cast<unsigned long long>(n));
-            return nullptr;
         }
         Remember(x, y, z, label, true, key.id);
         return r;

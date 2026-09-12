@@ -571,10 +571,11 @@ namespace
             return false;
         }
         const bool onTheMap = PlacePin(root, tx, ty, tz, label);
-        // Written down either way. The record and the id exist by now, and a
-        // pin in the file is one the restore can put back; a pin that never
-        // drew is not one to forget about.
-        gs::pinstore::Add(tx, ty, tz, label);
+        // Only a pin that went on the map goes in the file. Writing the failed
+        // one down as well left the target eligible for another attempt, and
+        // the file with two lines for one place: the restore would draw both,
+        // and deleting the pin would take only one of them out.
+        if (onTheMap) gs::pinstore::Add(tx, ty, tz, label);
         return onTheMap;
     }
 
