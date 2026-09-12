@@ -19,8 +19,6 @@
 //   Chord=RB+LB+A ; controller buttons that place a mark, held together.
 //                 ; Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START
 //   Hold=0        ; milliseconds the chord must be held before it fires
-//   ClearChord=BACK+Y ; buttons that take every pin of the mod's off the map
-//   ClearHold=600 ; milliseconds that one must be held. Longer on purpose
 //   MiniPin=0     ; also copy each pin onto the minimap. Crashed the game in
 //                 ; session eighty-two; leave it alone.
 //   Rumble=1      ; buzz the pad when a pin lands
@@ -265,17 +263,6 @@ namespace gs::Settings
         // the spy captured sixty times over. Doing what vanilla does puts the
         // marker on the screen he is already looking at.
         bool rumble = true;
-
-        // The chord that clears the mod's pins, and how long it must be held.
-        //
-        // Its own buttons and a longer hold, because undoing an afternoon of
-        // marking by fumbling a combination is a worse mistake than missing a
-        // mark. Back and Y is nothing combat asks for, and six tenths of a
-        // second means it cannot happen in passing.
-        //
-        // XINPUT_GAMEPAD_BACK 0x0020, Y 0x8000.
-        uint16_t clearChord = 0x8020;
-        uint32_t clearHoldMs = 600;
 
         // A copy of each pin on the minimap. Off, and this time for a reason
         // that is not a theory.

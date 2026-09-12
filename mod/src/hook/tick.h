@@ -16,10 +16,6 @@
 
 namespace gs::tick
 {
-    // Ask for every pin of ours to come off the map. Happens on the game's
-    // own thread at the next tick, like a mark does.
-    void RequestClear();
-
     // Install on the minimap root vtable. Returns false if the slot could not be
     // taken. Safe to call once only.
     bool Install(uintptr_t miniVtable);

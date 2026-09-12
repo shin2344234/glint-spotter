@@ -32,8 +32,6 @@ namespace
     HANDLE g_keyThread = nullptr;
     uint32_t g_key = 0x91;
     uint16_t g_chord = 0x00C0;
-    uint16_t g_clearChord = 0x8020;
-    uint32_t g_clearHold = 600;
     uint32_t g_chordHold = 300;
     void* g_self = nullptr;
 
@@ -836,11 +834,6 @@ namespace
             wasDown = down;
             // Whatever the ini's Chord names, held for Hold milliseconds.
             if (gs::pad::ChordHeld(g_chord, g_chordHold, 0)) OnTrigger("the pad chord");
-            if (gs::pad::ChordHeld(g_clearChord, g_clearHold, 1))
-            {
-                GS_LOG("[trigger] the clear chord. Taking every pin of ours off the map.");
-                gs::tick::RequestClear();
-            }
             gs::pad::Pump();
             // The entity set, off the game's thread. Twice a second is plenty:
             // an entity stays in the set twelve seconds after it was last seen.
@@ -907,8 +900,6 @@ namespace
         g_key = cfg.key;
         g_chord = cfg.chord;
         g_chordHold = cfg.holdMs;
-        g_clearChord = cfg.clearChord;
-        g_clearHold = cfg.clearHoldMs;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
         GS_LOG("press %s (VK %02X), or hold the pad chord 0x%04X for %lu ms, to mark whatever the "
                "crosshair is on", gs::Settings::KeyName(cfg.key), cfg.key, cfg.chord,

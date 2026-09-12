@@ -88,10 +88,6 @@ namespace
         fputs("; milliseconds. Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START.\n", f);
         fputs("Chord=RB+LB+A\n", f);
         fputs("Hold=0\n", f);
-        fputs("; The buttons that take every pin the mod placed back off the map, and\n", f);
-        fputs("; how long to hold them. Longer than a mark on purpose.\n", f);
-        fputs("ClearChord=BACK+Y\n", f);
-        fputs("ClearHold=600\n", f);
         fputs("; 1 also copies every pin onto the minimap. This crashed the game in\n", f);
         fputs("; session eighty-two, one frame after the call returned. Leave it off.\n", f);
         fputs("MiniPin=0\n", f);
@@ -240,19 +236,6 @@ namespace gs::Settings
             else if (_stricmp(key, "MiniPin") == 0)
             {
                 g_values.miniPin = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "ClearChord") == 0)
-            {
-                const uint16_t bits = ChordBits(val);
-                if (bits) g_values.clearChord = bits;
-                else GS_LOG_ERR("settings: ClearChord=%s named no button I know, keeping the default", val);
-            }
-            else if (_stricmp(key, "ClearHold") == 0)
-            {
-                const long h = atol(val);
-                if (h >= 0 && h <= 5000) g_values.clearHoldMs = static_cast<uint32_t>(h);
-                else GS_LOG_ERR("settings: ClearHold=%s is out of range, keeping %lu", val,
-                                static_cast<unsigned long>(g_values.clearHoldMs));
             }
             else if (_stricmp(key, "Hold") == 0)
             {
