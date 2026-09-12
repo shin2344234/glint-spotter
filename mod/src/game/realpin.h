@@ -48,10 +48,16 @@ namespace gs::realpin
     // when it cannot, and is safe to log every press.
     bool Ready(const char** why);
 
-    // Place one. Returns the id the game gave the record, or 0 when the record
-    // did not appear. The height is not passed on: the game writes zero for
-    // its own markers and the icon is drawn from this record.
-    int64_t Place(float x, float z);
+    // Place one. True when the record appeared, with its id in `outId`. Zero
+    // is a real id here, which is why this does not return one. The height is
+    // not passed on: the game writes zero for its own markers and the icon is
+    // drawn from this record.
+    bool Place(float x, float z, int64_t* outId);
+
+    // Tell the world map about a marker, the way the game tells it. This is
+    // the handler its own subscriber runs, so whatever the map keeps about a
+    // marker gets kept, rather than only the icon.
+    bool Draw(void* worldRoot, int64_t id, float x, float z);
 
     // How many markers the game is holding, or -1 when the list cannot be read.
     int Count();

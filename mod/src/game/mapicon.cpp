@@ -515,7 +515,7 @@ namespace gs::mapicon
     }
 
     void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* labelText,
-                      int64_t keyId)
+                      int64_t keyId, bool haveKey)
     {
         if (!worldRoot || !g_orig[0])
         {
@@ -534,7 +534,7 @@ namespace gs::mapicon
         // Session ten, byte for byte, except the position and the key id.
         uint16_t type = 0x0001;
         struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{
-            keyId != 0 ? keyId : 1000 + static_cast<int64_t>(n), 0x15, {}};
+            haveKey ? keyId : 1000 + static_cast<int64_t>(n), 0x15, {}};
         uint32_t dword4 = 0;
         float float5 = 0.0f;
         // Height zero, because that is what the game passes for this icon.

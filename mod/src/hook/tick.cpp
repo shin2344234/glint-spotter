@@ -196,7 +196,7 @@ namespace
     // once. Session twenty-two placed a pin on what the sweep offered
     // instead, a registry entry, and the game went down. Pins asked for
     // before the spy has seen the real root wait here.
-    struct Pending { float x, y, z; char label[16]; int64_t id; };
+    struct Pending { float x, y, z; char label[16]; int64_t id; bool haveId; };
     constexpr int kPendingMax = 32;
     Pending g_pending[kPendingMax];
     int g_pendingN = 0;
@@ -218,8 +218,15 @@ namespace
         if (!root) return;
         GS_LOG("[mark] the world map root exists now; placing %d queued pin(s)", g_pendingN);
         for (int i = 0; i < g_pendingN; ++i)
-            gs::mapicon::PlacePinNow(root, g_pending[i].x, g_pending[i].y, g_pending[i].z,
-                                     g_pending[i].label, g_pending[i].id);
+        {
+            Pending& p = g_pending[i];
+            if (p.haveId && gs::realpin::Draw(root, p.id, p.x, p.z))
+            {
+                gs::mapicon::Remember(p.x, p.y, p.z, p.label, false, p.id);
+                continue;
+            }
+            gs::mapicon::PlacePinNow(root, p.x, p.y, p.z, p.label, p.id, p.haveId);
+        }
         g_pendingN = 0;
     }
 
@@ -242,7 +249,8 @@ namespace
         // now names a marker the game knows about instead of a number the mod
         // made up. A zero here means no record, and the pin is a picture again.
         int64_t realId = 0;
-        if (gs::Settings::Get().realMarkers) realId = gs::realpin::Place(tx, tz);
+        bool haveReal = false;
+        if (gs::Settings::Get().realMarkers) haveReal = gs::realpin::Place(tx, tz, &realId);
 
         // Only a root the spy has seen the game call slot 170 on. The
         // sweep's candidate is never used for a call.
@@ -254,6 +262,7 @@ namespace
                 Pending& p = g_pending[g_pendingN++];
                 p.x = tx; p.y = ty; p.z = tz;
                 p.id = realId;
+                p.haveId = haveReal;
                 strncpy_s(p.label, sizeof(p.label), label, _TRUNCATE);
                 GS_LOG("[mark] the world map has not been opened this session, so its root does not exist yet; "
                        "pin queued (%d waiting). Open the map once and it appears.", g_pendingN);
@@ -261,7 +270,18 @@ namespace
             else GS_LOG_ERR("[mark] %d pins already waiting for the map to be opened; this one is dropped", g_pendingN);
             return;
         }
-        gs::mapicon::PlacePinNow(root, tx, ty, tz, label, realId);
+        // The map's own handler, which is what the game runs when a marker is
+        // added. It builds whatever the map keeps about a marker and calls the
+        // icon dispatcher itself along the way. The mod's direct call to that
+        // dispatcher is the fallback, and it is what four sessions of pins the
+        // delete key ignored were made of.
+        if (haveReal && gs::realpin::Draw(root, realId, tx, tz))
+        {
+            gs::mapicon::Remember(tx, ty, tz, label, false, realId);
+            if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 220);
+            return;
+        }
+        gs::mapicon::PlacePinNow(root, tx, ty, tz, label, realId, haveReal);
     }
 
     // The calibration is finished, and it passed. Session fifty-four put "Me"

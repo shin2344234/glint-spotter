@@ -14,6 +14,8 @@ namespace
 {
     using CreateFn = void (*)(void* submodule, void* unused, const float* pos,
                               const uint8_t* b1, const uint8_t* b2, uint8_t second);
+    using AddedFn = void (*)(void* root, int64_t id, const float* pos,
+                             uint8_t b1, uint8_t b2, uint8_t b3);
 
     uintptr_t g_base = 0;
     size_t g_size = 0;
@@ -65,9 +67,12 @@ namespace
             const auto* remove = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinServerRemove);
             if (!gs::rtti::Readable(create, sizeof(gs::sig::kPinCreatePrologue))) return false;
             if (!gs::rtti::Readable(remove, sizeof(gs::sig::kPinRemovePrologue))) return false;
+            const auto* added = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kMarkerAdded);
+            if (!gs::rtti::Readable(added, sizeof(gs::sig::kMarkerAddedPrologue))) return false;
             g_bytesOk =
                 memcmp(create, gs::sig::kPinCreatePrologue, sizeof(gs::sig::kPinCreatePrologue)) == 0 &&
-                memcmp(remove, gs::sig::kPinRemovePrologue, sizeof(gs::sig::kPinRemovePrologue)) == 0;
+                memcmp(remove, gs::sig::kPinRemovePrologue, sizeof(gs::sig::kPinRemovePrologue)) == 0 &&
+                memcmp(added, gs::sig::kMarkerAddedPrologue, sizeof(gs::sig::kMarkerAddedPrologue)) == 0;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -206,16 +211,17 @@ namespace gs::realpin
         return l.ok ? static_cast<int>(l.count) : -1;
     }
 
-    int64_t Place(float x, float z)
+    bool Place(float x, float z, int64_t* outId)
     {
+        *outId = 0;
         const char* why = "";
         if (!Ready(&why))
         {
             GS_LOG("[real] not placing a real marker: %s", why);
-            return 0;
+            return false;
         }
         uintptr_t sub = 0;
-        if (!Chain(&sub)) return 0;
+        if (!Chain(&sub)) return false;
 
         const int before = Count();
         // Height zero, and the two style bytes the game passed for the marker
@@ -263,11 +269,43 @@ namespace gs::realpin
         {
             GS_LOG_OK("[real] the game holds %d marker(s); this one is id %lld", after,
                       static_cast<long long>(id));
-            return id;
+            *outId = id;
+            return true;
         }
         GS_LOG_ERR("[real] no record for this mark; the list holds %d. Falling back to a drawn pin.",
                    after);
-        return 0;
+        return false;
+    }
+
+    bool Draw(void* worldRoot, int64_t id, float x, float z)
+    {
+        if (!worldRoot || !BytesMatch()) return false;
+        // The three bytes the dispatcher hands a subscriber are the record's
+        // own bytes at +0x14, +0x15 and +0x16. The first two are what this
+        // build writes into the record; the third is whatever the game's
+        // create left on its stack, and the icon the spy captured from a
+        // hand-placed marker carried a zero and a one, so a zero here matches
+        // what the map has already been seen to accept.
+        float pos[3] = {x, 0.0f, z};
+        const auto fn = reinterpret_cast<AddedFn>(g_base + gs::sig::kMarkerAdded);
+        GS_LOG("[real] telling the map about marker id %lld at (%.1f, %.1f)",
+               static_cast<long long>(id), x, z);
+        g_faultCode = 0;
+        g_faultAt = 0;
+        __try
+        {
+            fn(worldRoot, id, pos, 0, 1, 0);
+        }
+        __except (FaultFilter(GetExceptionInformation()))
+        {
+            const uintptr_t rva = (g_faultAt > g_base) ? g_faultAt - g_base : 0;
+            GS_LOG_ERR("[real] the map's own add handler raised 0x%08lX at +0x%08llX; the icon is "
+                       "drawn the old way instead", g_faultCode,
+                       static_cast<unsigned long long>(rva));
+            return false;
+        }
+        GS_LOG_OK("[real] the map's add handler returned for id %lld", static_cast<long long>(id));
+        return true;
     }
 
     void LogState(const char* why)

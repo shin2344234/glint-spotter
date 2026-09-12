@@ -125,6 +125,31 @@ namespace gs::sig
     constexpr uintptr_t kPinOnlineFlag   = 0x06BA5DA8;
     constexpr uintptr_t kOff_Pin_Owner   = 0x08;   // submodule + 8, the notify target
 
+    // And the map's end of it: what the world map does when it is told a
+    // marker exists.
+    //
+    // The map subscribes two small thunks to two events on the UI model,
+    // 0xD79280 for an added marker and 0xD792C0 for a removed one, and each
+    // forwards to a real handler. The add handler is this one. It is a
+    // thousand bytes and the icon dispatcher is one call inside it, which is
+    // exactly what the mod was skipping by calling the dispatcher itself: the
+    // icon appeared and nothing else the map keeps about a marker existed.
+    //
+    // Its arguments come off the dispatcher's own direct-call path, and the
+    // prologue agrees with every one of them:
+    //
+    //   rcx = the world map root      (mov rdi, rcx)
+    //   rdx = the record's id, int64  (mov r15, rdx)
+    //   r8  = the position, twelve bytes (mov r14, r8)
+    //   r9b = the record's byte at +0x14 (movzx esi, r9b)
+    //   arg5 = the byte at +0x15, arg6 = the byte at +0x16
+    constexpr uintptr_t kMarkerAdded = 0x00D70490;
+    constexpr uint8_t   kMarkerAddedPrologue[16] = {
+        0x48, 0x89, 0x5C, 0x24, 0x18,   // mov [rsp+0x18], rbx
+        0x55, 0x56, 0x57,               // push rbp, rsi, rdi
+        0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57,  // push r12..r15
+    };
+
     // Size the factory allocates for a root control (2760); a sanity bound.
     constexpr size_t kRootControlSize = 0xC48;
 

@@ -97,12 +97,12 @@ namespace gs::mapicon
     // (-9730.99, 562.29, -4303.08) while the player stood at (-9731.9,
     // 562.2, -4301.8), so the game gives its icons a real height and a pin
     // at zero is a pin the map has to guess at.
-    // `keyId` is the icon's key. Zero mints one of the mod's own, from 1001
-    // up. A real record's id goes here instead when there is one, because
-    // the map's delete acts on the key it finds under the cursor and only a
-    // key the game's own marker list knows can lead anywhere.
+    // `keyId` is the icon's key when `haveKey`, and otherwise one of the mod's
+    // own from 1001 up. It carries a real record's id when there is one, since
+    // a key the game's marker list knows about is the only kind that can lead
+    // anywhere. Zero is a real id, which is why the flag is separate.
     void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* label,
-                      int64_t keyId);
+                      int64_t keyId, bool haveKey);
 
     // Put every pin this session back on the map.
     //
