@@ -7,6 +7,10 @@ where the glint is.
 Everything below is checked against files on this machine or against a URL, not
 against memory. Where something is unproven it says so.
 
+References to `private/` are working notes kept off the repository, mostly
+per-session write-ups and captures of another mod's behaviour on this machine.
+Nothing in this document depends on reading them.
+
 ## Bottom line
 
 All three pieces are reachable, and nobody has built this. The marker piece looked
