@@ -222,6 +222,7 @@ namespace gs::physics
         // little more at range where a sample is a coarser thing.
         const float down[3] = {0.0f, -1.0f, 0.0f};
         int measured = 0;
+        int blockedRun = 0;
         for (int i = 1; i < steps; ++i)
         {
             // Skip the last tenth: the target is usually standing on the
@@ -236,11 +237,26 @@ namespace gs::physics
             if (!h.hit) continue;               // collision not loaded here
             ++measured;
             const float groundY = from[1] - h.dist;
-            const float clearance = 2.0f + flat * t * 0.01f;
+            // Eight metres, plus three percent of how far along the sample is.
+            //
+            // It was two metres plus one percent, which is under three metres
+            // at eighty, and session a hundred and eighteen had that refuse a
+            // glint Seth was looking straight at. The thing this is for is a
+            // mountain between him and something a kilometre away, and a
+            // mountain is not three metres. One sample over the line is a bank
+            // at the side of a road, so it takes two in a row.
+            const float clearance = 8.0f + flat * t * 0.03f;
             if (groundY > py + clearance)
             {
-                if (blockedAt) *blockedAt = flat * t;
-                return Sight::Blocked;
+                if (++blockedRun >= 2)
+                {
+                    if (blockedAt) *blockedAt = flat * t;
+                    return Sight::Blocked;
+                }
+            }
+            else
+            {
+                blockedRun = 0;
             }
         }
         return measured > 0 ? Sight::Clear : Sight::Unknown;

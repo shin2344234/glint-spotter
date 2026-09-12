@@ -253,24 +253,30 @@ namespace
         static uint32_t lastMs = 0;
         static bool pending = false;
 
-        // The game rebuilding its map icons is a world being built, and it is
-        // the earliest thing the mod hears about one. What it cannot do yet is
-        // act: the player is reached through an object that has just been
-        // freed, so the work waits until somebody answers again.
-        if (gs::mapicon::RepinWanted())
-        {
-            pending = true;
-            g_worldRebuilt.store(true);
-            GS_LOG("[pins] the game rebuilt its map icons, so the pins go back on as soon as the "
-                   "player answers again");
-        }
-
         // A player who answers with a position is a player the mod can write
         // through. Without this the restore can put records into a component
         // the load has already thrown away.
         if (!gs::player::Read().valid) return;
         const uintptr_t sub = gs::pinmodel::Submodule();
         if (!sub) return;
+
+        // A load builds a new player, so the actor moving is a world being
+        // built, and unlike the map's icons it moves once. The first signal
+        // tried here was the game creating a MapIcon_ActorFocus, which is the
+        // player's own arrow and is remade several times a second.
+        static uintptr_t seenActor = 0;
+        const uintptr_t actor = gs::player::Actor();
+        if (actor && actor != seenActor)
+        {
+            if (seenActor)
+            {
+                pending = true;
+                g_worldRebuilt.store(true);
+                GS_LOG("[pins] the player has been rebuilt, so a world was loaded; the pins go "
+                       "back on");
+            }
+            seenActor = actor;
+        }
 
         // Two ways to know a world has been built. The marker copy sitting at
         // an address the mod has not seen is the obvious one, and it catches a

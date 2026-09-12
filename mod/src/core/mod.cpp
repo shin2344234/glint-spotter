@@ -97,6 +97,7 @@ namespace
         "ServerContentsMiscActorComponent",
     };
     uintptr_t g_cameraVt = 0;
+    bool g_lookAgainNow = false;
     uintptr_t g_managerVt = 0;
 
     const char* ShortName(const char* decorated)
@@ -778,6 +779,10 @@ namespace
         gs::tick::DropProbe(t.object);
         if (strstr(t.info.name, "ClientSpecialModeActorComponent")) gs::player::SetSpecialComponent(nullptr);
         t.object = nullptr;
+        // Something the mod was holding has been freed, which in practice
+        // means a world was thrown away. Whatever the sweep had decided about
+        // how long to wait was about that world.
+        g_lookAgainNow = true;
         return false;
     }
 
@@ -1213,12 +1218,13 @@ namespace
             // has been thrown away and everything it wants has been made
             // again. Whatever it had decided about how long to wait is about
             // the old world.
-            if (gs::tick::TakeWorldRebuilt())
+            if (g_lookAgainNow || gs::tick::TakeWorldRebuilt())
             {
+                g_lookAgainNow = false;
                 barren = 0;
                 lastLive = 0;
-                GS_LOG("the map rebuilt its icons, so the world is new; looking again now rather "
-                       "than on the timer");
+                GS_LOG("something the mod was holding has been freed, so the world is new; "
+                       "looking again now rather than on the timer");
             }
             if (live < hunted)
             {
