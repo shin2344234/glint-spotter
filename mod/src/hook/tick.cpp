@@ -1137,7 +1137,14 @@ extern "C" void gs_OnMinimapTick(void* self)
                         const int nn = gs::lgso::NearLine(sv.ox, sv.oz, sv.fx / flen,
                                                           sv.fz / flen, 3000.0f,
                                                           onLine, onAlong, onPerp, 8);
-                        GS_LOG("[mark] closest to the sight line, whatever the rod says:");
+                        // Band by band first, because a gap in the table has
+                        // to look like a gap and not like an absence of luck.
+                        static const float kBands[] = {25.0f, 60.0f, 120.0f, 250.0f, 500.0f,
+                                                       1000.0f, 2000.0f, 4000.0f};
+                        GS_LOG("[mark] the sight line, band by band:");
+                        gs::lgso::LogBands(sv.ox, sv.oz, sv.fx / flen, sv.fz / flen,
+                                           kBands, 7);
+                        GS_LOG("[mark] closest to the sight line overall, whatever the rod says:");
                         for (int k = 0; k < nn; ++k)
                             GS_LOG("[mark]   %.1f m off the line, %.0f m out, record %u element %u \"%s\" at (%.1f, %.1f, %.1f)",
                                    onPerp[k], onAlong[k], onLine[k].record, onLine[k].element,

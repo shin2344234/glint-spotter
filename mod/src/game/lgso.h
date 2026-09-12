@@ -129,6 +129,22 @@ namespace gs::lgso
     int NearLine(float ox, float oz, float ux, float uz, float maxRange,
                  Place* out, float* alongs, float* perps, int n);
 
+    // The same question asked one distance band at a time.
+    //
+    // Sorting the whole line by distance from it answers "what is nearly under
+    // the crosshair" and hides "there is nothing out there at all", because
+    // eight entries two metres off the line at sixteen hundred metres crowd
+    // out the only thing at three hundred. Session eighty-six is exactly that:
+    // two presses whose eight closest were all either thirteen metres away or
+    // sixteen hundred, with nothing between, and no way to tell whether the
+    // middle was empty or merely outranked.
+    //
+    // Band by band there is nowhere to hide. One line per band, the placement
+    // closest to the line inside it, or a line saying the band holds nothing.
+    // `edges` is `bandCount + 1` ranges in metres.
+    void LogBands(float ox, float oz, float ux, float uz,
+                  const float* edges, int bandCount);
+
     // The placements nearest a point, for the log.
     int Near(float px, float pz, Place* out, int n);
 

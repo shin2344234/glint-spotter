@@ -188,6 +188,40 @@ namespace gs::lgso
         return found;
     }
 
+    void LogBands(float ox, float oz, float ux, float uz,
+                  const float* edges, int bandCount)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        for (int b = 0; b < bandCount; ++b)
+        {
+            const float lo = edges[b], hi = edges[b + 1];
+            int best = -1;
+            float bestPerp = 0, bestAlong = 0;
+            int inBand = 0;
+            for (int i = 0; i < g_n; ++i)
+            {
+                const float dx = g_places[i].x - ox, dz = g_places[i].z - oz;
+                const float a = dx * ux + dz * uz;
+                if (a < lo || a >= hi) continue;
+                ++inBand;
+                const float p = std::fabs(dx * uz - dz * ux);
+                if (best >= 0 && p >= bestPerp) continue;
+                best = i; bestPerp = p; bestAlong = a;
+            }
+            if (best < 0)
+            {
+                GS_LOG("[mark]   %5.0f to %5.0f m: nothing in the table at all", lo, hi);
+                continue;
+            }
+            GS_LOG("[mark]   %5.0f to %5.0f m: %d placement(s), closest to the line is %.1f m off "
+                   "at %.0f m, record %u element %u \"%s\" at (%.1f, %.1f, %.1f)",
+                   lo, hi, inBand, bestPerp, bestAlong, g_places[best].record,
+                   g_places[best].element,
+                   g_places[best].name[0] ? g_places[best].name : "unnamed",
+                   g_places[best].x, g_places[best].y, g_places[best].z);
+        }
+    }
+
     int NearLine(float ox, float oz, float ux, float uz, float maxRange,
                  Place* out, float* alongs, float* perps, int n)
     {
