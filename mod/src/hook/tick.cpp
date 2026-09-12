@@ -224,15 +224,25 @@ namespace
     // Sixteen places, oldest dropped, kept for the session and across a load.
     // Only the flash consults this. A button press is somebody asking for a
     // pin there in as many words, and it clears the refusal.
-    struct Declined { float x = 0.0f, z = 0.0f; };
+    struct Declined { float x = 0.0f, z = 0.0f; uint32_t ms = 0; };
     constexpr int kDeclinedMax = 16;
     Declined g_declined[kDeclinedMax];
     int g_declinedN = 0;
 
+    // A refusal that never lapses is its own bug. Taking a pin off and then
+    // deliberately flashing at the thing again is somebody changing their
+    // mind, and the mod refused for the rest of the session. The ini says how
+    // long, thirty seconds by default, which outlasts closing the map and does
+    // not outlast wanting the pin back.
     bool DeclinedNear(float x, float z, float radius)
     {
+        const int secs = gs::Settings::Get().remarkAfterSec;
+        if (secs <= 0) return false;
+        const uint32_t window = static_cast<uint32_t>(secs) * 1000u;
+        const uint32_t now = GetTickCount();
         for (int i = 0; i < g_declinedN; ++i)
         {
+            if (now - g_declined[i].ms >= window) continue;
             const float dx = g_declined[i].x - x, dz = g_declined[i].z - z;
             if (dx * dx + dz * dz <= radius * radius) return true;
         }
@@ -241,7 +251,11 @@ namespace
 
     void Decline(float x, float z)
     {
-        if (DeclinedNear(x, z, 1.0f)) return;
+        for (int i = 0; i < g_declinedN; ++i)
+        {
+            const float dx = g_declined[i].x - x, dz = g_declined[i].z - z;
+            if (dx * dx + dz * dz <= 1.0f) { g_declined[i].ms = GetTickCount(); return; }
+        }
         if (g_declinedN >= kDeclinedMax)
         {
             for (int i = 1; i < kDeclinedMax; ++i) g_declined[i - 1] = g_declined[i];
@@ -249,6 +263,7 @@ namespace
         }
         g_declined[g_declinedN].x = x;
         g_declined[g_declinedN].z = z;
+        g_declined[g_declinedN].ms = GetTickCount();
         ++g_declinedN;
     }
 
@@ -1278,7 +1293,8 @@ namespace
             --g_declineLogsLeft;
             g_declineLastMs = now;
             GS_LOG("[auto] the only thing on the line is one you took the pin off, so the flash "
-                   "leaves it alone. Press the button at it to have it back.");
+                   "leaves it alone for %d seconds. The button brings it back now.",
+                   gs::Settings::Get().remarkAfterSec);
         }
         if (matured && now >= g_cooldownUntil &&
             !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))

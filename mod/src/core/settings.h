@@ -250,6 +250,16 @@ namespace gs::Settings
         // floor below it keeps close range forgiving too.
         float autoConeDeg = 2.0f;
 
+        // How long the flash leaves alone something whose pin you took off.
+        //
+        // Nought seconds and it marks it again the moment you close the map,
+        // which is the mod arguing with you. Never, and you can never have the
+        // pin back from the flash, which is the mod arguing with you the other
+        // way. Thirty seconds is long enough for the removal to mean what it
+        // said and short enough that pressing the flash at the thing again is
+        // still how you change your mind.
+        int remarkAfterSec = 30;
+
         // Feedback, because a marker on a map you are not looking at is not
         // feedback. Still no notification of any kind that a marker was
         // placed or a glint was marked.
