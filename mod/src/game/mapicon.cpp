@@ -139,7 +139,7 @@ namespace
         }
     }
 
-    void Record(int surface, void* const* a)
+    void Record(int surface, void* const* a, uintptr_t ret)
     {
         const uint64_t n = ++g_seen[surface];
 
@@ -168,18 +168,18 @@ namespace
         // coincidence.
         // Who called, and out of which module.
         //
-        // Session ninety-one printed the return address as an offset from the
-        // exe and got +0x7FFD8B0C6D56, which is not an offset into anything.
-        // The caller is in some other module, so the marker Seth placed by
-        // hand is not being drawn by code in CrimsonDesert.exe at all. That
-        // matters more than any offset: the pin list traced through the
-        // network Ack reads empty because single player may never use it, and
-        // if a different module owns the markers then that is where deleting
-        // one has to happen.
-        if (pin && g_pinCallerLeft > 0)
+        // The address is passed in from the detour now. Session ninety-two
+        // took it here instead and the answer was GlintSpotter.asi+0x6D56,
+        // which is this function's own caller: the detour. One frame too low,
+        // and a reminder that _ReturnAddress only ever names the frame it is
+        // written in.
+        //
+        // The frame that matters is the game's, and the detour is standing in
+        // it. Whatever module that turns out to be is where a marker is
+        // created, and therefore where deleting one has to happen.
+        if (pin && g_pinCallerLeft > 0 && ret)
         {
             --g_pinCallerLeft;
-            const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
             HMODULE owner = nullptr;
             wchar_t path[MAX_PATH]{};
             if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -314,7 +314,7 @@ namespace
                       void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
     {
         void* a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
-        Record(0, a);
+        Record(0, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
         void* r = g_orig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 
         // The game's call is done and we are on its thread with its controller
@@ -338,7 +338,7 @@ namespace
                      void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
     {
         void* a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
-        Record(1, a);
+        Record(1, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
         return g_orig[1](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
     }
 }
