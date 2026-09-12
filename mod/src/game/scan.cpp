@@ -115,6 +115,7 @@ namespace gs::scan
         LARGE_INTEGER freq{}, start{}, now{};
         QueryPerformanceFrequency(&freq);
         QueryPerformanceCounter(&start);
+        uint64_t lastYieldAt = 0;
         const long long budgetTicks =
             freq.QuadPart ? static_cast<long long>(opt.timeBudgetMs) * freq.QuadPart / 1000 : 0;
 
@@ -228,6 +229,14 @@ namespace gs::scan
                     offset += pages * kPageSize;
                 }
                 rep.regionsScanned++;
+
+                // Hand the machine back. See Options::yieldEveryBytes: the
+                // thread is not the problem, the memory bandwidth is.
+                if (opt.yieldEveryBytes && rep.bytesScanned - lastYieldAt >= opt.yieldEveryBytes)
+                {
+                    lastYieldAt = rep.bytesScanned;
+                    Sleep(opt.yieldMs);
+                }
 
                 if (budgetTicks)
                 {

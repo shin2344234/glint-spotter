@@ -71,6 +71,21 @@ namespace gs::scan
         // Scan only the region containing this address. For the self test,
         // which knows exactly where its canary is.
         uintptr_t onlyRegionContaining = 0;
+
+        // Give the machine back after this many bytes, for this long.
+        //
+        // The scan runs on a worker thread, so in principle the game keeps its
+        // own. In practice reading five gigabytes as fast as the memory
+        // controller allows is a freeze, because the game is competing for
+        // bandwidth and for the pages this walk is faulting in. Seth has felt
+        // it as a hitch the moment the mod comes alive, through several
+        // sessions and several theories about what else it might be.
+        //
+        // A millisecond of sleep every four megabytes turns a seventeen second
+        // freeze into a longer walk nobody notices. Zero disables it, for the
+        // self test, which reads six megabytes and should not pause at all.
+        size_t yieldEveryBytes = 4ull * 1024 * 1024;
+        uint32_t yieldMs = 1;
     };
 
     struct Report

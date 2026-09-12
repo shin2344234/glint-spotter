@@ -135,6 +135,9 @@ namespace
         // in milliseconds; walking everything else proved nothing extra and
         // cost up to twenty seconds a session.
         opt.onlyRegionContaining = reinterpret_cast<uintptr_t>(canary);
+        // Six megabytes of our own memory; pausing in the middle of it would
+        // only make the self test slower than the thing it is testing.
+        opt.yieldEveryBytes = 0;
 
         std::vector<gs::scan::Hit> hits;
         const gs::scan::Report rep = gs::scan::FindPointers(&vt, 1, hits, opt);
