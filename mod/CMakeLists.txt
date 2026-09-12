@@ -38,6 +38,7 @@ add_library(GlintSpotter SHARED
     src/game/dump.cpp
     src/game/physics.cpp
     src/hook/vtable.cpp
+    src/hook/inlinehook.cpp
     src/hook/tick.cpp
     src/hook/thunk.asm
     src/hook/pad.cpp

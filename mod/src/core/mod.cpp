@@ -11,6 +11,7 @@
 #include "core/settings.h"
 #include "game/alert.h"
 #include "game/mapicon.h"
+#include "game/realpin.h"
 #include "game/player.h"
 #include "game/aim.h"
 #include "game/actors.h"
@@ -885,6 +886,9 @@ namespace
         // this is where they come from. One session of them going past says
         // what a call of our own has to look like.
         if (cfg.spy && g_alertVt) gs::alert::InstallSpy(g_alertVt);
+        // And the two marker calls, watched from inside rather than through a
+        // vtable, because nothing reaches them through an object.
+        if (cfg.spy) gs::realpin::InstallSpy();
         else if (cfg.spy) GS_LOG_ERR("[alert] the alert root vtable was not found; no popup groundwork this session");
         // The per-frame tick on the game's thread, stacked on the minimap root's
         // update, with the diff probe on for this discovery session.

@@ -64,4 +64,16 @@ namespace gs::realpin
 
     // The list, both kinds, and the flag that decides the cap.
     void LogState(const char* why);
+
+    // Watch the game's own create and remove, from inside them.
+    //
+    // Everything else the mod hooks is a vtable slot. These two are plain
+    // functions reached only from the in-process wire, so watching them means
+    // writing a jump over the front of each. It is worth it once: it says
+    // whether a marker the player places by hand goes through here, and if it
+    // does, which object it goes into. The mod has been writing to the one
+    // hanging off the player it found, and the player's own markers are not
+    // in it.
+    bool InstallSpy();
+    void RemoveSpy();
 }

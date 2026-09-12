@@ -1,6 +1,7 @@
 #include "game/realpin.h"
 
 #include <Windows.h>
+#include <intrin.h>
 #include <cstring>
 
 #include "core/log.h"
@@ -9,6 +10,7 @@
 #include "game/rtti.h"
 #include "game/signatures.h"
 #include "game/typescan.h"
+#include "hook/inlinehook.h"
 
 namespace
 {
@@ -16,6 +18,11 @@ namespace
                               const uint8_t* b1, const uint8_t* b2, uint8_t second);
     using AddedFn = void (*)(void* root, int64_t id, const float* pos,
                              uint8_t b1, uint8_t b2, uint8_t b3);
+    using ServerRemoveFn = void (*)(void* submodule, int64_t id, uint8_t second);
+
+    gs::inlinehook::Hook g_createHook;
+    gs::inlinehook::Hook g_removeHook;
+    int g_spyLogsLeft = 30;
 
     uintptr_t g_base = 0;
     size_t g_size = 0;
@@ -188,8 +195,85 @@ namespace
     }
 }
 
+namespace
+{
+    // Both detours do the same three things: say who called, say which object,
+    // and get out of the way. The object is the whole point. If it is not the
+    // one the mod computes off the player, the mod has been writing to the
+    // wrong list for four builds and the right one is one pointer away.
+    void Say(const char* what, uintptr_t ret, uintptr_t sub)
+    {
+        if (g_spyLogsLeft <= 0) return;
+        --g_spyLogsLeft;
+        const uintptr_t mine = gs::pinmodel::Submodule();
+        GS_LOG_OK("[mspy] the game called %s on 0x%p, from +0x%08llX. The mod's own submodule is "
+                  "0x%p, so this is %s object.", what, reinterpret_cast<void*>(sub),
+                  static_cast<unsigned long long>(ret > g_base ? ret - g_base : 0),
+                  reinterpret_cast<void*>(mine),
+                  (mine && mine == sub) ? "the same" : "a different");
+    }
+
+    void DetourCreate(void* sub, void* unused, const float* pos, const uint8_t* b1,
+                      const uint8_t* b2, uint8_t second)
+    {
+        const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+        Say("create", ret, reinterpret_cast<uintptr_t>(sub));
+        if (g_spyLogsLeft >= 0)
+        {
+            __try
+            {
+                GS_LOG("[mspy]   at (%.1f, %.1f, %.1f), style %u and %u, list %u",
+                       pos ? pos[0] : 0.0f, pos ? pos[1] : 0.0f, pos ? pos[2] : 0.0f,
+                       b1 ? *b1 : 0u, b2 ? *b2 : 0u, second);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+        reinterpret_cast<CreateFn>(g_createHook.trampoline)(sub, unused, pos, b1, b2, second);
+    }
+
+    void DetourRemove(void* sub, int64_t id, uint8_t second)
+    {
+        const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+        Say("remove", ret, reinterpret_cast<uintptr_t>(sub));
+        if (g_spyLogsLeft >= 0)
+            GS_LOG("[mspy]   id %lld from list %u", static_cast<long long>(id), second);
+        reinterpret_cast<ServerRemoveFn>(g_removeHook.trampoline)(sub, id, second);
+    }
+}
+
 namespace gs::realpin
 {
+    bool InstallSpy()
+    {
+        // The check has to run before the bytes are replaced, and it caches,
+        // so afterwards it still answers for the game rather than for us.
+        if (!BytesMatch()) return false;
+        // Fifteen bytes of the create and fourteen of the remove, both read
+        // off the disassembly and both nothing but register spills and pushes,
+        // so they mean the same thing wherever they are copied to.
+        const bool a = gs::inlinehook::Install(
+            g_createHook, g_base + gs::sig::kPinCreate, 15,
+            reinterpret_cast<void*>(&DetourCreate),
+            gs::sig::kPinCreatePrologue, sizeof(gs::sig::kPinCreatePrologue));
+        const bool b = gs::inlinehook::Install(
+            g_removeHook, g_base + gs::sig::kPinServerRemove, 14,
+            reinterpret_cast<void*>(&DetourRemove),
+            gs::sig::kPinRemovePrologue, sizeof(gs::sig::kPinRemovePrologue));
+        GS_LOG(a && b
+               ? "[mspy] both of the game's marker calls are watched. Place one of your own "
+                 "markers on the map and the log says which object it went into."
+               : "[mspy] the marker calls could not be watched; nothing was patched");
+        return a && b;
+    }
+
+    void RemoveSpy()
+    {
+        gs::inlinehook::Remove(g_createHook);
+        gs::inlinehook::Remove(g_removeHook);
+    }
+
     bool Ready(const char** why)
     {
         static const char* kNoBytes = "the game has been patched away from these addresses";
