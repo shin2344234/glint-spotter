@@ -63,7 +63,7 @@ namespace
     size_t g_nameCount = 0;
     std::atomic<void*> g_lastWorldRoot{nullptr};
     std::atomic<void*> g_lastMiniRoot{nullptr};
-    int g_pinCallerLeft = 6;
+    int g_pinCallerLeft = 12;
 
     bool NewName(const char* name)
     {
@@ -166,14 +166,39 @@ namespace
         // must contain and found a position trail instead, because he happens
         // to stand near one of his own markers. A caller cannot be
         // coincidence.
+        // Who called, and out of which module.
+        //
+        // Session ninety-one printed the return address as an offset from the
+        // exe and got +0x7FFD8B0C6D56, which is not an offset into anything.
+        // The caller is in some other module, so the marker Seth placed by
+        // hand is not being drawn by code in CrimsonDesert.exe at all. That
+        // matters more than any offset: the pin list traced through the
+        // network Ack reads empty because single player may never use it, and
+        // if a different module owns the markers then that is where deleting
+        // one has to happen.
         if (pin && g_pinCallerLeft > 0)
         {
             --g_pinCallerLeft;
             const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
-            const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-            GS_LOG("[spy] a MapIcon_Pin_Marker create was called from +0x%08llX (surface %d, key %lld)",
-                   static_cast<unsigned long long>(ret - base), surface,
-                   static_cast<long long>(c.keyId));
+            HMODULE owner = nullptr;
+            wchar_t path[MAX_PATH]{};
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCWSTR>(ret), &owner) && owner)
+            {
+                GetModuleFileNameW(owner, path, MAX_PATH);
+                const wchar_t* leaf = wcsrchr(path, L'\\');
+                GS_LOG("[spy] a MapIcon_Pin_Marker create came from %ls+0x%llX (surface %d, key %lld)",
+                       leaf ? leaf + 1 : path,
+                       static_cast<unsigned long long>(ret - reinterpret_cast<uintptr_t>(owner)),
+                       surface, static_cast<long long>(c.keyId));
+            }
+            else
+            {
+                GS_LOG("[spy] a MapIcon_Pin_Marker create came from 0x%p, which belongs to no "
+                       "loaded module (surface %d, key %lld)", reinterpret_cast<void*>(ret),
+                       surface, static_cast<long long>(c.keyId));
+            }
         }
         // The player's own marker is created when the map opens, and the
         // game rebuilds every icon around it. Anything the mod drew is gone
