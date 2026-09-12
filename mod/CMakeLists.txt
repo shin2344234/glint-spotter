@@ -21,6 +21,7 @@ add_library(GlintSpotter SHARED
     src/dllmain.cpp
     src/core/log.cpp
     src/core/mod.cpp
+    src/core/pinstore.cpp
     src/game/rtti.cpp
     src/game/scan.cpp
     src/game/typescan.cpp

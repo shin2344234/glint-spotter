@@ -135,7 +135,13 @@ namespace gs::mapicon
     // The game took a marker off the map. If it was one of the mod's, the mod
     // stops counting it, so the one-per-area rule lets that place be marked
     // again and a redraw does not bring it back.
-    void Forget(int64_t keyId);
+    // `x` and `z` come back with where it stood, so the caller can take it out
+    // of the file as well.
+    bool Forget(int64_t keyId, float* x, float* z);
+
+    // A world has been rebuilt, so nothing the mod drew is on the map any
+    // more and none of its keys mean anything. Start again.
+    void ForgetAll();
 
     // Take one of the mod's icons off the world map by its key. Used when
     // the map asks for a marker the mod owns to go and the mod does the

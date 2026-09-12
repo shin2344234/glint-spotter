@@ -283,6 +283,19 @@ namespace gs::Settings
         // Off draws pins the old way, which nothing can remove.
         bool realMarkers = true;
 
+        // Whether the pins outlive the game.
+        //
+        // On. Loading a save clears every marker the mod placed, because none
+        // of them are in the save, so the mod writes its own list to
+        // GlintSpotter.pins beside the plugin and puts them back when a world
+        // appears. Removing a pin on the map takes it out of the file too.
+        //
+        // One file for the whole game, not one per save: there is no save
+        // identity the mod can read, so a second character sees the first
+        // one's pins. Deleting the file clears them all. Off keeps everything
+        // in memory, where a reload loses it.
+        bool keepPins = true;
+
         // A copy of each pin on the minimap. Off, and this time for a reason
         // that is not a theory.
         //

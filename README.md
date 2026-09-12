@@ -56,8 +56,8 @@ the line the nearest thing was, and `Rod` in the ini is that number.
 
 **To remove a pin**, open the map, put the cursor on it, and press the button
 the prompt offers, which changes to Remove Marker exactly as it does over one of
-your own. There is no extra key and no chord. Every pin is gone anyway the next
-time you load a save.
+your own. There is no extra key and no chord, and the pin goes out of the
+file at the same time, so it stays gone across a reload.
 
 Everything is in `GlintSpotter.ini` beside the plugin, and every key has a
 comment saying what it does. The two worth knowing are `Rod`, which is how
@@ -68,9 +68,12 @@ is willing to mark.
 
 Read these before you decide whether the build is for you.
 
-- **Pins last one session.** Loading a save clears every pin the mod placed.
-  Nothing it does is written into your save, which is the reason they cannot be
-  left behind, and the reason they cannot be kept either.
+- **The pins live in a file, not in your save.** Loading a save clears every
+  marker the mod placed, so the mod keeps its own list in `GlintSpotter.pins`
+  beside the plugin and puts them back once you open the map. Nothing it does
+  touches your save file, so uninstalling leaves nothing behind. Delete that
+  file to clear every pin at once. It is one file for the whole game, so a
+  second character sees the first one's pins.
 - **The game hitches once, for about fifteen seconds, shortly after a save
   loads.** The mod is searching memory for your character. Everything works
   afterwards. Setting `Scan=0` removes the hitch and stops blinding flash

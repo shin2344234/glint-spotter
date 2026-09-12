@@ -22,6 +22,7 @@
 #include "game/physics.h"
 #include "game/pinmodel.h"
 #include "game/realpin.h"
+#include "core/pinstore.h"
 #include "hook/pad.h"
 #include "core/settings.h"
 
@@ -211,6 +212,16 @@ namespace
         return false;
     }
 
+    // A record the map's own user interface can see, and an icon keyed on it.
+    // Everything that puts a pin on the map goes through here.
+    void PlacePin(void* root, float x, float y, float z, const char* label)
+    {
+        int64_t realId = 0;
+        bool haveReal = false;
+        if (gs::Settings::Get().realMarkers) haveReal = gs::realpin::Place(x, z, &realId);
+        gs::mapicon::PlacePinNow(root, x, y, z, label, realId, haveReal);
+    }
+
     void FlushPending()
     {
         if (g_pendingN == 0) return;
@@ -218,11 +229,45 @@ namespace
         if (!root) return;
         GS_LOG("[mark] the world map root exists now; placing %d queued pin(s)", g_pendingN);
         for (int i = 0; i < g_pendingN; ++i)
-        {
-            Pending& p = g_pending[i];
-            gs::mapicon::PlacePinNow(root, p.x, p.y, p.z, p.label, p.id, p.haveId);
-        }
+            PlacePin(root, g_pending[i].x, g_pending[i].y, g_pending[i].z, g_pending[i].label);
         g_pendingN = 0;
+    }
+
+    bool QueuePin(float x, float y, float z, const char* label)
+    {
+        if (g_pendingN >= kPendingMax) return false;
+        Pending& p = g_pending[g_pendingN++];
+        p.x = x; p.y = y; p.z = z;
+        strncpy_s(p.label, sizeof(p.label), label, _TRUNCATE);
+        return true;
+    }
+
+    // A load builds a new player, and the marker copy the mod writes hangs off
+    // it, so the pointer changing is the mod's cue that a world has appeared.
+    // Everything it drew before that belongs to a map that no longer exists.
+    void RestoreOnNewWorld()
+    {
+        static uintptr_t seen = 0;
+        static uint32_t lastMs = 0;
+        const uintptr_t sub = gs::pinmodel::Submodule();
+        if (!sub || sub == seen) return;
+        // Twenty seconds between restores. The pointer moving is meant to be a
+        // world being built, and if it ever moves for some other reason this
+        // keeps one flicker from putting a second copy of every pin on the map.
+        const uint32_t now = GetTickCount();
+        if (lastMs && now - lastMs < 20000) return;
+        lastMs = now;
+        const bool first = seen == 0;
+        seen = sub;
+        gs::mapicon::ForgetAll();
+        g_pendingN = 0;
+        if (!gs::Settings::Get().keepPins) return;
+        gs::pinstore::Saved saved[256];
+        const int n = gs::pinstore::All(saved, 256);
+        if (n == 0) return;
+        for (int i = 0; i < n; ++i) QueuePin(saved[i].x, saved[i].y, saved[i].z, saved[i].label);
+        GS_LOG_OK("[pins] %s; %d pin(s) from the file are queued and go on as soon as the map has "
+                  "been opened once", first ? "a world" : "a different world", n);
     }
 
     void PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp, float dedupe)
@@ -243,9 +288,6 @@ namespace
         // the mod still draws it; what changed is that the thing on the map
         // now names a marker the game knows about instead of a number the mod
         // made up. A zero here means no record, and the pin is a picture again.
-        int64_t realId = 0;
-        bool haveReal = false;
-        if (gs::Settings::Get().realMarkers) haveReal = gs::realpin::Place(tx, tz, &realId);
 
         // Only a root the spy has seen the game call slot 170 on. The
         // sweep's candidate is never used for a call.
@@ -256,20 +298,16 @@ namespace
             {
                 Pending& p = g_pending[g_pendingN++];
                 p.x = tx; p.y = ty; p.z = tz;
-                p.id = realId;
-                p.haveId = haveReal;
                 strncpy_s(p.label, sizeof(p.label), label, _TRUNCATE);
+                gs::pinstore::Add(tx, ty, tz, label);
                 GS_LOG("[mark] the world map has not been opened this session, so its root does not exist yet; "
                        "pin queued (%d waiting). Open the map once and it appears.", g_pendingN);
             }
             else GS_LOG_ERR("[mark] %d pins already waiting for the map to be opened; this one is dropped", g_pendingN);
             return;
         }
-        // The icon call, with the record's id on it when there is a record.
-        // The map's own add handler was tried here and gave a pin in a
-        // different colour, keyed on an id that collides with the one the game
-        // hands the player's own marker, and no more deletable for any of it.
-        gs::mapicon::PlacePinNow(root, tx, ty, tz, label, realId, haveReal);
+        PlacePin(root, tx, ty, tz, label);
+        gs::pinstore::Add(tx, ty, tz, label);
     }
 
     // The calibration is finished, and it passed. Session fifty-four put "Me"
@@ -1059,9 +1097,13 @@ namespace
         const int n = gs::realpin::TakeRetired(retire, 8);
         for (int i = 0; i < n; ++i)
         {
+            // Where it stood first, because taking the icon off runs through
+            // the mod's own spy on that slot and the answer is gone after.
+            float gx = 0.0f, gz = 0.0f;
+            const bool known = gs::mapicon::Forget(retire[i], &gx, &gz);
             gs::realpin::Retire(retire[i]);
             gs::mapicon::RemoveIcon(gs::mapicon::LastWorldRoot(), retire[i]);
-            gs::mapicon::Forget(retire[i]);
+            if (known) gs::pinstore::Drop(gx, gz);
         }
     }
 
@@ -1104,6 +1146,7 @@ extern "C" void gs_OnMinimapTick(void* self)
     if (n - g_lastRefreshTick >= 15)
     {
         g_lastRefreshTick = n;
+        RestoreOnNewWorld();
         FlushPending();
         // A map that has just been rebuilt has none of the mod's pins on it.
         if (gs::mapicon::RepinWanted()) gs::mapicon::Repin(gs::mapicon::LastWorldRoot());

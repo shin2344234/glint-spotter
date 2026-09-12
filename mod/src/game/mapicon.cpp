@@ -372,17 +372,10 @@ namespace
             // the one that matters and it is rare, so the budget lasts.
             if (!keyOk || kind != gs::sig::kPinKind) return;
 
-            // A pin of the mod's that the game has just removed, by the
-            // delete rather than by the create replacing an icon of the same
-            // key. The two callers are different functions and the return
-            // address separates them. Session a hundred and nine is the first
-            // time this fired for one of ours.
-            {
-                const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-                const uintptr_t rva = ret > exe ? ret - exe : 0;
-                const bool byDelete = rva >= gs::sig::kIconRemoverLo && rva < gs::sig::kIconRemoverHi;
-                if (type == 0x0001 && byDelete && surface == 0) gs::mapicon::Forget(id);
-            }
+            // The mod's own removals come through here too, since it takes an
+            // icon off by calling this very slot. Forgetting the pin is the
+            // caller's job there, in the right order and with the position in
+            // hand, so nothing is done about it from inside the spy.
             --g_rmLogsLeft;
             const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
             GS_LOG("[rmspy %s #%llu] this=0x%p type=0x%04X key=%lld/0x%02X dword4=%u, called from "
@@ -709,17 +702,26 @@ namespace gs::mapicon
         return true;
     }
 
-    void Forget(int64_t keyId)
+    bool Forget(int64_t keyId, float* x, float* z)
     {
         const int n = g_placedN.load();
         for (int i = 0; i < n && i < kMaxPins; ++i)
         {
             if (g_placed[i].gone || g_placed[i].id != keyId) continue;
             g_placed[i].gone = true;
+            if (x) *x = g_placed[i].x;
+            if (z) *z = g_placed[i].z;
             GS_LOG_OK("[pin] the game removed the mod's \"%s\" pin, key %lld; that place is free "
                       "to mark again", g_placed[i].label, static_cast<long long>(keyId));
-            return;
+            return true;
         }
+        return false;
+    }
+
+    void ForgetAll()
+    {
+        g_placedN.store(0);
+        g_repinWanted.store(false);
     }
 
     void* LastWorldRoot() { return g_lastWorldRoot.load(); }

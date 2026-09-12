@@ -99,6 +99,12 @@ namespace
         fputs("; them.\n", f);
         fputs("RealMarkers=1\n", f);
         fputs("\n", f);
+        fputs("; 1 keeps your pins in GlintSpotter.pins beside the plugin and puts them back\n", f);
+        fputs("; when you load a save, since the game itself clears them. Delete that file to\n", f);
+        fputs("; clear every pin at once. It is one file for the whole game, so a second\n", f);
+        fputs("; character sees the first one's pins.\n", f);
+        fputs("KeepPins=1\n", f);
+        fputs("\n", f);
         fputs("; ------------------------------------------------------------------ aiming\n", f);
         fputs("\n", f);
         fputs("; How far either side of the sight line a press looks, in metres, the same\n", f);
@@ -270,6 +276,10 @@ namespace gs::Settings
             else if (_stricmp(key, "RealMarkers") == 0)
             {
                 g_values.realMarkers = atoi(val) != 0;
+            }
+            else if (_stricmp(key, "KeepPins") == 0)
+            {
+                g_values.keepPins = atoi(val) != 0;
             }
             else if (_stricmp(key, "MiniPin") == 0)
             {

@@ -9,6 +9,7 @@
 
 #include "core/log.h"
 #include "core/settings.h"
+#include "core/pinstore.h"
 #include "game/alert.h"
 #include "game/mapicon.h"
 #include "game/realpin.h"
@@ -878,6 +879,7 @@ namespace
         // The exe is mapped long before the UI exists, so RTTI can be read early
         // even though nothing has been built from it yet.
         const gs::Settings::Values& cfg = gs::Settings::Load(g_self);
+        gs::pinstore::Load(g_self);
 
         Sleep(1000);
         SelfTest();
