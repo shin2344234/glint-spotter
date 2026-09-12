@@ -19,6 +19,11 @@ namespace gs::tick
     // Install on the minimap root vtable. Returns false if the slot could not be
     // taken. Safe to call once only.
     bool Install(uintptr_t miniVtable);
+
+    // And the same slot on the world map root, which is the one that runs
+    // while the full map is open. The minimap stops updating then, so anything
+    // the player does on the map has to be answered from here.
+    bool InstallWorldMap(uintptr_t worldVtable);
     void Remove();
 
     uint64_t Count();

@@ -911,6 +911,7 @@ namespace
         else if (cfg.spy) GS_LOG_ERR("[alert] the alert root vtable was not found; no popup groundwork this session");
         // The per-frame tick on the game's thread, stacked on the minimap root's
         // update, with the diff probe on for this discovery session.
+        gs::tick::InstallWorldMap(g_worldVt);
         if (gs::tick::Install(g_miniVt))
         {
             gs::tick::SetProbe(cfg.verbose);

@@ -1039,6 +1039,43 @@ namespace
     }
 }
 
+namespace
+{
+    // The map asked for one of the mod's markers to go. The request went to
+    // the server, which has never heard of it, so the mod erases its own
+    // record and takes the icon off both surfaces.
+    void DrainRetires()
+    {
+        int64_t retire[8];
+        const int n = gs::realpin::TakeRetired(retire, 8);
+        for (int i = 0; i < n; ++i)
+        {
+            gs::realpin::Retire(retire[i]);
+            gs::mapicon::RemoveIcon(gs::mapicon::LastWorldRoot(), retire[i]);
+            gs::mapicon::Forget(retire[i]);
+        }
+    }
+
+    // Slot 35 on the world map root, the same per-frame update the minimap
+    // carries. Plain C++ rather than the assembler thunk the minimap uses:
+    // this one only reads a queue and forwards, and the signature is two
+    // arguments the compiler can be trusted with.
+    using UpdateFn = void (*)(void*, float);
+    gs::vtable::Swap g_worldSwap;
+    UpdateFn g_worldOrig = nullptr;
+    std::atomic<uint64_t> g_worldTicks{0};
+
+    void WorldMapUpdate(void* self, float dt)
+    {
+        const uint64_t n = ++g_worldTicks;
+        if (n == 1)
+            GS_LOG_OK("[tick] first world map update on thread %lu, root 0x%p; this is the one "
+                      "that runs while the map is open", GetCurrentThreadId(), self);
+        if ((n % 8) == 0) DrainRetires();
+        if (g_worldOrig) g_worldOrig(self, dt);
+    }
+}
+
 // Called from the thunk every tick with the minimap root in rcx. Runs on the
 // game's UI thread; keep it cheap and never let anything escape.
 extern "C" void gs_OnMinimapTick(void* self)
@@ -1061,17 +1098,7 @@ extern "C" void gs_OnMinimapTick(void* self)
         FlushPending();
         // A map that has just been rebuilt has none of the mod's pins on it.
         if (gs::mapicon::RepinWanted()) gs::mapicon::Repin(gs::mapicon::LastWorldRoot());
-        // The map asked for one of the mod's markers to go. The request went
-        // to the server, which has never heard of it, so the mod erases its
-        // own record and takes the icon off.
-        int64_t retire[8];
-        const int retiring = gs::realpin::TakeRetired(retire, 8);
-        for (int i = 0; i < retiring; ++i)
-        {
-            gs::realpin::Retire(retire[i]);
-            gs::mapicon::RemoveIcon(gs::mapicon::LastWorldRoot(), retire[i]);
-            gs::mapicon::Forget(retire[i]);
-        }
+        DrainRetires();
         AutoMark(GetTickCount());
 
         // The camera object moves; the probe follows it.
@@ -1482,6 +1509,23 @@ extern "C" void gs_OnMinimapTick(void* self)
 
 namespace gs::tick
 {
+    bool InstallWorldMap(uintptr_t worldVtable)
+    {
+        if (!worldVtable) return false;
+        if (!gs::vtable::Install(worldVtable, gs::sig::kSlotUpdate,
+                                 reinterpret_cast<void*>(&WorldMapUpdate), g_worldSwap))
+        {
+            GS_LOG_ERR("[tick] slot %d on the world map vtable could not be taken",
+                       gs::sig::kSlotUpdate);
+            return false;
+        }
+        g_worldOrig = reinterpret_cast<UpdateFn>(g_worldSwap.original);
+        GS_LOG_OK("[tick] slot %d on the world map vtable was 0x%p, now ours; a marker removed "
+                  "while the map is open is answered from there", gs::sig::kSlotUpdate,
+                  g_worldSwap.original);
+        return true;
+    }
+
     bool Install(uintptr_t miniVtable)
     {
         if (!miniVtable || g_swap.installed) return false;
