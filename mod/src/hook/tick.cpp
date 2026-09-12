@@ -247,7 +247,7 @@ namespace
     // How close two pins may be before they count as the same place. Used by
     // the dedupe below as well, which is why it lives up here.
     constexpr float kPinApart = 4.0f;
-    constexpr int kMarkedMax = 32;
+    constexpr int kMarkedMax = 64;
     MarkedThing g_marked[kMarkedMax];
     int g_markedN = 0;
 
@@ -256,8 +256,17 @@ namespace
         for (int i = 0; i < g_markedN; ++i)
         {
             const MarkedThing& m = g_marked[i];
-            if (eid && m.eid == eid) return true;
-            if (!eid && !m.eid && m.record == record && m.element == element) return true;
+            // Two of a kind answer for themselves. Two entities three metres
+            // apart are two entities, and a position test between them would
+            // silence one for no reason.
+            if (eid && m.eid) { if (m.eid == eid) return true; continue; }
+            if (!eid && !m.eid)
+            {
+                if (m.record == record && m.element == element) return true;
+                continue;
+            }
+            // One of each, and an entity id cannot be compared with a table
+            // record, so where they stand is all there is to go on.
             const float dx = m.x - x, dz = m.z - z;
             if (dx * dx + dz * dz <= kPinApart * kPinApart) return true;
         }
@@ -467,12 +476,15 @@ namespace
                   "been opened once", fresh ? "a world" : "the world was rebuilt", n);
     }
 
-    void PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp, float dedupe)
+    // True when a pin was placed or queued, false when nothing came of it. The
+    // automatic marker writes down what it has marked and must not write down
+    // what it failed to place.
+    bool PlaceAt(float tx, float ty, float tz, const char* how, const char* label, const gs::player::Pos& pp, float dedupe)
     {
         if (gs::mapicon::PinNear(tx, tz, dedupe) || PendingNear(tx, tz, dedupe))
         {
             GS_LOG("[mark] a pin already sits within %.0f units of (%.1f, %.1f); not placing another", dedupe, tx, tz);
-            return;
+            return false;
         }
         const float dx = tx - pp.x, dz = tz - pp.z;
         GS_LOG("[mark] target %.1f units away via %s; placing a %s pin at (%.1f, %.1f, %.1f)",
@@ -499,12 +511,14 @@ namespace
                 gs::pinstore::Add(tx, ty, tz, label);
                 GS_LOG("[mark] the world map has not been opened this session, so its root does not exist yet; "
                        "pin queued (%d waiting). Open the map once and it appears.", g_pendingN);
+                return true;
             }
-            else GS_LOG_ERR("[mark] %d pins already waiting for the map to be opened; this one is dropped", g_pendingN);
-            return;
+            GS_LOG_ERR("[mark] %d pins already waiting for the map to be opened; this one is dropped", g_pendingN);
+            return false;
         }
         PlacePin(root, tx, ty, tz, label);
         gs::pinstore::Add(tx, ty, tz, label);
+        return true;
     }
 
     // The calibration is finished, and it passed. Session fifty-four put "Me"
@@ -1345,13 +1359,14 @@ namespace
                        chosen.how, std::fabs(north), north >= 0 ? "north" : "south",
                        std::fabs(east), east >= 0 ? "east" : "west");
             }
-            RememberMarked(chosen.eid, chosen.record, chosen.element, chosen.x, chosen.z);
-            PlaceAt(chosen.x, chosen.y, chosen.z,
-                    byTable ? "automatic, the game's own level gimmick table"
-                            : byGlint ? "automatic, the node the game marked as a detect mode target"
-                            : (byTarget ? "automatic, what the game's detect system is holding"
-                                        : "automatic, the node under the crosshair"),
-                    "Glint", pp, kPinApart);
+            const bool landed =
+                PlaceAt(chosen.x, chosen.y, chosen.z,
+                        byTable ? "automatic, the game's own level gimmick table"
+                                : byGlint ? "automatic, the node the game marked as a detect mode target"
+                                : (byTarget ? "automatic, what the game's detect system is holding"
+                                            : "automatic, the node under the crosshair"),
+                        "Glint", pp, kPinApart);
+            if (landed) RememberMarked(chosen.eid, chosen.record, chosen.element, chosen.x, chosen.z);
         }
 
         // The measurement, once the flash has been on for a moment.
