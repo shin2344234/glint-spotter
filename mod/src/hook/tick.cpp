@@ -1014,8 +1014,21 @@ namespace
             }
         }
 
+        // Fifteen degrees, not forty.
+        //
+        // Forty was written when the flash lit one thing at a time and the
+        // worry was a crosshair swaying at six hundred metres. Standing near a
+        // mine it lights three things at once: session 17:05 had ironstone
+        // thirteen metres away at twenty-six degrees off, sophora at
+        // thirty-three and a spawn point at forty, none of them what I was
+        // aiming at, and the ironstone took the pin while I was pointing
+        // across a chasm. Sway is a problem at range and not at thirteen
+        // metres, where putting the crosshair on a thing is easy, so an angle
+        // is the right cap and this one is generous: fifteen degrees is eighty
+        // metres across at the far end of what the game keeps loaded.
+        constexpr float kGlintCone = 0.262f;   // radians
         bool byGlint = false;
-        if (glintPick < glintN && glintAngles[glintPick] < 0.70f)   // forty degrees
+        if (glintPick < glintN && glintAngles[glintPick] < kGlintCone)
         {
             byGlint = true;
             pickAngle = glintAngles[glintPick];
@@ -1088,6 +1101,28 @@ namespace
         // It is still read, inside the real bounds now, and still logged, so a
         // build where something real turns up there would say so.
         const bool byTarget = false;
+
+        // Whichever of the two is nearer the crosshair, rather than the table
+        // every time.
+        //
+        // The table holds everything the level has and the glint list holds
+        // what the game has lit, and until now the table only lost when it had
+        // nothing on the line. That is right when both are pointing at roughly
+        // the same place and wrong when they are not: a sealed artifact
+        // fourteen hundred metres out and a third of a degree off the line
+        // should not lose to a rock at twenty-six degrees, and it did.
+        if (byTable && byGlint)
+        {
+            const float vlen = std::sqrt(v.fx * v.fx + v.fz * v.fz);
+            const float ux = vlen > 1.0e-3f ? v.fx / vlen : 0.0f;
+            const float uz = vlen > 1.0e-3f ? v.fz / vlen : 1.0f;
+            const float ddx = table[tablePick].x - v.ox, ddz = table[tablePick].z - v.oz;
+            const float perp = std::fabs(ddx * uz - ddz * ux);
+            const float tableRad = std::atan2(perp, tableAngles[tablePick]);
+            // Half a degree of hysteresis, so two candidates a hair apart do
+            // not swap between passes and reset the hold for ever.
+            if (glintAngles[glintPick] + 0.0087f < tableRad) byTable = false;
+        }
 
         // One chosen thing, whichever route named it, so the hold and the pin
         // below do not care which one did.
