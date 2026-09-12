@@ -97,9 +97,9 @@ namespace
         fputs("; same at every distance. A press fires when you ask, so it does not\n", f);
         fputs("; need the slack that grows with range the automatic marker needs.\n", f);
         fputs("Rod=8.0\n", f);
-        fputs("; How far out a press looks, in metres. Zero means no limit, which is\n", f);
-        fputs("; what put a pin seven hundred metres past what was being aimed at.\n", f);
-        fputs("PressReach=800\n", f);
+        fputs("; How far out a press looks, in metres. Zero means no limit; the height\n", f);
+        fputs("; test is what keeps distant things honest now.\n", f);
+        fputs("PressReach=0\n", f);
         fputs("; 1 lets a press the table cannot answer guess a spot from terrain.\n", f);
         fputs("; Off, because past eighty metres that guess is an extrapolation.\n", f);
         fputs("RayFallback=0\n", f);

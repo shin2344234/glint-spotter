@@ -180,8 +180,14 @@ namespace gs::lgso
             // its shadow does. The tolerance grows a little with range because
             // a building's origin sits at its base and a player aims at its
             // middle.
+            // Four per cent, not eight. The first log with heights in it
+            // shows how well this separates: on one bearing the placement
+            // fifteen hundred metres out sat six metres off the sight line's
+            // height while its neighbours at seventeen hundred sat a hundred
+            // and sixty-six below. Eight per cent kept both, four keeps only
+            // the one the crosshair is actually on.
             const float lineY = oy + slope * along;
-            float vAllow = along * 0.08f;
+            float vAllow = along * 0.04f;
             if (vAllow < maxVert) vAllow = maxVert;
             if (std::fabs(g_places[i].y - lineY) > vAllow) continue;
             if (!anyKind && !Worth(g_places[i].name)) continue;

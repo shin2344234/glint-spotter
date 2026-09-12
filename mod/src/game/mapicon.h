@@ -85,6 +85,23 @@ namespace gs::mapicon
     // at zero is a pin the map has to guess at.
     void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* label);
 
+    // Put every pin this session back on the map.
+    //
+    // Seth felt the buzz and found no marker, over and over. The buzz fires
+    // the moment the create call returns, so the call is being made and is
+    // returning what it always returns. What happens afterwards is the map
+    // being opened, and opening it makes the game rebuild its icon list from
+    // its own marker data, which the mod's pins are not in. They are drawn
+    // onto the control directly, so a rebuild erases them.
+    //
+    // The mod keeps its own list of what it placed, so it can put them back.
+    // Called from the tick when the spy has just seen the game build its own
+    // icons again.
+    void Repin(void* worldRoot);
+
+    // True when the game has rebuilt its icons since the last Repin.
+    bool RepinWanted();
+
     // True if the mod has already placed a pin within `radius` of (x, z).
     // The spec: one marker per area, never a second one on top of it.
     bool PinNear(float x, float z, float radius);

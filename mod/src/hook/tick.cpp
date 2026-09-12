@@ -1036,6 +1036,8 @@ extern "C" void gs_OnMinimapTick(void* self)
     {
         g_lastRefreshTick = n;
         FlushPending();
+        // A map that has just been rebuilt has none of the mod's pins on it.
+        if (gs::mapicon::RepinWanted()) gs::mapicon::Repin(gs::mapicon::LastWorldRoot());
         AutoMark(GetTickCount());
 
         // The camera object moves; the probe follows it.
@@ -1148,7 +1150,11 @@ extern "C" void gs_OnMinimapTick(void* self)
                         GS_LOG("[mark] the sight line, band by band:");
                         gs::lgso::LogBands(sv.ox, sv.oy, sv.oz, sv.fx / flen, sv.fz / flen,
                                            sv.fy / flen, kBands, 7);
-                        GS_LOG("[mark] closest to the sight line overall, whatever the rod says:");
+                        GS_LOG("[mark] closest to the sight line overall, whatever the rod or "
+                               "the height test says (a placement is only taken when it is "
+                               "within %.1f m of the line and within the greater of 20 m or four "
+                               "per cent of its range in height):",
+                               gs::Settings::Get().rodMetres);
                         for (int k = 0; k < nn; ++k)
                         {
                             const float lineY = sv.oy + (sv.fy / flen) * onAlong[k];

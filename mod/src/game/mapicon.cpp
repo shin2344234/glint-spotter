@@ -32,9 +32,23 @@ namespace
 
     // Every pin this mod placed this session, for the one-per-area rule.
     constexpr int kMaxPins = 256;
-    struct Placed { float x, z; };
+    struct Placed { float x, y, z; char label[16]; };
     Placed g_placed[kMaxPins];
     std::atomic<int> g_placedN{0};
+    std::atomic<bool> g_repinWanted{false};
+
+    // Only a control the running game still says is a world map root gets
+    // called. The stored pointer comes from the spy and the UI is free to
+    // destroy and rebuild that object; a call into freed memory returns
+    // whatever it likes and draws nothing, which is one of the two ways a
+    // buzz can arrive with no marker behind it.
+    bool RootLooksRight(void* root)
+    {
+        if (!root) return false;
+        if (!gs::rtti::Readable(root, 8)) return false;
+        const void* vt = *reinterpret_cast<void* const*>(root);
+        return gs::rtti::VtableIs(vt, gs::sig::kWorldMapClass);
+    }
 
     bool IsName(const gs::mapicon::Capture& c, const char* name)
     {
@@ -161,6 +175,10 @@ namespace
                    static_cast<unsigned long long>(ret - base), surface,
                    static_cast<long long>(c.keyId));
         }
+        // The player's own marker is created when the map opens, and the
+        // game rebuilds every icon around it. Anything the mod drew is gone
+        // at that moment, so this is the cue to draw it again.
+        if (surface == 0 && IsName(c, "MapIcon_ActorFocus")) g_repinWanted.store(true);
         if (surface == 0) g_lastWorldRoot.store(c.self);
         else g_lastMiniRoot.store(c.self);
         if (n == 1) GS_LOG("[spy %s] calls arrive on thread %lu", surface == 0 ? "world" : "mini", GetCurrentThreadId());
@@ -371,6 +389,13 @@ namespace gs::mapicon
             GS_LOG_ERR("[pin] no world root or no original slot 170, nothing placed");
             return nullptr;
         }
+        if (!RootLooksRight(worldRoot))
+        {
+            GS_LOG_ERR("[pin] 0x%p no longer reads as a world map root; nothing placed and the "
+                       "stored pointer is dropped", worldRoot);
+            g_lastWorldRoot.store(nullptr);
+            return nullptr;
+        }
         const uint64_t n = ++g_replayCount;
 
         // Session ten, byte for byte, except the position and the key id.
@@ -431,7 +456,12 @@ namespace gs::mapicon
                    static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
         }
         const int i = g_placedN.load();
-        if (i < kMaxPins) { g_placed[i] = {x, z}; g_placedN.store(i + 1); }
+        if (i < kMaxPins)
+        {
+            g_placed[i].x = x; g_placed[i].y = y; g_placed[i].z = z;
+            CopyString(g_placed[i].label, sizeof(g_placed[i].label), label);
+            g_placedN.store(i + 1);
+        }
         return r;
     }
 
@@ -447,6 +477,39 @@ namespace gs::mapicon
     }
 
     int PinCount() { return g_placedN.load(); }
+
+    bool RepinWanted() { return g_repinWanted.load(); }
+
+    void Repin(void* worldRoot)
+    {
+        g_repinWanted.store(false);
+        const int n = g_placedN.load();
+        if (n <= 0) return;
+        if (!worldRoot || !g_orig[0] || !RootLooksRight(worldRoot))
+        {
+            GS_LOG("[pin] the map was rebuilt but there is no usable root, so %d pin(s) wait", n);
+            g_repinWanted.store(true);
+            return;
+        }
+        GS_LOG("[pin] the game rebuilt its icons; drawing this session's %d pin(s) again", n);
+        for (int i = 0; i < n && i < kMaxPins; ++i)
+        {
+            uint16_t type = 0x0001;
+            struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{
+                2000 + static_cast<int64_t>(i), 0x15, {}};
+            uint32_t dword4 = 0;
+            float float5 = 0.0f;
+            float pos[3] = {g_placed[i].x, 0.0f, g_placed[i].z};
+            char label[48];
+            CopyString(label, sizeof(label), g_placed[i].label);
+            char name[64] = "MapIcon_Pin_Marker";
+            uint8_t struct10[36]{};
+            g_orig[0](worldRoot, &type, &key, &dword4, &float5, pos, label, name,
+                      reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
+                      reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
+                      nullptr, nullptr, nullptr);
+        }
+    }
 
     void* LastWorldRoot() { return g_lastWorldRoot.load(); }
     void* LastMiniRoot() { return g_lastMiniRoot.load(); }

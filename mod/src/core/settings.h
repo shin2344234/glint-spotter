@@ -25,7 +25,7 @@
 //   Rod=8.0       ; metres either side of the sight line a press will look,
 //                 ; the same at every distance
 //   RayFallback=0 ; let a press that the table cannot answer guess from terrain
-//   PressReach=800 ; how far out a press will look, in metres. Zero means no limit
+//   PressReach=0  ; how far out a press will look, in metres. Zero means no limit
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
 //                 ; may be and still count. Zero, the default, means none.
@@ -134,12 +134,19 @@ namespace gs::Settings
         // nearest wins could not save it because the near bands hold nothing
         // within tens of metres of the line.
         //
-        // A limit is the only thing that fixes that, and it belongs on the
-        // press because the press is where Seth said the range he cares about
-        // is: three to five hundred, and past five hundred. Eight hundred
-        // leaves room above that. Zero means none, and none is what produced
-        // the seven hundred and twenty-five metre pin.
-        float pressReach = 800.0f;
+        // Eight hundred was that limit and it lasted one session, because
+        // the height test turns out to do the same job better. The first log
+        // with heights in it, on one bearing: the placement fifteen hundred
+        // metres out sat six metres off the sight line's height and two tenths
+        // of a metre off the line itself, while its neighbours at seventeen
+        // hundred sat a hundred and sixty-six metres below. Height separates
+        // those; a range cap only refuses all three.
+        //
+        // So zero, no limit, which is what Seth asked for in the first place.
+        // A number here refuses something real, and the thing that stops the
+        // statistics is a candidate having to be at the right height as well
+        // as the right bearing.
+        float pressReach = 0.0f;
 
         // Eight metres, and this one is arithmetic rather than another guess.
         //
