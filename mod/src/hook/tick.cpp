@@ -292,12 +292,16 @@ namespace
 
     // A record the map's own user interface can see, and an icon keyed on it.
     // Everything that puts a pin on the map goes through here.
-    void PlacePin(void* root, float x, float y, float z, const char* label)
+    // False when nothing went on the map. A root the map has since thrown
+    // away still reads as a pointer, and PlacePinNow catches that and places
+    // nothing; discarding its answer here is what let the automatic marker
+    // write down a mark it never made.
+    bool PlacePin(void* root, float x, float y, float z, const char* label)
     {
         int64_t realId = 0;
         bool haveReal = false;
         if (gs::Settings::Get().realMarkers) haveReal = gs::realpin::Place(x, z, &realId);
-        gs::mapicon::PlacePinNow(root, x, y, z, label, realId, haveReal);
+        return gs::mapicon::PlacePinNow(root, x, y, z, label, realId, haveReal) != nullptr;
     }
 
     void FlushPending()
@@ -516,9 +520,12 @@ namespace
             GS_LOG_ERR("[mark] %d pins already waiting for the map to be opened; this one is dropped", g_pendingN);
             return false;
         }
-        PlacePin(root, tx, ty, tz, label);
+        const bool onTheMap = PlacePin(root, tx, ty, tz, label);
+        // Written down either way. The record and the id exist by now, and a
+        // pin in the file is one the restore can put back; a pin that never
+        // drew is not one to forget about.
         gs::pinstore::Add(tx, ty, tz, label);
-        return true;
+        return onTheMap;
     }
 
     // The calibration is finished, and it passed. Session fifty-four put "Me"
