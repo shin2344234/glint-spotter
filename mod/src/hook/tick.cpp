@@ -213,51 +213,59 @@ namespace
         return false;
     }
 
-    // What the flash has already marked in this world.
+    // What this flash has already marked.
     //
     // The automatic marker used to have no memory at all. The only thing
     // stopping it marking the same glint twice was a pin sitting on the map
     // near that place, so deleting the pin erased the memory and the still lit
-    // glint was new again: it went back on within a second, and if the target
-    // resolved a few metres differently the second time, back on in the wrong
-    // place. The first attempt at a fix wrote down where a pin had been taken
-    // off and refused to mark near there for thirty seconds, which was the
-    // same mistake in the other direction, a stop bolted to the outside of the
-    // thing that was wrong inside.
+    // glint was new again: back on within a second, and if the target resolved
+    // a few metres differently the second time, back on in the wrong place.
     //
-    // What was wrong inside is that a mark is about a thing, not a place. The
-    // flash marks a thing once per world. Deleting the pin does not enter into
-    // it, because deletion was never what the rule was about.
+    // Two wrong fixes came before this one. A list of places a pin had been
+    // taken off, which was a stop bolted to the outside of the thing that was
+    // wrong inside and needed a timer to stop being permanent. Then a list of
+    // things marked, kept for the whole world, which stopped a glint being
+    // marked ever again once its pin was deleted. Both got the scope wrong.
     //
-    // Every candidate already carries an identity: nodes have the game's
-    // entity id, and placements out of the level table have a record and an
-    // element number. Two hundred and fifty six of them, which is more glints
-    // than one world holds, and cleared when a world is built.
+    // The right scope is one press of the flash. Inside a single flash, each
+    // thing is marked once, so deleting a pin while the flash is still lit
+    // does not fetch it straight back. Press the flash again and everything is
+    // eligible again, because pressing it again is somebody asking. Nothing
+    // here expires on a clock and nothing keys on a place alone.
+    //
+    // A candidate carries an identity: nodes have the game's entity id, level
+    // table placements have a record and an element number. The position comes
+    // along as well, because the same object can arrive by either route and
+    // the two identities cannot be matched to each other.
     struct MarkedThing
     {
         uint32_t eid = 0;       // a node
         uint32_t record = 0;    // or a level table placement
         uint32_t element = 0;
+        float x = 0.0f, z = 0.0f;
     };
-    constexpr int kMarkedMax = 256;
+    // How close two pins may be before they count as the same place. Used by
+    // the dedupe below as well, which is why it lives up here.
+    constexpr float kPinApart = 4.0f;
+    constexpr int kMarkedMax = 32;
     MarkedThing g_marked[kMarkedMax];
     int g_markedN = 0;
 
-    bool AlreadyMarked(uint32_t eid, uint32_t record, uint32_t element)
+    bool AlreadyMarked(uint32_t eid, uint32_t record, uint32_t element, float x, float z)
     {
         for (int i = 0; i < g_markedN; ++i)
         {
-            if (eid) { if (g_marked[i].eid == eid) return true; continue; }
-            if (!g_marked[i].eid && g_marked[i].record == record &&
-                g_marked[i].element == element)
-                return true;
+            const MarkedThing& m = g_marked[i];
+            if (eid && m.eid == eid) return true;
+            if (!eid && !m.eid && m.record == record && m.element == element) return true;
+            const float dx = m.x - x, dz = m.z - z;
+            if (dx * dx + dz * dz <= kPinApart * kPinApart) return true;
         }
         return false;
     }
 
-    void RememberMarked(uint32_t eid, uint32_t record, uint32_t element)
+    void RememberMarked(uint32_t eid, uint32_t record, uint32_t element, float x, float z)
     {
-        if (AlreadyMarked(eid, record, element)) return;
         if (g_markedN >= kMarkedMax)
         {
             for (int i = 1; i < kMarkedMax; ++i) g_marked[i - 1] = g_marked[i];
@@ -266,6 +274,8 @@ namespace
         g_marked[g_markedN].eid = eid;
         g_marked[g_markedN].record = record;
         g_marked[g_markedN].element = element;
+        g_marked[g_markedN].x = x;
+        g_marked[g_markedN].z = z;
         ++g_markedN;
     }
 
@@ -444,8 +454,7 @@ namespace
             gs::mapicon::RemoveIcon(root, old[i]);
         }
         if (oldN) GS_LOG("[pins] %d old pin(s) taken off first", oldN);
-        // A new world has its own entity ids and its own pins, so what the
-        // flash marked in the last one means nothing here.
+        // Entity ids belong to the world that issued them.
         ForgetMarked();
         gs::mapicon::ForgetAll();
         g_pendingN = 0;
@@ -688,7 +697,6 @@ namespace
     // How close two automatic pins may be. Eight metres was arbitrary and
     // it is wide enough to swallow a neighbour: glints come in clusters and
     // pinning one should not refuse the next one along. Four.
-    constexpr float kPinApart = 4.0f;
     int g_dupLogsLeft = 20;
     // Its own small budget rather than the duplicate message's, which is the
     // more useful of the two and should not be spent by this one.
@@ -759,6 +767,10 @@ namespace
             g_flashWas = true;
             g_flashOnMs = now;
             g_probedThisPress = false;
+            // A new flash is a new ask. Whatever the last one marked stops
+            // counting here, so a glint whose pin was deleted can be marked
+            // again by pressing again.
+            ForgetMarked();
         }
 
         // What the game itself decided the flash lit. The detect component
@@ -973,20 +985,26 @@ namespace
         int pick = -1;
         for (int i = 0; i < n; ++i)
         {
-            if (AlreadyMarked(around[i].eid, 0, 0)) { ++markedSeen; continue; }
+            if (AlreadyMarked(around[i].eid, 0, 0, around[i].x, around[i].z))
+            {
+                ++markedSeen;
+                continue;
+            }
             pick = i;
             break;
         }
         float pickAngle = pick >= 0 ? angles[pick] : 0.0f;
         int tablePick = 0;
         while (tablePick < tableN &&
-               AlreadyMarked(0, table[tablePick].record, table[tablePick].element))
+               AlreadyMarked(0, table[tablePick].record, table[tablePick].element,
+                             table[tablePick].x, table[tablePick].z))
         {
             ++tablePick;
             ++markedSeen;
         }
         int glintPick = 0;
-        while (glintPick < glintN && AlreadyMarked(glints[glintPick].eid, 0, 0))
+        while (glintPick < glintN && AlreadyMarked(glints[glintPick].eid, 0, 0,
+                                                  glints[glintPick].x, glints[glintPick].z))
         {
             ++glintPick;
             ++markedSeen;
@@ -1283,8 +1301,8 @@ namespace
         {
             --g_markedLogsLeft;
             g_markedLastMs = now;
-            GS_LOG("[auto] everything on the line has been marked once already, and the flash "
-                   "marks a thing once. Press the button at it for another pin.");
+            GS_LOG("[auto] everything on the line was marked by this flash already. Press the "
+                   "flash again, or the button, for another pin on the same thing.");
         }
         if (matured && now >= g_cooldownUntil &&
             !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
@@ -1327,7 +1345,7 @@ namespace
                        chosen.how, std::fabs(north), north >= 0 ? "north" : "south",
                        std::fabs(east), east >= 0 ? "east" : "west");
             }
-            RememberMarked(chosen.eid, chosen.record, chosen.element);
+            RememberMarked(chosen.eid, chosen.record, chosen.element, chosen.x, chosen.z);
             PlaceAt(chosen.x, chosen.y, chosen.z,
                     byTable ? "automatic, the game's own level gimmick table"
                             : byGlint ? "automatic, the node the game marked as a detect mode target"
