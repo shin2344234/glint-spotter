@@ -8,6 +8,7 @@
 
 #include "core/log.h"
 #include "game/rtti.h"
+#include "game/actors.h"
 #include "game/aim.h"
 
 namespace
@@ -110,6 +111,40 @@ namespace
 namespace gs::player
 {
     void SetSpecialComponent(void* comp) { g_comp.store(comp); }
+
+    bool Recover()
+    {
+        // Nothing to do while the one we have still answers.
+        if (Read().valid) return false;
+
+        gs::actors::Entity set[512];
+        const int n = gs::actors::Snapshot(set, 512);
+        for (int i = 0; i < n; ++i)
+        {
+            const uintptr_t comps = Deref(set[i].ptr + kOff_Ent_Comps);
+            if (!comps) continue;
+            for (uintptr_t off = 0; off < kComps_SlotsEnd; off += 8)
+            {
+                const uintptr_t c = Deref(comps + off);
+                if (!c) continue;
+                const char* name = NameOf(c);
+                if (!name || !strstr(name, "ClientSpecialModeActorComponent")) continue;
+                const void* had = g_comp.load();
+                if (reinterpret_cast<const void*>(c) == had) return false;
+                g_comp.store(reinterpret_cast<void*>(c));
+                if (!Read().valid)
+                {
+                    g_comp.store(const_cast<void*>(had));
+                    continue;
+                }
+                GS_LOG_OK("[player] found again through the actor manager: eid %08X carries the "
+                          "special mode component at 0x%p, so the mod is back without a heap walk",
+                          set[i].eid, reinterpret_cast<void*>(c));
+                return true;
+            }
+        }
+        return false;
+    }
 
     Pos Read()
     {

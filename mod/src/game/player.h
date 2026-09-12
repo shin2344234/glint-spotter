@@ -35,6 +35,13 @@ namespace gs::player
     // the scan; cleared to null if that object stops carrying its vtable.
     void SetSpecialComponent(void* comp);
 
+    // Find the special mode component again by asking the actor manager
+    // rather than the heap. A load throws the old one away and the sweep that
+    // finds it takes sixteen seconds; the pools hold the player and the
+    // component is in his block, which takes microseconds. Returns true when
+    // it took a new one. Call from a thread that is not the game's.
+    bool Recover();
+
     // Walk component -> actor -> transform and read the position. Every read is
     // guarded. Logs what it finds on the first few calls so a wrong assumption
     // about the layout is visible in the log rather than silently wrong.

@@ -865,7 +865,14 @@ namespace
             // an entity stays in the set twelve seconds after it was last seen.
             static uint32_t lastRefresh = 0;
             const uint32_t now = GetTickCount();
-            if (now - lastRefresh >= 500) { lastRefresh = now; gs::actors::Refresh(now); }
+            if (now - lastRefresh >= 500)
+            {
+                lastRefresh = now;
+                gs::actors::Refresh(now);
+                // Twice a second, and only when the player has stopped
+                // answering, which after a load is the whole problem.
+                gs::player::Recover();
+            }
             Sleep(50);
         }
         return 0;
