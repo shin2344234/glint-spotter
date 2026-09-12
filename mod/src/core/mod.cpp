@@ -1209,6 +1209,17 @@ namespace
             static size_t lastLive = 0;
             static int barren = 0;
             int ticks = 30;
+            // A world has just been built, so everything the sweep is holding
+            // has been thrown away and everything it wants has been made
+            // again. Whatever it had decided about how long to wait is about
+            // the old world.
+            if (gs::tick::TakeWorldRebuilt())
+            {
+                barren = 0;
+                lastLive = 0;
+                GS_LOG("the map rebuilt its icons, so the world is new; looking again now rather "
+                       "than on the timer");
+            }
             if (live < hunted)
             {
                 if (live > lastLive) barren = 0;

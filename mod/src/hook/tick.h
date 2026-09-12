@@ -24,6 +24,11 @@ namespace gs::tick
     // while the full map is open. The minimap stops updating then, so anything
     // the player does on the map has to be answered from here.
     bool InstallWorldMap(uintptr_t worldVtable);
+
+    // True once after the game has rebuilt its map icons, which is what a
+    // world being built looks like from here. The sweep uses it to stop
+    // waiting: everything it holds has just been thrown away.
+    bool TakeWorldRebuilt();
     void Remove();
 
     uint64_t Count();

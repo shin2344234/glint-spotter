@@ -245,10 +245,30 @@ namespace
     // A load builds a new player, and the marker copy the mod writes hangs off
     // it, so the pointer changing is the mod's cue that a world has appeared.
     // Everything it drew before that belongs to a map that no longer exists.
+    std::atomic<bool> g_worldRebuilt{false};
+
     void RestoreOnNewWorld()
     {
         static uintptr_t seen = 0;
         static uint32_t lastMs = 0;
+        static bool pending = false;
+
+        // The game rebuilding its map icons is a world being built, and it is
+        // the earliest thing the mod hears about one. What it cannot do yet is
+        // act: the player is reached through an object that has just been
+        // freed, so the work waits until somebody answers again.
+        if (gs::mapicon::RepinWanted())
+        {
+            pending = true;
+            g_worldRebuilt.store(true);
+            GS_LOG("[pins] the game rebuilt its map icons, so the pins go back on as soon as the "
+                   "player answers again");
+        }
+
+        // A player who answers with a position is a player the mod can write
+        // through. Without this the restore can put records into a component
+        // the load has already thrown away.
+        if (!gs::player::Read().valid) return;
         const uintptr_t sub = gs::pinmodel::Submodule();
         if (!sub) return;
 
@@ -269,7 +289,7 @@ namespace
             mine = gs::realpin::MineInList();
             lost = live > 0 && mine >= 0 && mine < live;
         }
-        if (!fresh && !lost) return;
+        if (!fresh && !lost && !pending) return;
 
         // Twenty seconds between restores, so that whatever the cause, one bad
         // reading cannot put a second copy of every pin on the map.
@@ -277,6 +297,7 @@ namespace
         if (lastMs && now - lastMs < 20000) return;
         lastMs = now;
         seen = sub;
+        pending = false;
         if (lost)
             GS_LOG("[pins] %d pin(s) on the map and %d record(s) left behind them, so the world "
                    "has been rebuilt", live, mine);
@@ -1184,7 +1205,6 @@ extern "C" void gs_OnMinimapTick(void* self)
         RestoreOnNewWorld();
         FlushPending();
         // A map that has just been rebuilt has none of the mod's pins on it.
-        if (gs::mapicon::RepinWanted()) gs::mapicon::Repin(gs::mapicon::LastWorldRoot());
         DrainRetires();
         AutoMark(GetTickCount());
 
@@ -1596,6 +1616,8 @@ extern "C" void gs_OnMinimapTick(void* self)
 
 namespace gs::tick
 {
+    bool TakeWorldRebuilt() { return g_worldRebuilt.exchange(false); }
+
     bool InstallWorldMap(uintptr_t worldVtable)
     {
         if (!worldVtable) return false;
