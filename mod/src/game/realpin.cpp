@@ -43,10 +43,12 @@ namespace
     bool g_checked = false;
     bool g_bytesOk = false;
 
-    // A call that raises is still a call that wrote the record, so the reason
-    // to stop is a run of them rather than one. Three, and then the drawn pin
-    // is all that is left.
+    // A call that raises is still a call that wrote the record, and session a
+    // hundred and seven has it doing exactly that three times out of three.
+    // So the count is of calls that produced nothing, not of calls that
+    // raised. Three of those in a row and the drawn pin is all that is left.
     int g_faultsLeft = 3;
+    bool g_saidWhyItRaises = false;
     unsigned long g_faultCode = 0;
     uintptr_t g_faultAt = 0;
 
@@ -265,10 +267,10 @@ namespace
         if (sub >= 0x10000 && sub != mine) g_gameSub.store(sub);
         if (g_spyLogsLeft <= 0) return;
         --g_spyLogsLeft;
-        GS_LOG_OK("[mspy] the game called %s on 0x%p, from +0x%08llX. The mod's own submodule is "
-                  "0x%p, so this is %s object.", what, reinterpret_cast<void*>(sub),
+        GS_LOG_OK("[mspy] the game called %s on 0x%p, from +0x%08llX on thread %lu. The mod's own "
+                  "submodule is 0x%p, so this is %s object.", what, reinterpret_cast<void*>(sub),
                   static_cast<unsigned long long>(ret > g_base ? ret - g_base : 0),
-                  reinterpret_cast<void*>(mine),
+                  GetCurrentThreadId(), reinterpret_cast<void*>(mine),
                   (mine && mine == sub) ? "the same" : "a different");
         if (!g_saidWhose)
         {
@@ -403,7 +405,6 @@ namespace gs::realpin
         __except (FaultFilter(GetExceptionInformation()))
         {
             raised = true;
-            --g_faultsLeft;
         }
 
         // The record first, because session a hundred and three had the call
@@ -415,24 +416,27 @@ namespace gs::realpin
         int64_t id = 0;
         const bool landed = Landed(x, z, &id);
 
-        if (raised)
-        {
-            const uintptr_t rva = (g_faultAt > g_base) ? g_faultAt - g_base : 0;
-            GS_LOG_ERR("[real] the call raised 0x%08lX at +0x%08llX, %d attempt(s) left. The list "
-                       "holds %d and the record %s.", g_faultCode,
-                       static_cast<unsigned long long>(rva), g_faultsLeft, after,
-                       landed ? "is there" : "is not");
-        }
-
         if (landed)
         {
+            g_faultsLeft = 3;
+            if (raised && !g_saidWhyItRaises)
+            {
+                g_saidWhyItRaises = true;
+                const uintptr_t rva = (g_faultAt > g_base) ? g_faultAt - g_base : 0;
+                GS_LOG("[real] the call raises 0x%08lX at +0x%08llX on its way out and the record "
+                       "lands anyway. That is the notify reading a thread local that only a wire "
+                       "dispatch fills in, so the map is not told and the mod draws the icon "
+                       "itself. Said once.", g_faultCode,
+                       static_cast<unsigned long long>(rva));
+            }
             GS_LOG_OK("[real] the game holds %d marker(s); this one is id %lld", after,
                       static_cast<long long>(id));
             *outId = id;
             return true;
         }
-        GS_LOG_ERR("[real] no record for this mark; the list holds %d. Falling back to a drawn pin.",
-                   after);
+        --g_faultsLeft;
+        GS_LOG_ERR("[real] no record for this mark; the list holds %d, %d attempt(s) left. Falling "
+                   "back to a drawn pin.", after, g_faultsLeft);
         return false;
     }
 
