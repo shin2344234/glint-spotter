@@ -6,6 +6,7 @@
 
 #include "core/log.h"
 #include "game/pinmodel.h"
+#include "game/actors.h"
 #include "game/player.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
@@ -390,6 +391,46 @@ namespace gs::realpin
         }
         GS_LOG_OK("[real] the map's add handler returned for id %lld", static_cast<long long>(id));
         return true;
+    }
+
+    void HuntStore(const char* why)
+    {
+        gs::actors::Entity set[512];
+        const int n = gs::actors::Snapshot(set, 512);
+        const uintptr_t mine = gs::pinmodel::Submodule();
+        int carriers = 0, filled = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            uintptr_t sub = 0;
+            uint32_t c0 = 0, c1 = 0;
+            __try
+            {
+                const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(
+                    set[i].ptr + gs::sig::kOff_Actor_Components);
+                if (comps < 0x10000) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(
+                        comps + gs::sig::kOff_Comp_PinSubmodule), 8)) continue;
+                sub = *reinterpret_cast<const uintptr_t*>(comps + gs::sig::kOff_Comp_PinSubmodule);
+                if (sub < 0x10000 || (sub & 7) != 0) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(sub), 0xC8 + 2 * 16)) continue;
+                c0 = *reinterpret_cast<const uint32_t*>(sub + gs::sig::kOff_Pin_Lists + 8);
+                c1 = *reinterpret_cast<const uint32_t*>(sub + gs::sig::kOff_Pin_Lists + 16 + 8);
+                if (c0 > 4096 || c1 > 4096) continue;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                continue;
+            }
+            ++carriers;
+            if (c0 == 0 && c1 == 0) continue;
+            ++filled;
+            GS_LOG_OK("[hunt] eid %08X carries a marker list with %u and %u in it, at 0x%p%s",
+                      set[i].eid, c0, c1, reinterpret_cast<void*>(sub),
+                      sub == mine ? ", which is the one the mod writes" : "");
+        }
+        GS_LOG("[hunt] %s: %d actor(s) in the set, %d with a marker list, %d of those holding "
+               "anything. The mod's own is 0x%p.", why, n, carriers, filled,
+               reinterpret_cast<void*>(mine));
     }
 
     void LogState(const char* why)

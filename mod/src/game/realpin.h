@@ -76,4 +76,10 @@ namespace gs::realpin
     // in it.
     bool InstallSpy();
     void RemoveSpy();
+
+    // Every actor in the set, and whether any of them carries a marker list
+    // with something in it. The player's own is the one the mod has been
+    // writing to and the player's own markers are not in it, so either
+    // another actor of the same shape holds them or nothing does.
+    void HuntStore(const char* why);
 }

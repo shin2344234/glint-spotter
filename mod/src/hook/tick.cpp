@@ -220,11 +220,6 @@ namespace
         for (int i = 0; i < g_pendingN; ++i)
         {
             Pending& p = g_pending[i];
-            if (p.haveId && gs::realpin::Draw(root, p.id, p.x, p.z))
-            {
-                gs::mapicon::Remember(p.x, p.y, p.z, p.label, false, p.id);
-                continue;
-            }
             gs::mapicon::PlacePinNow(root, p.x, p.y, p.z, p.label, p.id, p.haveId);
         }
         g_pendingN = 0;
@@ -270,17 +265,10 @@ namespace
             else GS_LOG_ERR("[mark] %d pins already waiting for the map to be opened; this one is dropped", g_pendingN);
             return;
         }
-        // The map's own handler, which is what the game runs when a marker is
-        // added. It builds whatever the map keeps about a marker and calls the
-        // icon dispatcher itself along the way. The mod's direct call to that
-        // dispatcher is the fallback, and it is what four sessions of pins the
-        // delete key ignored were made of.
-        if (haveReal && gs::realpin::Draw(root, realId, tx, tz))
-        {
-            gs::mapicon::Remember(tx, ty, tz, label, false, realId);
-            if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 220);
-            return;
-        }
+        // The icon call, with the record's id on it when there is a record.
+        // The map's own add handler was tried here and gave a pin in a
+        // different colour, keyed on an id that collides with the one the game
+        // hands the player's own marker, and no more deletable for any of it.
         gs::mapicon::PlacePinNow(root, tx, ty, tz, label, realId, haveReal);
     }
 
@@ -1314,6 +1302,7 @@ extern "C" void gs_OnMinimapTick(void* self)
             --g_pinModelLogsLeft;
             gs::pinmodel::LogState("on a press");
             gs::realpin::LogState("before the press");
+            gs::realpin::HuntStore("on a press");
         }
 
         View v;
