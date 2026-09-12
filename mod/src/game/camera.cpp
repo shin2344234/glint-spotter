@@ -30,6 +30,8 @@ namespace
         float acc[2];
         float vec[3];
         float dist80;
+        float world1[3];
+        float world2[3];
     };
 
     bool ReadRaw(uintptr_t obj, Raw* r)
@@ -46,6 +48,8 @@ namespace
             memcpy(&r->acc[1], b + 0x368, 4);
             memcpy(r->vec, b + 0x14C, 12);
             memcpy(&r->dist80, b + 0x80, 4);
+            memcpy(r->world1, b + 0x94, 12);
+            memcpy(r->world2, b + 0xB4, 12);
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -122,6 +126,20 @@ namespace gs::camera
         memcpy(p.vec, r.vec, sizeof(p.vec));
         p.dist = r.dist;
         p.dist80 = r.dist80;
+        // The world position, believed only when its two copies agree.
+        float w1[3], w2[3];
+        memcpy(w1, r.world1, 12);
+        memcpy(w2, r.world2, 12);
+        if (std::isfinite(w1[0]) && std::isfinite(w1[1]) && std::isfinite(w1[2]) &&
+            std::fabs(w1[0] - w2[0]) < 1.0f && std::fabs(w1[1] - w2[1]) < 1.0f &&
+            std::fabs(w1[2] - w2[2]) < 1.0f &&
+            std::fabs(w1[0]) < 60000.0f && std::fabs(w1[2]) < 60000.0f &&
+            std::fabs(w1[0]) + std::fabs(w1[2]) > 1.0f)
+        {
+            p.world[0] = w1[0]; p.world[1] = w1[1]; p.world[2] = w1[2];
+            p.worldValid = true;
+        }
+
         p.valid = true;
 
         const float x = r.q[0], y = r.q[1], z = r.q[2], w = r.q[3];

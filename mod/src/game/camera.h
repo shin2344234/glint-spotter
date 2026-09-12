@@ -50,6 +50,17 @@ namespace gs::camera
         float acc[2]{};        // +0x364, +0x368
         float vec[3]{};        // +0x14C
         float dist80 = 0;      // +0x80
+        // The player in world coordinates, which the camera keeps beside the
+        // pivot's local ones. Two copies, at +0x94 and +0xB4, and the reader
+        // only believes them when they agree.
+        //
+        // This is what lets a press work before the actor manager has said
+        // anything. The pivot at +0x30 is local to the sub-level and the world
+        // position is the same point in the map's frame, so the difference
+        // between them is the sub-level origin, and that is the whole of what
+        // gs::player::Pos carries.
+        float world[3]{};
+        bool worldValid = false;
         bool valid = false;    // the object was readable
         bool fwdValid = false; // the quaternion was a unit rotation
     };

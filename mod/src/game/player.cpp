@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "game/camera.h"
 #include "game/rtti.h"
 #include "game/aim.h"
 

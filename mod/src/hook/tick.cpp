@@ -1056,13 +1056,40 @@ extern "C" void gs_OnMinimapTick(void* self)
     // ground under it when the camera is looking down. Never at the player.
     if (g_markPending.exchange(false))
     {
-        const gs::player::Pos pp = gs::player::Read();
-        if (!pp.valid || !gs::player::DetectComponent())
+        // A press needs a position and a direction. It does not need the
+        // detect component, which is only there to tell the automatic marker
+        // when the flash is up, and it does not need the player's own
+        // component either, because the camera carries the same position in
+        // both frames from the first tick.
+        //
+        // That matters because the actor manager takes sixty to seventy-five
+        // seconds to hand the component over, and 0.49.0 stopped walking the
+        // heap to get it sooner. Waiting that long to be able to press was the
+        // price of not freezing, and this is how the price gets paid back.
+        gs::player::Pos pp = gs::player::Read();
+        if (!pp.valid)
         {
-            GS_LOG_ERR("[mark] NOT READY: %s. Wait for 'READY' in this log, then press again.",
-                       !pp.valid ? "the player has not been located yet" : "the detect component has not been found yet");
+            const gs::camera::Pose cam = gs::camera::Read();
+            if (cam.valid && cam.worldValid)
+            {
+                pp.x = cam.world[0]; pp.y = cam.world[1]; pp.z = cam.world[2];
+                pp.lx = cam.pivot[0]; pp.ly = cam.pivot[1]; pp.lz = cam.pivot[2];
+                pp.ox = pp.x - pp.lx; pp.oy = pp.y - pp.ly; pp.oz = pp.z - pp.lz;
+                pp.q[0] = cam.q[0]; pp.q[1] = cam.q[1]; pp.q[2] = cam.q[2]; pp.q[3] = cam.q[3];
+                pp.valid = true;
+                pp.fromCamera = true;
+            }
+        }
+        if (!pp.valid)
+        {
+            GS_LOG_ERR("[mark] NOT READY: neither the player's own component nor the camera has a "
+                       "position yet. Give it a few seconds after the world appears.");
             return;
         }
+        if (pp.fromCamera)
+            GS_LOG("[mark] the player's own component is not in hand yet, so this press is using "
+                   "the camera's position: world (%.1f, %.1f, %.1f), sub-level origin "
+                   "(%.0f, %.0f, %.0f)", pp.x, pp.y, pp.z, pp.ox, pp.oy, pp.oz);
         const bool flash = gs::aim::FlashActive();
         GS_LOG("[mark] requested. player world (%.3f, %.3f, %.3f) local (%.3f, %.3f, %.3f), flash %s",
                pp.x, pp.y, pp.z, pp.lx, pp.ly, pp.lz, flash ? "on" : "off");

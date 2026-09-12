@@ -24,6 +24,11 @@ namespace gs::player
         float ox = 0, oy = 0, oz = 0;    // world minus local: the sub-level origin
         float q[4]{};                    // facing, yaw quaternion at transform +0x28C
         bool valid = false;
+        // True when this came from the camera rather than from the player's
+        // own component. The position is as good; what is missing is the
+        // flash, so the automatic glint marker still waits and a press does
+        // not have to.
+        bool fromCamera = false;
     };
 
     // Tell the reader where the player's special mode component is. Comes from
