@@ -80,7 +80,11 @@ namespace gs::pinmodel
                     memcpy(&x, r + 8, 4); memcpy(&y, r + 12, 4); memcpy(&z, r + 16, 4);
                     if (LooksLikePosition(x, y, z)) ++good;
                 }
-                if (!good) continue;
+                // A majority, not a single one. Session eighty let two lists
+                // of pointers through because one record in sixty-seven
+                // happened to hold two small floats, and the real list never
+                // got looked for.
+                if (good * 2 < static_cast<int>(count < 64 ? count : 64)) continue;
                 ++found;
 
                 GS_LOG("[pins]   %s+%03llX: %u record(s) of %u at 0x%p, %d read as positions%s",
@@ -146,6 +150,119 @@ namespace gs::pinmodel
         }
     }
 
+    // Coordinates from markers Seth placed by hand in earlier sessions, read
+    // straight out of the spy captures of the game building them. Any of these
+    // appearing as a float is the marker list, wherever it turns out to live.
+    const float kKnownX[] = {
+        -9714.073f, -10521.472f, -12386.253f, -11320.633f, -4464.704f,
+        -12402.748f, -12675.004f, -4935.399f,
+    };
+
+    bool IsKnownX(float v)
+    {
+        for (float k : kKnownX)
+            if (v > k - 0.05f && v < k + 0.05f) return true;
+        return false;
+    }
+
+    // Every four-byte float in a block, checked against those. On a hit, the
+    // bytes either side, because the record layout is the other half of what
+    // this is for.
+    int HuntBlock(uintptr_t base, size_t bytes, const char* tag)
+    {
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(base), bytes)) return 0;
+        int hits = 0;
+        __try
+        {
+            for (size_t off = 0; off + 4 <= bytes; off += 4)
+            {
+                float v;
+                memcpy(&v, reinterpret_cast<const void*>(base + off), 4);
+                if (!IsKnownX(v)) continue;
+                ++hits;
+                GS_LOG("[pins] HIT %s+%04llX holds %.3f", tag,
+                       static_cast<unsigned long long>(off), v);
+                const size_t from = off >= 32 ? off - 32 : 0;
+                for (size_t r = from; r < off + 48 && r + 16 <= bytes; r += 16)
+                {
+                    const auto* b = reinterpret_cast<const uint8_t*>(base + r);
+                    float f0, f1, f2, f3;
+                    memcpy(&f0, b, 4); memcpy(&f1, b + 4, 4);
+                    memcpy(&f2, b + 8, 4); memcpy(&f3, b + 12, 4);
+                    GS_LOG("[pins]   %s+%04llX  %02X%02X%02X%02X %02X%02X%02X%02X "
+                           "%02X%02X%02X%02X %02X%02X%02X%02X   %.2f %.2f %.2f %.2f",
+                           tag, static_cast<unsigned long long>(r),
+                           b[3], b[2], b[1], b[0], b[7], b[6], b[5], b[4],
+                           b[11], b[10], b[9], b[8], b[15], b[14], b[13], b[12],
+                           f0, f1, f2, f3);
+                }
+                if (hits >= 4) break;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return hits;
+    }
+
+    void HuntByCoordinates(const char* why)
+    {
+        const uintptr_t sub = Submodule();
+        const uintptr_t actor = gs::player::Actor();
+        if (!actor) { GS_LOG("[pins] %s: no player actor to hunt from", why); return; }
+
+        int hits = 0;
+        char tag[32];
+
+        // The submodule itself, then everything it points at.
+        if (sub)
+        {
+            hits += HuntBlock(sub, 0x1000, "sub");
+            for (uintptr_t off = 0; off + 8 <= 0x1000 && hits < 8; off += 8)
+            {
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(sub + off), 8)) break;
+                const uintptr_t p = *reinterpret_cast<const uintptr_t*>(sub + off);
+                if (p < 0x10000 || (p & 7) != 0) continue;
+                _snprintf_s(tag, sizeof(tag), _TRUNCATE, "sub+%03llX*",
+                            static_cast<unsigned long long>(off));
+                hits += HuntBlock(p, 0x4000, tag);
+            }
+        }
+
+        // Then every component the player carries, and what each points at.
+        __try
+        {
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(actor + gs::sig::kOff_Actor_Components), 8))
+                return;
+            const uintptr_t comps =
+                *reinterpret_cast<const uintptr_t*>(actor + gs::sig::kOff_Actor_Components);
+            if (comps < 0x10000) return;
+            for (uintptr_t c = 0; c + 8 <= 0x400 && hits < 8; c += 8)
+            {
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(comps + c), 8)) break;
+                const uintptr_t obj = *reinterpret_cast<const uintptr_t*>(comps + c);
+                if (obj < 0x10000 || (obj & 7) != 0 || obj == sub) continue;
+                _snprintf_s(tag, sizeof(tag), _TRUNCATE, "c%03llX",
+                            static_cast<unsigned long long>(c));
+                hits += HuntBlock(obj, 0x1000, tag);
+                for (uintptr_t off = 0; off + 8 <= 0x400 && hits < 8; off += 8)
+                {
+                    if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj + off), 8)) break;
+                    const uintptr_t p = *reinterpret_cast<const uintptr_t*>(obj + off);
+                    if (p < 0x10000 || (p & 7) != 0) continue;
+                    _snprintf_s(tag, sizeof(tag), _TRUNCATE, "c%03llX+%03llX*",
+                                static_cast<unsigned long long>(c),
+                                static_cast<unsigned long long>(off));
+                    hits += HuntBlock(p, 0x2000, tag);
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        GS_LOG("[pins] %s: the coordinate hunt found %d hit(s)", why, hits);
+    }
+
     void LogState(const char* why)
     {
         const uintptr_t sub = Submodule();
@@ -174,5 +291,6 @@ namespace gs::pinmodel
             GS_LOG("[pins] the submodule holds no list of marker-shaped records");
             SweepComponents(why);
         }
+        HuntByCoordinates(why);
     }
 }

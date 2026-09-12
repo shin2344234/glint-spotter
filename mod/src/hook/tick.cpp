@@ -646,7 +646,7 @@ namespace
                 // and he says they landed where he pointed, so the sway was
                 // never the problem the wide cone was solving.
                 tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             2.0f, 0.015f, 5.0f, reach > 0.0f ? reach : 1.0e9f,
+                                             0.5f, 0.0105f, 10.0f, reach > 0.0f ? reach : 1.0e9f,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
@@ -1061,21 +1061,30 @@ extern "C" void gs_OnMinimapTick(void* self)
                 {
                     gs::lgso::Place sight[4];
                     float sightDist[4];
-                    // Two metres and one and a half per cent, which is a press
-                    // aiming rather than sweeping. Eight metres flat put pins
-                    // nineteen and thirty-three metres out on whatever a
-                    // sector record had off to the side, because eight metres
-                    // at nineteen is a cone twenty-four degrees wide.
+                    // Six tenths of a degree, and the floor is half a metre
+                    // so that it stays an angle all the way in.
                     //
-                    // No ceiling here, whatever Reach says. Reach exists
-                    // because the automatic path pins on its own and once put
-                    // a marker three kilometres out during a flash. A press is
-                    // the player pointing at something and asking for it, and
-                    // there is nothing to protect him from: if he can see a
+                    // Two metres was still a distance pretending to be an aim.
+                    // Session eighty pressed twice and took the same thing
+                    // eight metres away, one metre off the line and seven and
+                    // a half degrees off the crosshair, while what Seth was
+                    // actually pointing at sat six hundred metres out at half
+                    // a degree. A metric floor is an enormous angle up close,
+                    // and the nearest survivor wins, so anything underfoot
+                    // takes every press.
+                    //
+                    // Twenty-five metres is also the closest a press will look.
+                    // A map marker for something four paces away is not a
+                    // thing anybody wants, and refusing them costs nothing.
+                    //
+                    // No ceiling, whatever Reach says. Reach exists because the
+                    // automatic path pins on its own and once put a marker
+                    // three kilometres out during a flash. A press is the
+                    // player asking for a specific thing, and if he can see a
                     // tower across the map he can have it.
                     const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oz,
                                                        sv.fx / flen, sv.fz / flen,
-                                                       2.0f, 0.015f, 3.0f, 1.0e9f,
+                                                       0.5f, 0.0105f, 25.0f, 1.0e9f,
                                                        sight, sightDist, 4, true);
                     if (sn > 0)
                     {

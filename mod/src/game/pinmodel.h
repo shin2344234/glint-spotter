@@ -21,4 +21,15 @@ namespace gs::pinmodel
     // Print the marker list for kind 0x15, and enough of its neighbourhood to
     // spot the right offset if 0xC8 is wrong. Safe to call from the tick.
     void LogState(const char* why);
+
+    // Hunt for the list by the coordinates it must contain.
+    //
+    // Session eighty found the submodule and it is real, a
+    // ClientSelfContentsMiscActorComponent, but no list inside it holds
+    // markers. Guessing further at offsets is the wrong game when the answer
+    // is already written down: the spy captured the game building Seth's own
+    // markers from its model, so their coordinates are known. A float that
+    // matches one of them, anywhere in that component or in anything it points
+    // at, is the list, and the bytes around it are the record layout.
+    void HuntByCoordinates(const char* why);
 }
