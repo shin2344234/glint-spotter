@@ -960,13 +960,40 @@ namespace
                 held = gs::aim::DescribeTargets(eye, sayTargets);
             }
         }
-        int pick = n > 0 ? 0 : -1;
-        float pickAngle = n > 0 ? angles[0] : 0.0f;
+        // Somewhere a pin was taken off is not a candidate at all.
+        //
+        // Refusing at the end instead, which is what 1.1.4 did, let one
+        // declined thing stand in front of everything else: it won the pick
+        // every pass, was refused every pass, and the three second wait that
+        // came with the refusal meant nothing else could be pinned either. A
+        // whole session marked nothing.
+        int declinedSeen = 0;
+        int pick = -1;
+        for (int i = 0; i < n; ++i)
+        {
+            if (DeclinedNear(around[i].x, around[i].z, kPinApart)) { ++declinedSeen; continue; }
+            pick = i;
+            break;
+        }
+        float pickAngle = pick >= 0 ? angles[pick] : 0.0f;
+        int tablePick = 0;
+        while (tablePick < tableN && DeclinedNear(table[tablePick].x, table[tablePick].z, kPinApart))
+        {
+            ++tablePick;
+            ++declinedSeen;
+        }
+        int glintPick = 0;
+        while (glintPick < glintN &&
+               DeclinedNear(glints[glintPick].x, glints[glintPick].z, kPinApart))
+        {
+            ++glintPick;
+            ++declinedSeen;
+        }
         // Seven degrees, because the table is complete and a wide cone over a
         // complete set just invites the wrong answer. At two hundred metres
         // seven degrees is twenty-four metres across, which is about the
         // precision a crosshair has at that range.
-        bool byTable = tableN > 0;
+        bool byTable = tablePick < tableN;
         if (byTable && g_tableLogsLeft > 0)
         {
             --g_tableLogsLeft;
@@ -981,17 +1008,17 @@ namespace
                 const float deg = std::atan2(perp, tableAngles[k]) * 57.2958f;
                 GS_LOG("[auto]   %srecord %u element %u \"%s\" at (%.1f, %.1f, %.1f), %.0f metres "
                        "out, %.1f off the line, %.2f degrees",
-                       k == 0 ? "TAKEN " : "      ", table[k].record, table[k].element,
+                       k == tablePick ? "TAKEN " : "      ", table[k].record, table[k].element,
                        table[k].name[0] ? table[k].name : "unnamed",
                        table[k].x, table[k].y, table[k].z, tableAngles[k], perp, deg);
             }
         }
 
         bool byGlint = false;
-        if (glintN > 0 && glintAngles[0] < 0.70f)   // forty degrees
+        if (glintPick < glintN && glintAngles[glintPick] < 0.70f)   // forty degrees
         {
             byGlint = true;
-            pickAngle = glintAngles[0];
+            pickAngle = glintAngles[glintPick];
         }
         // Only the glint gets a pin. Session fifty-eight pressed from the spot
         // I have been testing from all along, a hundred and nineteen metres
@@ -1026,11 +1053,12 @@ namespace
         if (byGlint && g_glintWinsLeft > 0)
         {
             --g_glintWinsLeft;
-            const float gx = glints[0].x - pp.x, gz = glints[0].z - pp.z;
+            const float gx = glints[glintPick].x - pp.x, gz = glints[glintPick].z - pp.z;
             GS_LOG("[auto] the game has set the glint byte on %d node(s); the nearest the crosshair is "
                    "\"%s\" eid %08X, %.1f metres away, %.1f degrees off. That takes the pin.",
-                   glintN, glints[0].name[0] ? glints[0].name : "?", glints[0].eid,
-                   std::sqrt(gx * gx + gz * gz), glintAngles[0] * 57.2958f);
+                   glintN, glints[glintPick].name[0] ? glints[glintPick].name : "?",
+                   glints[glintPick].eid,
+                   std::sqrt(gx * gx + gz * gz), glintAngles[glintPick] * 57.2958f);
         }
 
         // The game's own detect target, when it has one on the crosshair,
@@ -1074,22 +1102,25 @@ namespace
         } chosen;
         if (byTable)
         {
-            chosen.x = table[0].x; chosen.y = table[0].y; chosen.z = table[0].z;
+            chosen.x = table[tablePick].x; chosen.y = table[tablePick].y;
+            chosen.z = table[tablePick].z;
             chosen.angleDeg = 0.0f;
             chosen.eid = 0;
             chosen.how = "the game's own level gimmick table";
-            _snprintf_s(chosen.name, sizeof(chosen.name), _TRUNCATE,
-                        "%s", table[0].name[0] ? table[0].name : "unnamed level gimmick");
+            _snprintf_s(chosen.name, sizeof(chosen.name), _TRUNCATE, "%s",
+                        table[tablePick].name[0] ? table[tablePick].name
+                                                 : "unnamed level gimmick");
             chosen.valid = true;
         }
         else if (byGlint)
         {
-            chosen.x = glints[0].x; chosen.y = glints[0].y; chosen.z = glints[0].z;
-            chosen.angleDeg = glintAngles[0] * 57.2958f;
-            chosen.eid = glints[0].eid;
-            chosen.how = glints[0].how ? glints[0].how : "?";
+            chosen.x = glints[glintPick].x; chosen.y = glints[glintPick].y;
+            chosen.z = glints[glintPick].z;
+            chosen.angleDeg = glintAngles[glintPick] * 57.2958f;
+            chosen.eid = glints[glintPick].eid;
+            chosen.how = glints[glintPick].how ? glints[glintPick].how : "?";
             strncpy_s(chosen.name, sizeof(chosen.name),
-                      glints[0].name[0] ? glints[0].name : "?", _TRUNCATE);
+                      glints[glintPick].name[0] ? glints[glintPick].name : "?", _TRUNCATE);
             chosen.valid = true;
         }
         else if (byTarget)
@@ -1203,21 +1234,19 @@ namespace
             GS_LOG("[auto] \"%s\" is already pinned; the map has it from earlier this session",
                    chosen.name);
         }
-        if (matured && now >= g_cooldownUntil &&
-            !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart) &&
-            DeclinedNear(chosen.x, chosen.z, kPinApart))
+        // Something was passed over for having had its pin taken off, and
+        // nothing else on the line could take its place. Said out loud,
+        // because a flash that does nothing and says nothing reads as broken.
+        if (!chosen.valid && declinedSeen > 0 && g_declineLogsLeft > 0 &&
+            now - g_declineLastMs > 10000)
         {
-            g_cooldownUntil = now + 3000;
-            if (g_declineLogsLeft > 0 && now - g_declineLastMs > 10000)
-            {
-                --g_declineLogsLeft;
-                g_declineLastMs = now;
-                GS_LOG("[auto] you took the pin for \"%s\" off the map, so the flash leaves it "
-                       "alone. Press the button at it to have it back.", chosen.name);
-            }
+            --g_declineLogsLeft;
+            g_declineLastMs = now;
+            GS_LOG("[auto] the only thing on the line is one you took the pin off, so the flash "
+                   "leaves it alone. Press the button at it to have it back.");
         }
-        else if (matured && now >= g_cooldownUntil &&
-                 !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
+        if (matured && now >= g_cooldownUntil &&
+            !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
         {
             // The ground, asked once, at the moment a pin is about to land.
             //
