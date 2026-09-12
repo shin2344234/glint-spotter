@@ -1,6 +1,6 @@
 #pragma once
 
 #define GS_VERSION_MAJOR 0
-#define GS_VERSION_MINOR 70
+#define GS_VERSION_MINOR 71
 #define GS_VERSION_PATCH 0
-#define GS_VERSION_STRING "0.70.0"
+#define GS_VERSION_STRING "0.71.0"

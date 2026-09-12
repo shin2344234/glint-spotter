@@ -600,12 +600,12 @@ namespace gs::mapicon
         return r;
     }
 
-    int LivePinKeys(int64_t minId, int64_t* out, int n)
+    int LivePinKeys(int64_t* out, int n)
     {
         const int total = g_placedN.load();
         int got = 0;
         for (int i = 0; i < total && i < kMaxPins && got < n; ++i)
-            if (!g_placed[i].gone && g_placed[i].id >= minId) out[got++] = g_placed[i].id;
+            if (!g_placed[i].gone) out[got++] = g_placed[i].id;
         return got;
     }
 

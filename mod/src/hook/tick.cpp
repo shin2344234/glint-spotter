@@ -287,10 +287,10 @@ namespace
         // pins on every place.
         void* root = gs::mapicon::LastWorldRoot();
         int64_t old[256];
-        const int oldN = gs::mapicon::LivePinKeys(gs::realpin::IdBase(), old, 256);
+        const int oldN = gs::mapicon::LivePinKeys(old, 256);
         for (int i = 0; i < oldN; ++i)
         {
-            gs::realpin::Retire(old[i]);
+            if (old[i] >= gs::realpin::IdBase()) gs::realpin::Retire(old[i]);
             gs::mapicon::RemoveIcon(root, old[i]);
         }
         if (oldN) GS_LOG("[pins] %d old pin(s) taken off first", oldN);
