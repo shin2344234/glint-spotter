@@ -98,9 +98,20 @@ namespace
     {
         if (prune && g_groups.size() >= kMaxGroups)
         {
-            size_t oldest = 0;
-            for (size_t i = 1; i < g_groups.size(); ++i)
-                if (g_groups[i].touched < g_groups[oldest].touched) oldest = i;
+            // Never the one in hand, however long ago it was played. Erasing
+            // that one would leave the index pointing at somebody else's pins.
+            size_t oldest = g_groups.size();
+            for (size_t i = 0; i < g_groups.size(); ++i)
+            {
+                if (i == g_cur) continue;
+                if (oldest == g_groups.size() || g_groups[i].touched < g_groups[oldest].touched)
+                    oldest = i;
+            }
+            if (oldest == g_groups.size())
+            {
+                g_groups.emplace_back();
+                return g_groups.size() - 1;
+            }
             GS_LOG("[pins] %u saves is as many as the file keeps; the least recently played one "
                    "and its %u pin(s) are forgotten", static_cast<unsigned>(kMaxGroups),
                    static_cast<unsigned>(g_groups[oldest].pins.size()));
@@ -254,12 +265,6 @@ namespace gs::pinstore
         g_cur = Mint();
         GS_LOG("[pins] a world with no save read in front of it, so this is a new game; it starts "
                "with no pins and takes them along when it is first saved");
-    }
-
-    bool Bound()
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        return !Cur().slots.empty();
     }
 
     void Add(float x, float y, float z, const char* label)

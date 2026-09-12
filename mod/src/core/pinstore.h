@@ -48,9 +48,6 @@ namespace gs::pinstore
     // Pins from here belong to nothing until the first save is written.
     void NewGame();
 
-    // Whether the pins in hand are attached to a save yet.
-    bool Bound();
-
     // Remember a new pin and write the file. Ignored when the list is full.
     void Add(float x, float y, float z, const char* label);
 

@@ -42,7 +42,7 @@ namespace
         uint64_t got = 0;
         uint32_t since = 0;   // when it was opened, so it can be given up on
     };
-    constexpr int kOpen = 16;
+    constexpr int kOpen = 32;
     Open g_open[kOpen];
     int g_openNext = 0;
     std::atomic<int> g_tracked{0};   // read by every ReadFile in the game
@@ -158,8 +158,18 @@ namespace
                                    ? static_cast<uint64_t>(size.QuadPart)
                                    : 0;
         std::lock_guard<std::mutex> lock(g_mutex);
-        Open& slot = g_open[g_openNext];
-        g_openNext = (g_openNext + 1) % kOpen;
+        // Windows hands the same handle value out again after a close, and a
+        // close is the one thing this does not watch. Reusing the entry rather
+        // than adding a second one keeps the count honest.
+        Open* found = nullptr;
+        for (Open& o : g_open)
+            if (o.handle == h) { found = &o; break; }
+        if (!found)
+        {
+            found = &g_open[g_openNext];
+            g_openNext = (g_openNext + 1) % kOpen;
+        }
+        Open& slot = *found;
         slot.handle = h;
         slot.id = id;
         slot.need = bytes ? bytes / 2 : 256u * 1024u;
@@ -215,7 +225,10 @@ namespace
     // filter swallows everything, so the clear below is always reached.
     void Note(LPCWSTR path, DWORD access, DWORD disposition, HANDLE opened)
     {
-        if (!path || g_inside) return;
+        // A failed open is the game asking whether a file is there. The load
+        // menu does that, and so does a save into a slot that does not exist
+        // yet, and neither is worth an event.
+        if (!path || g_inside || opened == INVALID_HANDLE_VALUE) return;
         g_inside = true;
         gs::saveslot::Id id;
         __try
@@ -226,7 +239,9 @@ namespace
                 Push(id, write, false);
                 if (!write) Track(opened, id);
             }
-            else if (g_oddLogsLeft.load() > 0 && TailIs(path, wcslen(path), L".save", 5))
+            else if (g_oddLogsLeft.load() > 0 &&
+                     (TailIs(path, wcslen(path), L".save", 5) ||
+                      TailIs(path, wcslen(path), L".tmp", 4)))
             {
                 --g_oddLogsLeft;
                 GS_LOG("[save] a .save file this does not recognise: %ls (access 0x%08lX, "
@@ -327,19 +342,25 @@ namespace gs::saveslot
     int Take(Event* out, int n)
     {
         Expire();
-        std::lock_guard<std::mutex> lock(g_mutex);
-        if (g_dropped)
-        {
-            g_dropped = false;
-            GS_LOG_ERR("[save] more save opens arrived than the queue holds; one was missed");
-        }
         int got = 0;
-        for (; got < g_queued && got < n; ++got) out[got] = g_queue[got];
-        // What did not fit stays, in order. The first build cleared the queue
-        // whatever it had handed over, and the game opening eight saves in one
-        // tick meant the one that mattered went in the half thrown away.
-        for (int i = got; i < g_queued; ++i) g_queue[i - got] = g_queue[i];
-        g_queued -= got;
+        bool dropped = false;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            dropped = g_dropped;
+            g_dropped = false;
+            for (; got < g_queued && got < n; ++got) out[got] = g_queue[got];
+            // What did not fit stays, in order. The first build cleared the
+            // queue whatever it had handed over, and the game opening eight
+            // saves inside one tick meant the one that mattered went out with
+            // the half thrown away.
+            for (int i = got; i < g_queued; ++i) g_queue[i - got] = g_queue[i];
+            g_queued -= got;
+        }
+        // Outside the lock. A detour takes this lock, and writing a line takes
+        // the log's, so holding both at once in one order here and the other
+        // order there is the shape a deadlock comes in.
+        if (dropped)
+            GS_LOG_ERR("[save] more save opens arrived than the queue holds; one was missed");
         return got;
     }
 
