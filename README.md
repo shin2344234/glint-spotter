@@ -1,6 +1,7 @@
 # Glint Spotter
 
-Puts a map marker on the thing you are looking at, in Crimson Desert 2.02.00.
+Puts a map marker on the thing you are looking at with Blinding Flash or a
+button press.
 
 Aim Blinding Flash at a glint and the mod pins the object it is
 lighting, out to the range you can actually see one. Or point at anything at
@@ -8,7 +9,8 @@ all and press a button, and it pins that instead. The pin lands on the world
 map where the thing stands, so you can walk away and come back to it, and the
 map's own Remove Marker takes it off again when you are done.
 
-Read the limitations before you install it.
+An ASI plugin for Crimson Desert 2.02.00. Read the limitations before you
+install it.
 
 ## What it does
 
@@ -109,6 +111,11 @@ bands, so that one number is usually enough to place the mistake.
 
 Set `Verbose=1` before a run if something is badly broken. It writes about a
 thousand lines a minute and stutters the frame, so turn it back off afterwards.
+
+## Source and licence
+
+MIT licensed. The source, the build script and the notes from working the mod
+out are at [github.com/shin2344234/glint-spotter](https://github.com/shin2344234/glint-spotter).
 
 ## Discord and Patreon
 

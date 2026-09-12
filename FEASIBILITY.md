@@ -172,8 +172,9 @@ the cheapest of the three and would make piece one nearly free.
 while logging writes near whatever the `+0xAB5594` read points at.
 
 **Does MasterLooter collide on the map hooks?** Another mod already owns both
-map update slots on this machine. The present-hook ordering problem in CLAUDE.md
-is the same shape, and the answer there was to stack rather than wrap. Assume the
+map update slots on this machine. The present-hook ordering problem in Master
+Looter's notes is the same shape, and the answer there was to stack rather than
+wrap. Assume the
 same applies and test it early. Details in `private/CRIMSON-ROUTE.md`.
 
 ## Reasons not to build it
@@ -579,9 +580,9 @@ reach into that project for anything. `disasm.py` disassembles from an RVA,
 into the vtable that holds it.
 
 They are unchanged apart from two things. `disasm.py` no longer adds Master
-Looter's `codex/python-deps` to the path, since this folder does not vendor
-capstone; it uses the installed one, and prefers a local `vendor` folder if one
-is ever added. `qref.py` gained the usage docstring it never had. Each carries a
+Looter's vendored dependency folder to the path, since this folder does not
+vendor capstone; it uses the installed one, and prefers a local `vendor` folder
+if one is ever added. `qref.py` gained the usage docstring it never had. Each carries a
 line saying where it came from and when, so a future divergence from Master
 Looter's copies is visible rather than silent.
 
@@ -912,7 +913,7 @@ byte from its own `+0x58` and calls slot 124 of the actor's
 `component+0x45B`. Slot 7 (`0x88DD20`) reads it back. The component sits at
 slot `+0x30` of the entity's component block, vtable `+0x054A5A10`. The mesh
 highlight is a separate handler writing a different byte through a different
-sub-object, so `+0x45B` is the knowledge glint specifically. The refuter
+sub-object, so `+0x45B` is the knowledge glint specifically. A second reading
 reproduced every instruction.
 
 The effect names (`fx_detectmode_knowledge_gimmick` and the rest) are not in
@@ -977,7 +978,7 @@ frame on one object.
 
 ### The game's own ray cast
 
-Two more passes against the exe, each refuted by a second agent, gave:
+Two more passes against the exe, each checked against the other, gave:
 
 - `hknpWorld::castRay` at `0x41BDA30`, slot 61 of the world's vtable at
   `0x51FB528`, taking (world, query, collector). Havok here is double
@@ -1056,7 +1057,7 @@ vtables fall back to RTTI, the camera update is matched by its first bytes,
 the ray cast wrapper by its prologue pattern with the facade and frame
 offset decoded from its own operands.
 
-Four audits, each refuted by a second pass, went over everything:
+Four audits, each checked by a second pass, went over everything:
 
 - Nothing the mod reads or calls changed in shape. Entity, transform,
   actor manager pools, the gimmick byte and its setter, the detect gate,

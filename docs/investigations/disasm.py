@@ -6,7 +6,7 @@ here is a fixed virtual address at runtime too.
 
 Copied from Master Looter's docs/investigations on 10 September 2026 so this mod
 carries its own copy. The only change is the capstone import below: that project
-vendors capstone under codex/python-deps and this one does not, so this uses
+vendors capstone in a folder of its own and this one does not, so this uses
 whatever capstone is installed. If it is ever missing: py -3 -m pip install capstone
 """
 import os, struct, sys

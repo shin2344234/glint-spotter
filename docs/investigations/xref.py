@@ -18,8 +18,8 @@ Hits are then filtered against the .pdata RUNTIME_FUNCTION table and only those
 landing inside a real function are printed, which throws away the coincidental
 matches in data. Pass --all to see the unfiltered hits too.
 
-numpy is a system install here, not vendored in Master Looter's
-codex/python-deps, so this script does not touch PYTHONPATH the way disasm.py
+numpy is a system install here, not vendored the way Master Looter vendors
+its own dependencies, so this script does not touch PYTHONPATH the way disasm.py
 does. If it is ever missing: py -3 -m pip install numpy
 
 Written 10 September 2026. It found the whole chain from the map icon create
