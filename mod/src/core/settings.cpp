@@ -36,6 +36,75 @@ namespace
     // Controller buttons by name, joined with + or a comma. Case does not
     // matter and anything unrecognised is ignored, which is logged by the
     // caller when the whole string names nothing.
+    // A key by name, or 0 for one this does not know. Letters and digits are
+    // themselves, the function keys are F1 to F24, and the rest are the keys
+    // people actually reach for when a game has taken everything else.
+    uint32_t KeyFromName(const char* s)
+    {
+        struct Named { const char* name; uint32_t vk; };
+        static const Named kKeys[] = {
+            {"PAUSE", 0x13},     {"CAPSLOCK", 0x14},  {"SPACE", 0x20},
+            {"PAGEUP", 0x21},    {"PAGEDOWN", 0x22},  {"END", 0x23},
+            {"HOME", 0x24},      {"INSERT", 0x2D},    {"DELETE", 0x2E},
+            {"NUMLOCK", 0x90},   {"SCROLLLOCK", 0x91},
+            {"BACKSLASH", 0xDC}, {"TILDE", 0xC0},     {"GRAVE", 0xC0},
+            {"MINUS", 0xBD},     {"EQUALS", 0xBB},
+            {"LBRACKET", 0xDB},  {"RBRACKET", 0xDD},
+            {"SEMICOLON", 0xBA}, {"QUOTE", 0xDE},
+            {"COMMA", 0xBC},     {"PERIOD", 0xBE},    {"SLASH", 0xBF},
+        };
+        char w[16];
+        size_t n = 0;
+        for (const char* p = s; *p && n + 1 < sizeof(w); ++p)
+            if (*p != ' ' && *p != '_' && *p != '-')
+                w[n++] = static_cast<char>(toupper(static_cast<unsigned char>(*p)));
+        w[n] = 0;
+        if (n == 0) return 0;
+        for (const Named& k : kKeys)
+            if (strcmp(w, k.name) == 0) return k.vk;
+        if (n == 1 && w[0] >= 'A' && w[0] <= 'Z') return static_cast<uint32_t>(w[0]);
+        if (n == 1 && w[0] >= '0' && w[0] <= '9') return static_cast<uint32_t>(w[0]);
+        if (w[0] == 'F' && n >= 2 && n <= 3)
+        {
+            int num = 0;
+            for (size_t i = 1; i < n; ++i)
+            {
+                if (w[i] < '0' || w[i] > '9') return 0;
+                num = num * 10 + (w[i] - '0');
+            }
+            if (num >= 1 && num <= 24) return 0x70 + static_cast<uint32_t>(num - 1);
+        }
+        if (n >= 7 && strncmp(w, "NUMPAD", 6) == 0 && w[6] >= '0' && w[6] <= '9' && n == 7)
+            return 0x60 + static_cast<uint32_t>(w[6] - '0');
+        return 0;
+    }
+
+    // The chord back in words, so the log can be read as a binding rather than
+    // as a bitmask.
+    const char* ChordText(uint16_t bits, char* out, size_t cap)
+    {
+        struct Named { uint16_t bit; const char* name; };
+        static const Named kButtons[] = {
+            {0x0100, "LB"}, {0x0200, "RB"}, {0x0040, "LS"}, {0x0080, "RS"},
+            {0x1000, "A"},  {0x2000, "B"},  {0x4000, "X"},  {0x8000, "Y"},
+            {0x0001, "Up"}, {0x0002, "Down"}, {0x0004, "Left"}, {0x0008, "Right"},
+            {0x0010, "Start"}, {0x0020, "Back"},
+        };
+        out[0] = 0;
+        size_t w = 0;
+        for (const Named& b : kButtons)
+        {
+            if (!(bits & b.bit)) continue;
+            const size_t need = strlen(b.name) + (w ? 3 : 0);
+            if (w + need + 1 >= cap) break;
+            if (w) { memcpy(out + w, " + ", 3); w += 3; }
+            memcpy(out + w, b.name, strlen(b.name));
+            w += strlen(b.name);
+            out[w] = 0;
+        }
+        return out[0] ? out : "nothing";
+    }
+
     uint16_t ChordBits(const char* s)
     {
         struct Named { const char* name; uint16_t bit; };
@@ -85,9 +154,10 @@ namespace
         fputs("; Raise it if a mark ever lands during a fight.\n", f);
         fputs("Hold=0\n", f);
         fputs("\n", f);
-        fputs("; The same on the keyboard, as a hex virtual-key code. 91 is Scroll Lock,\n", f);
-        fputs("; 7B is F12, 13 is Pause.\n", f);
-        fputs("Key=91\n", f);
+        fputs("; The key that marks whatever the crosshair is on. A name: F1 to F24, a\n", f);
+        fputs("; letter, a digit, Insert, Delete, Home, End, PageUp, PageDown, Pause,\n", f);
+        fputs("; ScrollLock, Numpad0 to Numpad9. F9 because the game binds nothing to it.\n", f);
+        fputs("Key=F9\n", f);
         fputs("\n", f);
         fputs("; 1 buzzes the controller when a pin lands. The map is rarely open at that\n", f);
         fputs("; moment, so this is usually the only thing that tells you it worked.\n", f);
@@ -203,9 +273,19 @@ namespace gs::Settings
 
             if (_stricmp(key, "Key") == 0)
             {
-                const unsigned long v = strtoul(val, nullptr, 16);
-                if (v > 0 && v < 256) g_values.key = static_cast<uint32_t>(v);
-                else GS_LOG_ERR("settings: Key=%s is not a hex VK code, keeping %02X", val, g_values.key);
+                // A name first, since that is what the ini asks for. A bare
+                // hex code still works, because that is what every ini written
+                // before this build holds.
+                uint32_t vk = KeyFromName(val);
+                if (!vk)
+                {
+                    const unsigned long v = strtoul(val, nullptr, 16);
+                    if (v > 0 && v < 256) vk = static_cast<uint32_t>(v);
+                }
+                if (vk) g_values.key = vk;
+                else GS_LOG_ERR("settings: Key=%s is not a key I know. Try a name like F9, or a "
+                                "letter, or a two digit hex code. Keeping %s.", val,
+                                KeyName(g_values.key));
             }
             else if (_stricmp(key, "Spy") == 0)
             {
@@ -340,9 +420,13 @@ namespace gs::Settings
         else
             GS_LOG("settings: Key=%02X (%s), Spy=%d, no radius cap: everything the game has loaded",
                    g_values.key, KeyName(g_values.key), g_values.spy ? 1 : 0);
+        char chord[64];
+        GS_LOG("settings: the mark key is %s and the pad chord is %s%s", KeyName(g_values.key),
+               ChordText(g_values.chord, chord, sizeof(chord)),
+               g_values.holdMs ? ", held" : "");
         if (g_values.reach > 0.0f)
-            GS_LOG("settings: Reach=%.0f metres, Chord=0x%04X held %lu ms", g_values.reach,
-                   g_values.chord, static_cast<unsigned long>(g_values.holdMs));
+            GS_LOG("settings: Reach=%.0f metres, chord held %lu ms", g_values.reach,
+                   static_cast<unsigned long>(g_values.holdMs));
         else
             GS_LOG("settings: no reach ceiling, Chord=0x%04X held %lu ms", g_values.chord,
                    static_cast<unsigned long>(g_values.holdMs));
@@ -379,18 +463,40 @@ namespace gs::Settings
         switch (vk)
         {
         case 0x13: return "Pause";
+        case 0x14: return "Caps Lock";
+        case 0x20: return "Space";
+        case 0x21: return "Page Up";
+        case 0x22: return "Page Down";
+        case 0x23: return "End";
+        case 0x24: return "Home";
         case 0x2D: return "Insert";
         case 0x2E: return "Delete";
-        case 0x91: return "Scroll Lock";
         case 0x90: return "Num Lock";
+        case 0x91: return "Scroll Lock";
+        case 0xBA: return "semicolon";
+        case 0xBB: return "equals";
+        case 0xBC: return "comma";
+        case 0xBD: return "minus";
+        case 0xBE: return "period";
+        case 0xBF: return "slash";
+        case 0xC0: return "tilde";
+        case 0xDB: return "left bracket";
+        case 0xDC: return "backslash";
+        case 0xDD: return "right bracket";
+        case 0xDE: return "quote";
         default:
-            if (vk >= 0x70 && vk <= 0x7B)
+        {
+            static char buf[12];
+            if (vk >= 0x70 && vk <= 0x87) { sprintf_s(buf, "F%u", vk - 0x70 + 1); return buf; }
+            if (vk >= 0x60 && vk <= 0x69) { sprintf_s(buf, "Numpad %u", vk - 0x60); return buf; }
+            if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9'))
             {
-                static char fkey[8];
-                sprintf_s(fkey, "F%u", vk - 0x70 + 1);
-                return fkey;
+                sprintf_s(buf, "%c", static_cast<char>(vk));
+                return buf;
             }
-            return "key";
+            sprintf_s(buf, "key %02X", vk);
+            return buf;
+        }
         }
     }
 }

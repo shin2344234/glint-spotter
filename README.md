@@ -17,7 +17,7 @@ This is a test build. Read the limitations before you install it.
   second. Distance is not the limit it used to be: a glint six hundred metres
   out marks as readily as one at twenty.
 - **Marks anything on request.** Right bumper, left bumper and A together, or
-  Scroll Lock, pins whatever the crosshair is on. Ruins, camps, ore veins,
+  F9 on the keyboard, pins whatever the crosshair is on. Ruins, camps, ore veins,
   bridges, dungeon mouths, shops. Anything the game keeps in its own level data,
   which is most things worth walking to.
 - **Buzzes the controller when a pin lands**, because the map is not open at that
@@ -59,7 +59,13 @@ the prompt offers, which changes to Remove Marker exactly as it does over one of
 your own. There is no extra key and no chord, and the pin goes out of the
 file at the same time, so it stays gone across a reload.
 
-Everything is in `GlintSpotter.ini` beside the plugin, and every key has a
+Both binds are yours to change. `Chord` takes controller button names, so
+`Chord=LB+RB+X` or `Chord=RS` work as written. `Key` takes a key name: `F9` by
+default because the game binds nothing to it, and `Insert`, `Home`, `Numpad5`,
+a bare letter and the rest are all accepted. The log prints both back in words
+on startup, so you can see what it read.
+
+Everything else is in `GlintSpotter.ini` beside the plugin, and every key has a
 comment saying what it does. The two worth knowing are `Rod`, which is how
 precisely a press has to be aimed, and `Kinds`, which is what blinding flash
 is willing to mark.

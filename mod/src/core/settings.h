@@ -48,7 +48,11 @@ namespace gs::Settings
 {
     struct Values
     {
-        uint32_t key = 0x91;   // VK_SCROLL
+        // F9. Scroll Lock was the default for seventy builds and it assumes a
+        // keyboard that has one, which plenty do not. F9 is free in this game,
+        // F12 belongs to Steam's screenshot, F11 toggles fullscreen on a lot
+        // of setups, and F1 to F8 are where games put quick slots.
+        uint32_t key = 0x78;   // VK_F9
         bool spy = true;
         // What is worth a pin, by name. The names come from the node's own
         // prefab path, the same string Master Looter prints, so
