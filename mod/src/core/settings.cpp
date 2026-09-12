@@ -90,9 +90,10 @@ namespace
         fputs("Hold=0\n", f);
         fputs("; 1 also copies every pin onto the minimap. Unproven, off by default.\n", f);
         fputs("MiniPin=0\n", f);
-        fputs("; An optional ceiling in metres on how far out a level gimmick may be\n", f);
-        fputs("; and still count as the thing the crosshair is on. Zero means none.\n", f);
-        fputs("Reach=0\n", f);
+        fputs("; A ceiling in metres on how far out a level gimmick may be and still\n", f);
+        fputs("; count as the thing the crosshair is on. Zero means none, which put a\n", f);
+        fputs("; pin three kilometres away once.\n", f);
+        fputs("Reach=1500\n", f);
         fputs("Radius=0\n", f);
         fclose(f);
     }

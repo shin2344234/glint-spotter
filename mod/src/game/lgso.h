@@ -72,6 +72,20 @@ namespace gs::lgso
     // range. Among everything within `maxPerp` metres of the line, the nearest
     // along it wins, which is what "what am I pointing at" means.
     //
+    // The cone is a floor and a slope, because one number cannot serve both
+    // callers. A placement counts when it is within `maxPerp` metres of the
+    // line or `perpFrac` of its own range, whichever is larger, to a ceiling
+    // of thirty.
+    //
+    // Session seventy-eight is why they are separate. The automatic glint
+    // search wants eight metres flat, because a crosshair sways while flying
+    // and the thing it is looking for is far enough that eight metres is a
+    // couple of degrees. A deliberate press wants the opposite: at nineteen
+    // metres a floor of eight is a cone twenty-four degrees wide, so the press
+    // was picking whatever a dense sector record happened to have off to one
+    // side. Two metres and one and a half per cent is under a degree from
+    // fifty metres out and still forgiving up close.
+    //
     // `px, pz` is the player, `ox, oz` the eye, `ux, uz` the unit view bearing.
     // `dists` receives each kept placement's distance along the ray.
     //
@@ -80,7 +94,7 @@ namespace gs::lgso
     // wants the opposite, because the player is pointing at a ruin or a camp
     // or a bridge and asking for that, and the table holds all of it.
     int OnBearing(float px, float pz, float ox, float oz, float ux, float uz,
-                  float maxPerp, float minFromPlayer, float maxRange,
+                  float maxPerp, float perpFrac, float minFromPlayer, float maxRange,
                   Place* out, float* dists, int n, bool anyKind = false);
 
     // The single placement closest to the view line, whatever it is called

@@ -148,7 +148,7 @@ namespace gs::lgso
     }
 
     int OnBearing(float px, float pz, float ox, float oz, float ux, float uz,
-                  float maxPerp, float minFromPlayer, float maxRange,
+                  float maxPerp, float perpFrac, float minFromPlayer, float maxRange,
                   Place* out, float* dists, int n, bool anyKind)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -164,12 +164,11 @@ namespace gs::lgso
             // the other way round.
             // The cone widens with range because a crosshair is steady in
             // degrees, not metres, but it stops widening at thirty. Without a
-            // distance ceiling three per cent would be a hundred and fifty
+            // distance ceiling a fixed fraction would be a hundred and fifty
             // metres across at five kilometres, which is wide enough to catch
-            // something the player cannot see and call it the answer. Thirty
-            // metres is reached at a kilometre and holds from there.
+            // something the player cannot see and call it the answer.
             const float perp = std::fabs(dx * uz - dz * ux);
-            float allow = along * 0.03f;
+            float allow = along * perpFrac;
             if (allow < maxPerp) allow = maxPerp;
             if (allow > 30.0f) allow = 30.0f;
             if (perp > allow) continue;

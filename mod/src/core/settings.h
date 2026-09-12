@@ -62,16 +62,19 @@ namespace gs::Settings
         // placement to within a fifth of a degree, so the pick was right and
         // only the ceiling was wrong.
         //
-        // Twelve hundred was the replacement and it lasted one build. The
-        // ceiling is gone: zero means the search runs as far as the table
-        // does, and the table is the whole map. Nothing about a placement
-        // nine kilometres away makes it a worse answer than one at nine
-        // hundred, because the test that picks it is distance from the line
-        // and the nearest one on the line still wins. A number here only
-        // ever waits to refuse something real.
+        // Fifteen hundred metres, and zero still means none.
         //
-        // It stays as a key for anyone who wants their pins kept local.
-        float reach = 0.0f;
+        // Seth asked for the ceiling gone and it went, and the session after
+        // that put a pin three thousand two hundred and ninety-four metres
+        // away and called it a glint. Over seventeen thousand placements, a
+        // crosshair pointed at open ground will always find something on its
+        // bearing eventually, and being well aligned is not the same as being
+        // visible. No angle can tell those apart; only a distance can.
+        //
+        // Fifteen hundred is two and a half times the six hundred he asked to
+        // be able to reach, so it refuses nothing he has ever aimed at. Set
+        // Reach=0 for no ceiling at all.
+        float reach = 1500.0f;
         // RB plus LB plus A, firing the moment all three are down.
         //
         // Build 0.35.0 moved this to both stick clicks with a third of a

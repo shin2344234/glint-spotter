@@ -629,7 +629,7 @@ namespace
                 // which is roughly how steady a crosshair is at those ranges.
                 const float reach = gs::Settings::Get().reach;
                 tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             8.0f, 5.0f, reach > 0.0f ? reach : 1.0e9f,
+                                             8.0f, 0.03f, 5.0f, reach > 0.0f ? reach : 1.0e9f,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
@@ -1039,10 +1039,16 @@ extern "C" void gs_OnMinimapTick(void* self)
                 {
                     gs::lgso::Place sight[4];
                     float sightDist[4];
+                    // Two metres and one and a half per cent, which is a press
+                    // aiming rather than sweeping. Eight metres flat put pins
+                    // nineteen and thirty-three metres out on whatever a
+                    // sector record had off to the side, because eight metres
+                    // at nineteen is a cone twenty-four degrees wide.
                     const float reach = gs::Settings::Get().reach;
                     const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oz,
                                                        sv.fx / flen, sv.fz / flen,
-                                                       8.0f, 3.0f, reach > 0.0f ? reach : 1.0e9f,
+                                                       2.0f, 0.015f, 3.0f,
+                                                       reach > 0.0f ? reach : 1.0e9f,
                                                        sight, sightDist, 4, true);
                     if (sn > 0)
                     {
@@ -1050,14 +1056,18 @@ extern "C" void gs_OnMinimapTick(void* self)
                         have = true;
                         how = "the game's own level gimmick table";
                         _snprintf_s(markLabel, sizeof(markLabel), _TRUNCATE, "%.0fm", sightDist[0]);
-                        GS_LOG("[mark] the table has %d placement(s) on the line; the nearest is "
-                               "record %u element %u \"%s\" at (%.1f, %.1f, %.1f), %.0f metres out",
-                               sn, sight[0].record, sight[0].element,
-                               sight[0].name[0] ? sight[0].name : "unnamed",
-                               tx, ty, tz, sightDist[0]);
-                        for (int k = 1; k < sn; ++k)
-                            GS_LOG("[mark]   behind it, record %u element %u at %.0f metres",
-                                   sight[k].record, sight[k].element, sightDist[k]);
+                        const float ux = sv.fx / flen, uz = sv.fz / flen;
+                        for (int k = 0; k < sn; ++k)
+                        {
+                            const float ddx = sight[k].x - sv.ox, ddz = sight[k].z - sv.oz;
+                            const float perp = std::fabs(ddx * uz - ddz * ux);
+                            const float deg = std::atan2(perp, sightDist[k]) * 57.2958f;
+                            GS_LOG("[mark]   %srecord %u element %u \"%s\" at (%.1f, %.1f, %.1f), "
+                                   "%.0f metres out, %.1f off the line, %.2f degrees",
+                                   k == 0 ? "TAKEN " : "      ", sight[k].record, sight[k].element,
+                                   sight[k].name[0] ? sight[k].name : "unnamed",
+                                   sight[k].x, sight[k].y, sight[k].z, sightDist[k], perp, deg);
+                        }
                     }
                     else
                     {
