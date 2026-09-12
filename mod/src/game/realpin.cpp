@@ -21,6 +21,7 @@ namespace
     using AddedFn = void (*)(void* root, int64_t id, const float* pos,
                              uint8_t b1, uint8_t b2, uint8_t b3);
     using ServerRemoveFn = void (*)(void* submodule, int64_t id, uint8_t second);
+    using UpsertFn = void (*)(void* submodule, int32_t* outError, uint8_t kind, const void* desc);
 
     gs::inlinehook::Hook g_createHook;
     gs::inlinehook::Hook g_removeHook;
@@ -210,6 +211,61 @@ namespace
         {
             return false;
         }
+    }
+
+    // Put the same record into the client copy, which is what the map's UI
+    // reads. The server list decides whether a removal can succeed; this one
+    // decides whether the UI will ask for one at all.
+    bool Mirror(int64_t id, float x, float z)
+    {
+        const uintptr_t client = gs::pinmodel::Submodule();
+        if (!client) return false;
+        __try
+        {
+            const auto* code = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinUpsert);
+            if (!gs::rtti::Readable(code, sizeof(gs::sig::kPinUpsertPrologue))) return false;
+            if (memcmp(code, gs::sig::kPinUpsertPrologue,
+                       sizeof(gs::sig::kPinUpsertPrologue)) != 0)
+            {
+                GS_LOG_ERR("[real] the client copy's writer is not where this build expects it");
+                return false;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+
+        // Twenty-four bytes, the shape both halves use: the id, the position
+        // with the height the game writes for a marker, and the two style
+        // bytes off the game's own call.
+        uint8_t record[gs::sig::kPinRecord]{};
+        const float y = 0.0f;
+        memcpy(record, &id, 8);
+        memcpy(record + 8, &x, 4);
+        memcpy(record + 12, &y, 4);
+        memcpy(record + 16, &z, 4);
+        record[20] = kStyle1;
+        record[21] = kStyle2;
+        struct { const void* ptr; int32_t count; int32_t pad; } desc{record, 1, 0};
+        int32_t err = -1;
+
+        const auto fn = reinterpret_cast<UpsertFn>(g_base + gs::sig::kPinUpsert);
+        __try
+        {
+            fn(reinterpret_cast<void*>(client), &err, 0, &desc);
+        }
+        __except (FaultFilter(GetExceptionInformation()))
+        {
+            const uintptr_t rva = (g_faultAt > g_base) ? g_faultAt - g_base : 0;
+            GS_LOG_ERR("[real] the client copy raised 0x%08lX at +0x%08llX", g_faultCode,
+                       static_cast<unsigned long long>(rva));
+            return false;
+        }
+        const gs::pinmodel::List l = gs::pinmodel::ReadAt(client, gs::sig::kPinListKind);
+        GS_LOG_OK("[real] the client copy took id %lld, status %d, and now holds %u",
+                  static_cast<long long>(id), err, l.ok ? l.count : 0u);
+        return true;
     }
 
     // The record we asked for, rather than any record. Two marks in a row at
@@ -431,6 +487,7 @@ namespace gs::realpin
             }
             GS_LOG_OK("[real] the game holds %d marker(s); this one is id %lld", after,
                       static_cast<long long>(id));
+            Mirror(id, x, z);
             *outId = id;
             return true;
         }

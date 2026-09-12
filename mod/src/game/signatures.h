@@ -95,7 +95,22 @@ namespace gs::sig
     // that same function applies to its own inputs. List 0 is a marker, list 1
     // is a traced marker, and list 0x15 was empty every session because
     // nothing writes to it.
+    // The client copy's writer, and the one function in this whole feature
+    // that was documented correctly from the first pass. The acknowledgement
+    // calls it to put the server's answer into the client component, which is
+    // the copy the map's own UI reads, so a marker the mod creates has to go
+    // through here as well or the UI never learns it exists.
+    //
+    //   0x4260C0(this = client submodule, int32* outError, uint8 kind,
+    //            struct { const void* records; int32 count; }*)
+    //
+    // Find or insert by id, so calling it twice with one id is an update.
     constexpr uintptr_t kPinUpsert = 0x004260C0;   // (submodule, &err, kind, &{records, count})
+    constexpr uint8_t   kPinUpsertPrologue[12] = {
+        0x44, 0x88, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8b   the kind
+        0x48, 0x89, 0x54, 0x24, 0x10,   // mov [rsp+0x10], rdx   the error out
+        0x53, 0x55,                     // push rbx, rbp
+    };
     constexpr uintptr_t kPinRemove = 0x00426360;   // (submodule, &err, &id, kind)
     constexpr uintptr_t kOff_Actor_Components = 0x68;
     constexpr uintptr_t kOff_Comp_PinSubmodule = 0x168;
