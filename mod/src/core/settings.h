@@ -264,18 +264,23 @@ namespace gs::Settings
         // marker on the screen he is already looking at.
         bool rumble = true;
 
-        // Whether a mark writes a real marker record, so the map's own Remove
-        // Marker can take the pin away.
+        // Whether a pin is a marker the map can remove, or only a picture.
         //
-        // On, and this is the whole feature. Session a hundred and six caught
-        // the game placing a marker of its own from inside the call: the same
-        // function the mod was calling, the same list, and a different object.
-        // The mod had been writing into a marker list hanging off the actor it
-        // found, and the game writes into one hanging off something else. Two
-        // lists of the same shape, and every session until now wrote to the
-        // empty one.
+        // On. A mark writes a record into the marker list the map's own user
+        // interface reads, under an id far above anything the game hands out,
+        // and draws the icon on that id. Put the cursor on the pin and the map
+        // offers Remove Marker, exactly as it does for one you placed. Press
+        // it and the game sends a removal request for that id, which the mod
+        // is watching for, and the record and the icon both go.
         //
-        // Off goes back to pins that are drawn and nothing more.
+        // Sessions 103 to 112 are all in that sentence. A marker is two
+        // records, one on each end of the game's in-process wire, and only the
+        // client end is needed: it is what makes the button offer, and the
+        // request it sends is something the mod can answer itself. Nothing is
+        // written into the authoritative list the save is built from, so pins
+        // do not survive a reload and cannot be left behind.
+        //
+        // Off draws pins the old way, which nothing can remove.
         bool realMarkers = true;
 
         // A copy of each pin on the minimap. Off, and this time for a reason

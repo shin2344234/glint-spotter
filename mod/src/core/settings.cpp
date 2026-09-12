@@ -93,9 +93,10 @@ namespace
         fputs("; moment, so this is usually the only thing that tells you it worked.\n", f);
         fputs("Rumble=1\n", f);
         fputs("\n", f);
-        fputs("; 1 writes a real marker record for each mark, so the map's own Remove Marker\n", f);
-        fputs("; takes the pin away. The mod has to see you place one marker of your own\n", f);
-        fputs("; first: that is how it learns which object the game keeps markers in.\n", f);
+        fputs("; 1 makes each pin a marker the map can remove: put the cursor on it and the\n", f);
+        fputs("; map offers Remove Marker, the same as for one you placed yourself. Pins do\n", f);
+        fputs("; not survive loading a save. 0 draws pins the old way and nothing removes\n", f);
+        fputs("; them.\n", f);
         fputs("RealMarkers=1\n", f);
         fputs("\n", f);
         fputs("; ------------------------------------------------------------------ aiming\n", f);

@@ -5,7 +5,8 @@ Puts a map marker on the thing you are looking at, in Crimson Desert 2.02.00.
 Aim blinding flash at a glint and the mod pins the object it is
 lighting, out to the range you can actually see one. Or point at anything at
 all and press a button, and it pins that instead. The pin lands on the world
-map where the thing stands, so you can walk away and come back to it.
+map where the thing stands, so you can walk away and come back to it, and the
+map's own Remove Marker takes it off again when you are done.
 
 This is a test build. Read the limitations before you install it.
 
@@ -21,6 +22,9 @@ This is a test build. Read the limitations before you install it.
   which is most things worth walking to.
 - **Buzzes the controller when a pin lands**, because the map is not open at that
   moment and there is nothing else to tell you.
+- **Removes a pin with the map's own button.** Put the cursor on one and the
+  prompt changes to Remove Marker, the same as for a marker you placed by hand.
+  Press it and the pin goes.
 - **Refuses a glint it can see a hill in front of.** Where the game has collision
   loaded, the mod samples the ground along the sight line and will not pin
   through a rise. Past that range it says nothing rather than guessing.
@@ -50,6 +54,11 @@ it is fussy about aim on purpose: at four hundred metres you have about eight
 metres either side of the line. If it misses something, the log says how far off
 the line the nearest thing was, and `Rod` in the ini is that number.
 
+**To remove a pin**, open the map, put the cursor on it, and press the button
+the prompt offers, which changes to Remove Marker exactly as it does over one of
+your own. There is no extra key and no chord. Every pin is gone anyway the next
+time you load a save.
+
 Everything is in `GlintSpotter.ini` beside the plugin, and every key has a
 comment saying what it does. The two worth knowing are `Rod`, which is how
 precisely a press has to be aimed, and `Kinds`, which is what blinding flash
@@ -59,10 +68,9 @@ is willing to mark.
 
 Read these before you decide whether the build is for you.
 
-- **You cannot delete the mod's pins.** Your own markers delete normally; these
-  do not. They are drawn onto the map rather than stored as markers, so the
-  game's delete has nothing to act on. Loading a save clears them. This is the
-  thing being worked on.
+- **Pins last one session.** Loading a save clears every pin the mod placed.
+  Nothing it does is written into your save, which is the reason they cannot be
+  left behind, and the reason they cannot be kept either.
 - **The game hitches once, for about fifteen seconds, shortly after a save
   loads.** The mod is searching memory for your character. Everything works
   afterwards. Setting `Scan=0` removes the hitch and stops blinding flash

@@ -907,7 +907,10 @@ namespace
         if (cfg.spy && g_alertVt) gs::alert::InstallSpy(g_alertVt);
         // And the two marker calls, watched from inside rather than through a
         // vtable, because nothing reaches them through an object.
-        if (cfg.spy) gs::realpin::InstallSpy();
+        // Removable pins need this one, not only the diagnostics: the jump
+        // over the server's remove is how the mod hears the map ask for a
+        // marker of its own to go.
+        if (cfg.spy || cfg.realMarkers) gs::realpin::InstallSpy();
         else if (cfg.spy) GS_LOG_ERR("[alert] the alert root vtable was not found; no popup groundwork this session");
         // The per-frame tick on the game's thread, stacked on the minimap root's
         // update, with the diff probe on for this discovery session.

@@ -483,12 +483,21 @@ namespace
     char g_huntNames[4][48]{};
     int g_huntOn[4] = {0, 0, 0, 0};
     int g_huntN = 0;
-    int g_huntLeft = 6;
+    // Six rounds of a four entity, eleven hundred byte dump, on the frame
+    // thread, every time the flash is held. It answered its question long
+    // ago and it is most of the log, so it waits for Verbose now.
+    int g_huntLeft = 0;
     uint32_t g_huntLastMs = 0;
     uint32_t g_huntOffMs = 0;
 
     void AutoMark(uint32_t now)
     {
+        static bool huntArmed = false;
+        if (!huntArmed)
+        {
+            huntArmed = true;
+            if (gs::Settings::Get().verbose) g_huntLeft = 6;
+        }
         const bool flash = gs::aim::FlashActive();
         if (!flash)
         {
