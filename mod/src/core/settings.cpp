@@ -170,8 +170,9 @@ namespace
         fputs("\n", f);
         fputs("; 1 keeps your pins in GlintSpotter.pins beside the plugin and puts them back\n", f);
         fputs("; when you load a save, since the game itself clears them. Delete that file to\n", f);
-        fputs("; clear every pin at once. It is one file for the whole game, so a second\n", f);
-        fputs("; character sees the first one's pins.\n", f);
+        fputs("; clear every pin at once. For now it is one file for the whole game rather\n", f);
+        fputs("; than one per save, so a second character sees the first one's pins. Tying\n", f);
+        fputs("; them to a specific save is being worked on.\n", f);
         fputs("KeepPins=1\n", f);
         fputs("\n", f);
         fputs("; Which of the map's marker pictures a pin uses, as two numbers. 1,4 is the\n", f);

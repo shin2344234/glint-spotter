@@ -294,10 +294,11 @@ namespace gs::Settings
         // GlintSpotter.pins beside the plugin and puts them back when a world
         // appears. Removing a pin on the map takes it out of the file too.
         //
-        // One file for the whole game, not one per save: there is no save
-        // identity the mod can read, so a second character sees the first
-        // one's pins. Deleting the file clears them all. Off keeps everything
-        // in memory, where a reload loses it.
+        // One file for the whole game, not one per save: no save identity has
+        // been found that the mod can read, so a second character sees the
+        // first one's pins. Tying them to a save is the next thing on this
+        // feature. Deleting the file clears them all. Off keeps everything in
+        // memory, where a reload loses it.
         bool keepPins = true;
 
         // Which of the map's marker pictures a pin uses.
