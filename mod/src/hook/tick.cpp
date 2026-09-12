@@ -213,6 +213,60 @@ namespace
         return false;
     }
 
+    // Places the player has taken a pin off.
+    //
+    // The flash marks whatever is lit in front of it, and a glint stays lit.
+    // So taking its pin off the map and then looking that way again put the
+    // pin straight back, sometimes a few metres from where the old one stood,
+    // because the mod re-resolved the same target. That is the mod arguing
+    // with the player, and the player is right.
+    //
+    // Sixteen places, oldest dropped, kept for the session and across a load.
+    // Only the flash consults this. A button press is somebody asking for a
+    // pin there in as many words, and it clears the refusal.
+    struct Declined { float x = 0.0f, z = 0.0f; };
+    constexpr int kDeclinedMax = 16;
+    Declined g_declined[kDeclinedMax];
+    int g_declinedN = 0;
+
+    bool DeclinedNear(float x, float z, float radius)
+    {
+        for (int i = 0; i < g_declinedN; ++i)
+        {
+            const float dx = g_declined[i].x - x, dz = g_declined[i].z - z;
+            if (dx * dx + dz * dz <= radius * radius) return true;
+        }
+        return false;
+    }
+
+    void Decline(float x, float z)
+    {
+        if (DeclinedNear(x, z, 1.0f)) return;
+        if (g_declinedN >= kDeclinedMax)
+        {
+            for (int i = 1; i < kDeclinedMax; ++i) g_declined[i - 1] = g_declined[i];
+            g_declinedN = kDeclinedMax - 1;
+        }
+        g_declined[g_declinedN].x = x;
+        g_declined[g_declinedN].z = z;
+        ++g_declinedN;
+    }
+
+    void Undecline(float x, float z, float radius)
+    {
+        for (int i = 0; i < g_declinedN;)
+        {
+            const float dx = g_declined[i].x - x, dz = g_declined[i].z - z;
+            if (dx * dx + dz * dz <= radius * radius)
+            {
+                for (int j = i + 1; j < g_declinedN; ++j) g_declined[j - 1] = g_declined[j];
+                --g_declinedN;
+                continue;
+            }
+            ++i;
+        }
+    }
+
     // A record the map's own user interface can see, and an icon keyed on it.
     // Everything that puts a pin on the map goes through here.
     void PlacePin(void* root, float x, float y, float z, const char* label)
@@ -435,6 +489,7 @@ namespace
         }
         PlacePin(root, tx, ty, tz, label);
         gs::pinstore::Add(tx, ty, tz, label);
+        Undecline(tx, tz, dedupe > 0.0f ? dedupe : 4.0f);
     }
 
     // The calibration is finished, and it passed. Session fifty-four put "Me"
@@ -1143,7 +1198,20 @@ namespace
                    chosen.name);
         }
         if (matured && now >= g_cooldownUntil &&
-            !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
+            !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart) &&
+            DeclinedNear(chosen.x, chosen.z, kPinApart))
+        {
+            g_cooldownUntil = now + 3000;
+            if (g_dupLogsLeft > 0 && now - g_dupLastMs > 3000)
+            {
+                --g_dupLogsLeft;
+                g_dupLastMs = now;
+                GS_LOG("[auto] you took the pin for \"%s\" off the map, so the flash leaves it "
+                       "alone. Press the button at it to have it back.", chosen.name);
+            }
+        }
+        else if (matured && now >= g_cooldownUntil &&
+                 !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
         {
             // The ground, asked once, at the moment a pin is about to land.
             //
@@ -1230,7 +1298,13 @@ namespace
             const bool known = gs::mapicon::Forget(retire[i], &gx, &gz);
             gs::realpin::Retire(retire[i]);
             gs::mapicon::RemoveIcon(gs::mapicon::LastWorldRoot(), retire[i]);
-            if (known) gs::pinstore::Drop(gx, gz);
+            if (known)
+            {
+                gs::pinstore::Drop(gx, gz);
+                // And the flash is told to leave that place alone, or it puts
+                // the pin back the moment the same glint is in front of it.
+                Decline(gx, gz);
+            }
         }
     }
 
