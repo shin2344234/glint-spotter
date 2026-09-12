@@ -910,7 +910,7 @@ namespace
         // before the general sweep reached it.
         // Retried until it lands: the world may still be loading on the first
         // attempt, and a registry entry must never be taken for the player.
-        for (int attempt = 0; attempt < 40 && !g_stop.load(); ++attempt)
+        for (int attempt = 0; attempt < 120 && !g_stop.load(); ++attempt)
         {
             bool done = false;
 
@@ -941,7 +941,22 @@ namespace
                     gs::player::SetSpecialComponent(nullptr);
                 }
             }
-            for (size_t i = 0; i < g_count && !done; ++i)
+            // The scan is a fallback and it has to behave like one.
+            //
+            // Session ninety-four is the whole argument. The actor manager was
+            // not ready on the first attempt, which is normal because the save
+            // was still loading, so the fallback ran immediately and spent
+            // twelve seconds walking the heap. Then it ran again and spent
+            // seventeen. That is the stutter Seth gets when the mod comes
+            // alive, and the manager would have answered for free a few
+            // seconds later if anything had waited for it.
+            //
+            // Thirty attempts at half a second each is thirty seconds of
+            // asking the cheap way before paying the expensive one. If the
+            // manager never answers, the fallback still runs and the mod still
+            // works, just later.
+            const int kAskManagerUntil = 60;
+            for (size_t i = 0; i < g_count && !done && attempt >= kAskManagerUntil; ++i)
             {
             Target& t = g_targets[i];
             if (!strstr(t.info.name, "ClientSpecialModeActorComponent")) continue;
@@ -996,8 +1011,12 @@ namespace
             }
             }
             if (done) break;
-            GS_LOG("no world yet, looking again in a second");
-            for (int i = 0; i < 2 && !g_stop.load(); ++i) Sleep(500);
+            // Quiet while it waits. Sixty attempts of half a second is thirty
+            // seconds, and saying so once beats saying it sixty times.
+            if (attempt == 0)
+                GS_LOG("no world yet; asking the actor manager twice a second for thirty seconds "
+                       "before falling back to a heap scan");
+            for (int i = 0; i < 1 && !g_stop.load(); ++i) Sleep(500);
         }
 
         int pass = 0;
