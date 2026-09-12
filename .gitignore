@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+# anything written in my voice for a mod page or a forum reply stays local
+private/
+# raw session captures; the write-ups transcribe what mattered and the logs are large
+docs/investigations/logs/
+# build output, once there is a plugin here
+mod/build/
+mod/dist/

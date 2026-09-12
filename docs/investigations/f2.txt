@@ -1,0 +1,152 @@
+RVA 0x38F1E00 in .data2 (file offset 0x38F1200), VA 0x1438F1E00
+
+  +0x38F1E00: jns       0x1438f1e70
+  +0x38F1E02: iretd     
+  +0x38F1E03: vmovd     xmm0, ecx
+  +0x38F1E07: vpcmpeqd  xmm3, xmm0, xmm1
+  +0x38F1E0B: vmovss    xmm2, dword ptr [rip + 0x2361b1d]
+  +0x38F1E13: vblendvps xmm0, xmm6, xmm2, xmm3
+  +0x38F1E19: vxorps    xmm1, xmm1, xmm1
+  +0x38F1E1D: vinsertps xmm1, xmm1, xmm0, 0
+  +0x38F1E23: vinsertps xmm1, xmm1, xmm10, 0x10
+  +0x38F1E29: vmovups   xmmword ptr [rsp + 0x70], xmm1
+  +0x38F1E2F: vcmpltss  xmm1, xmm9, xmm11
+  +0x38F1E35: vmovss    xmm0, dword ptr [rip + 0x23625c7]
+  +0x38F1E3D: vblendvps xmm2, xmm0, xmm6, xmm1
+  +0x38F1E43: vsubps    xmm3, xmm12, xmmword ptr [rsp + 0x170]
+  +0x38F1E4C: vxorps    xmm0, xmm0, xmm0
+  +0x38F1E50: vinsertps xmm0, xmm0, xmm2, 0
+  +0x38F1E56: vsubps    xmm1, xmm8, xmm10
+  +0x38F1E5B: vinsertps xmm0, xmm0, xmm1, 0x10
+  +0x38F1E61: vinsertps xmm0, xmm0, xmm3, 0x20
+  +0x38F1E67: vmovups   xmmword ptr [rsp + 0x60], xmm0
+  +0x38F1E6D: mov       dword ptr [rsp + 0x20], r15d
+  +0x38F1E72: lea       r9, [rip + 0x2e71a87]
+  +0x38F1E79: vmovss    xmm2, dword ptr [rip + 0x2361947]
+  +0x38F1E81: lea       rdx, [rsp + 0x60]
+  +0x38F1E86: lea       rcx, [rsp + 0xfa8]
+  +0x38F1E8E: call      0x144114080
+  +0x38F1E93: nop       
+  +0x38F1E94: mov       rsi, qword ptr [rax]
+  +0x38F1E97: mov       qword ptr [rax], r15
+  +0x38F1E9A: mov       qword ptr [rsp + 0xfa0], rsi
+  +0x38F1EA2: mov       rcx, qword ptr [rsp + 0xfa8]
+  +0x38F1EAA: test      rcx, rcx
+  +0x38F1EAD: je        0x1438f1eb4
+  +0x38F1EAF: call      0x14402ff20
+  +0x38F1EB4: mov       qword ptr [rsp + 0x1a8], rsi
+  +0x38F1EBC: vmovups   xmm0, xmmword ptr [rip + 0x2e71a4c]
+  +0x38F1EC4: vmovups   xmmword ptr [rsp + 0x170], xmm0
+  +0x38F1ECD: vmovaps   xmm2, xmm7
+  +0x38F1ED1: lea       rdx, [rsp + 0x170]
+  +0x38F1ED9: lea       rcx, [rsp + 0x40]
+  +0x38F1EDE: call      0x144039a80
+  +0x38F1EE3: vmovups   xmmword ptr [rsp + 0x3b0], xmm13
+  +0x38F1EEC: lea       rdx, [rsp + 0x40]
+  +0x38F1EF1: lea       rcx, [rsp + 0x380]
+  +0x38F1EF9: call      0x14403b820
+  +0x38F1EFE: lea       r8, [rsp + 0x1c0]
+  +0x38F1F06: lea       rdx, [rsp + 0x200]
+  +0x38F1F0E: lea       rcx, [rsp + 0x3c0]
+  +0x38F1F16: call      0x14403b420
+  +0x38F1F1B: lea       rax, [rip + 0x18c5346]
+  +0x38F1F22: mov       qword ptr [rsp + 0xb0], rax
+  +0x38F1F2A: lea       rax, [rip + 0x1908cdf]
+  +0x38F1F31: mov       qword ptr [rsp + 0xb0], rax
+  +0x38F1F39: mov       byte ptr [rsp + 0xb8], 0
+  +0x38F1F41: mov       dword ptr [rsp + 0xbc], r15d
+  +0x38F1F49: vmovsd    xmm1, qword ptr [rip + 0x236221f]
+  +0x38F1F51: vmovsd    qword ptr [rsp + 0xc0], xmm1
+  +0x38F1F5A: mov       byte ptr [rsp + 0xc8], 0
+  +0x38F1F62: lea       rax, [rip + 0x190c9a7]
+  +0x38F1F69: mov       qword ptr [rsp + 0xb0], rax
+  +0x38F1F71: mov       qword ptr [rsp + 0x120], 0xffff
+  +0x38F1F7D: mov       qword ptr [rsp + 0x128], r15
+  +0x38F1F85: mov       qword ptr [rsp + 0x148], 0xffff
+  +0x38F1F91: mov       qword ptr [rsp + 0x150], r15
+  +0x38F1F99: mov       qword ptr [rsp + 0x158], r15
+  +0x38F1FA1: vxorpd    xmm0, xmm0, xmm0
+  +0x38F1FA5: vmovupd   xmmword ptr [rsp + 0xe0], xmm0
+  +0x38F1FAE: vmovsd    qword ptr [rsp + 0xf0], xmm0
+  +0x38F1FB7: vmovups   xmmword ptr [rsp + 0xd0], xmm8
+  +0x38F1FC0: vmovsd    xmm0, qword ptr [rip + 0x2362378]
+  +0x38F1FC8: vmovsd    qword ptr [rsp + 0x100], xmm0
+  +0x38F1FD1: mov       qword ptr [rsp + 0x108], 0xffffffffffffffff
+  +0x38F1FDD: mov       qword ptr [rsp + 0x110], 0xffffff
+  +0x38F1FE9: mov       dword ptr [rsp + 0x118], 0xffffffff
+  +0x38F1FF4: mov       byte ptr [rsp + 0x11c], 0xf
+  +0x38F1FFC: mov       word ptr [rsp + 0x120], r12w
+  +0x38F2005: mov       dword ptr [rsp + 0x124], r15d
+  +0x38F200D: mov       qword ptr [rsp + 0x128], r15
+  +0x38F2015: mov       qword ptr [rsp + 0x130], 0xffffffffffffffff
+  +0x38F2021: mov       qword ptr [rsp + 0x138], 0xffffff
+  +0x38F202D: mov       dword ptr [rsp + 0x140], 0xffffffff
+  +0x38F2038: mov       byte ptr [rsp + 0x144], 0xf
+  +0x38F2040: mov       word ptr [rsp + 0x148], r12w
+  +0x38F2049: mov       dword ptr [rsp + 0x14c], r15d
+  +0x38F2051: mov       qword ptr [rsp + 0x150], r15
+  +0x38F2059: vmovss    dword ptr [rsp + 0x160], xmm6
+  +0x38F2062: vmovss    dword ptr [rsp + 0x164], xmm6
+  +0x38F206B: vmovss    dword ptr [rsp + 0x168], xmm6
+  +0x38F2074: vmovss    dword ptr [rsp + 0x160], xmm6
+  +0x38F207D: vmovss    dword ptr [rsp + 0x164], xmm6
+  +0x38F2086: vmovss    dword ptr [rsp + 0x168], xmm6
+  +0x38F208F: mov       dword ptr [rsp + 0xbc], r15d
+  +0x38F2097: vmovsd    qword ptr [rsp + 0xc0], xmm1
+  +0x38F20A0: mov       byte ptr [rsp + 0xc8], 0
+  +0x38F20A8: mov       r14, qword ptr [rsp + 0xf90]
+  +0x38F20B0: mov       rax, qword ptr gs:[0x58]
+  +0x38F20B9: mov       rdi, qword ptr [rax]
+  +0x38F20BC: mov       eax, 0x98
+  +0x38F20C1: cmp       byte ptr [rax + rdi], 0
+  +0x38F20C5: jne       0x1438f20cc
+  +0x38F20C7: call      0x1447a2294
+  +0x38F20CC: mov       r13d, 0x20
+  +0x38F20D2: mov       rbx, qword ptr [rdi + r13]
+  +0x38F20D6: test      rbx, rbx
+  +0x38F20D9: jne       0x1438f20f7
+  +0x38F20DB: call      0x14403f080
+  +0x38F20E0: mov       rbx, rax
+  +0x38F20E3: mov       eax, 0x98
+  +0x38F20E8: cmp       byte ptr [rax + rdi], 0
+  +0x38F20EC: jne       0x1438f20f3
+  +0x38F20EE: call      0x1447a2294
+  +0x38F20F3: mov       qword ptr [rdi + r13], rbx
+  +0x38F20F7: mov       rbx, qword ptr [rbx + 0x3e0]
+  +0x38F20FE: test      rbx, rbx
+  +0x38F2101: je        0x1438f2128
+  +0x38F2103: lea       rax, [rip + 0x22b3ee6]
+  +0x38F210A: mov       qword ptr [rsp + 0x40], rax
+  +0x38F210F: lea       rax, [rip + 0x22b3eec]
+  +0x38F2116: mov       qword ptr [rsp + 0x48], rax
+  +0x38F211B: lea       rdx, [rsp + 0x40]
+  +0x38F2120: mov       rcx, rbx
+  +0x38F2123: call      0x144041190
+  +0x38F2128: mov       qword ptr [rsp + 0xfa8], rbx
+  +0x38F2130: vmovups   ymm0, ymmword ptr [rsp + 0x380]
+  +0x38F2139: vmovups   ymmword ptr [rsp + 0x240], ymm0
+  +0x38F2142: vmovups   ymm0, ymmword ptr [rsp + 0x3a0]
+  +0x38F214B: vmovups   ymmword ptr [rsp + 0x260], ymm0
+  +0x38F2154: vmovups   xmmword ptr [rsp + 0x280], xmm8
+  +0x38F215D: vmovups   ymm0, ymmword ptr [rsp + 0x3c0]
+  +0x38F2166: vmovups   ymmword ptr [rsp + 0x60], ymm0
+  +0x38F216C: vmovups   ymm0, ymmword ptr [rsp + 0x3e0]
+  +0x38F2175: vmovups   ymmword ptr [rsp + 0x80], ymm0
+  +0x38F217E: vmovups   xmmword ptr [rsp + 0xa0], xmm8
+  +0x38F2187: mov       dword ptr [rsp + 0x308], 0xffffffff
+  +0x38F2192: mov       dword ptr [rsp + 0x30c], r15d
+  +0x38F219A: mov       qword ptr [rsp + 0x2f0], r15
+  +0x38F21A2: mov       qword ptr [rsp + 0x300], r15
+  +0x38F21AA: mov       qword ptr [rsp + 0x318], r15
+  +0x38F21B2: mov       byte ptr [rsp + 0x320], 0
+  +0x38F21BA: vmovdqu   xmm0, xmmword ptr [rip + 0x236438e]
+  +0x38F21C2: vmovups   xmmword ptr [rsp + 0x330], xmm0
+  +0x38F21CB: mov       dword ptr [rsp + 0x324], r15d
+  +0x38F21D3: vmovups   xmmword ptr [rsp + 0x340], xmm8
+  +0x38F21DC: vmovss    dword ptr [rsp + 0x328], xmm6
+  +0x38F21E5: lea       rax, [rsp + 0x240]
+  +0x38F21ED: mov       qword ptr [rsp + 0x310], rax
+  +0x38F21F5: mov       rax, qword ptr [rsp + 0x1a8]
+  +0x38F21FD: mov       qword ptr [rsp + 0x2f8], rax
+  +0x38F2205: mov       qword ptr [rsp + 0x50], 0xffff
+  +0x38F220E: mov       qword ptr [rsp + 0x58], r15
