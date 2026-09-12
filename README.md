@@ -2,7 +2,7 @@
 
 Puts a map marker on the thing you are looking at, in Crimson Desert 2.02.00.
 
-Aim the detect flash at a glint and the mod pins the object the flash is
+Aim the blinding flash at a glint and the mod pins the object the flash is
 lighting, out to the range you can actually see one. Or point at anything at
 all and press a button, and it pins that instead. The pin lands on the world
 map where the thing stands, so you can walk away and come back to it.
@@ -11,7 +11,7 @@ This is a test build. Read the limitations before you install it.
 
 ## What it does
 
-- **Marks a glint automatically.** Hold the detect flash with a glint on your
+- **Marks a glint automatically.** Hold the blinding flash with a glint on your
   crosshair and a pin appears where it is, once the crosshair has held it for a
   second. Distance is not the limit it used to be: a glint six hundred metres
   out marks as readily as one at twenty.
@@ -40,7 +40,7 @@ while it does. That is a known problem, see below.
 
 Both triggers do the same thing, and it is worth knowing which one you want.
 
-**The flash** marks glints and only glints. Bring up detect mode, put the
+**The blinding flash** marks glints and only glints. Use it, put the
 crosshair on the glint, and hold it there for about a second. The pad buzzes
 when the pin lands. It is deliberately generous about aim, because nobody holds
 a crosshair still while flying.

@@ -954,7 +954,7 @@ namespace
                         done = true;
                         gs::tick::AddProbe("special", reinterpret_cast<void*>(special), 0x400);
                         GS_LOG_OK("READY in %llu ms: the manager handed over the player at (%.1f, %.1f, %.1f), "
-                                  "origin (%.0f, %.0f, %.0f). Aim the flash at a glint.",
+                                  "origin (%.0f, %.0f, %.0f). Aim the blinding flash at a glint.",
                                   static_cast<unsigned long long>(GetTickCount() - g_startedMs),
                                   probe.x, probe.y, probe.z, probe.ox, probe.oy, probe.oz);
                         break;
@@ -1114,7 +1114,7 @@ namespace
                 gs::actors::Locate(GetTickCount());
                 if (pp.valid && gs::player::DetectComponent() && gs::player::CharacterControlComponent())
                     GS_LOG_OK("READY: player world (%.1f, %.1f, %.1f), origin (%.0f, %.0f, %.0f), actor manager %s. "
-                              "Aim the flash at a glint and press.", pp.x, pp.y, pp.z, pp.ox, pp.oy, pp.oz,
+                              "Aim the blinding flash at a glint and press.", pp.x, pp.y, pp.z, pp.ox, pp.oy, pp.oz,
                               gs::actors::Ready() ? "found" : "pending");
                 else
                     GS_LOG("special mode component found; player walk %s, detect component %s",
