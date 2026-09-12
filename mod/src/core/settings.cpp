@@ -95,7 +95,7 @@ namespace
         fputs("Rumble=1\n", f);
         fputs("; How many degrees off the crosshair a press will look. Small is good:\n", f);
         fputs("; a press is you telling the mod what you are already aiming at.\n", f);
-        fputs("Cone=1.5\n", f);
+        fputs("Cone=0.85\n", f);
         fputs("; The same for the automatic glint marker. Wide on purpose: nobody is\n", f);
         fputs("; aiming carefully during a flash, and a miss there is a glint lost.\n", f);
         fputs("AutoCone=2.0\n", f);

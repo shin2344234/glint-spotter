@@ -442,6 +442,8 @@ namespace
     constexpr float kPinApart = 4.0f;
     int g_dupLogsLeft = 20;
     int g_pinModelLogsLeft = 3;
+    int g_losLogsLeft = 20;
+    uint32_t g_losLastMs = 0;
     uint32_t g_dupLastMs = 0;
     uint32_t g_quietLastMs = 0;
     int g_lastGlintN = -1;
@@ -944,6 +946,34 @@ namespace
         if (matured && now >= g_cooldownUntil &&
             !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
         {
+            // The ground, asked once, at the moment a pin is about to land.
+            //
+            // Seth marked a glint through a mountain. This cannot see the
+            // whole way there, because collision only exists in a box around
+            // him, but a mountain between him and something a kilometre off is
+            // usually much nearer than the thing itself and so usually inside
+            // that box. Sixteen samples is about twenty milliseconds and it
+            // happens once per pin, not once per pass.
+            {
+                const float eye[3] = {v.ox, v.oy, v.oz};
+                const float tgt[3] = {chosen.x, chosen.y, chosen.z};
+                float blockedAt = 0.0f;
+                const gs::physics::Sight s =
+                    gs::physics::LineOfSight(eye, tgt, 16, &blockedAt);
+                if (s == gs::physics::Sight::Blocked)
+                {
+                    if (g_losLogsLeft > 0 && now - g_losLastMs > 3000)
+                    {
+                        --g_losLogsLeft;
+                        g_losLastMs = now;
+                        GS_LOG("[auto] \"%s\" is behind ground that rises across the sight line "
+                               "%.0f metres out; not pinned", chosen.name, blockedAt);
+                    }
+                    g_heldSinceMs = now;   // start the hold again rather than spin
+                    return;
+                }
+            }
+
             g_cooldownUntil = now + 3000;
             const float dx = chosen.x - pp.x, dz = chosen.z - pp.z;
             GS_LOG("[auto] the crosshair held \"%s\" eid %08X for a second, %.1f degrees off, %.1f metres away; pinning it where it stands",
@@ -1098,6 +1128,19 @@ extern "C" void gs_OnMinimapTick(void* self)
                         have = true;
                         how = "the game's own level gimmick table";
                         _snprintf_s(markLabel, sizeof(markLabel), _TRUNCATE, "%.0fm", sightDist[0]);
+                        {
+                            const float eye[3] = {sv.ox, sv.oy, sv.oz};
+                            const float tgt[3] = {tx, ty, tz};
+                            float blockedAt = 0.0f;
+                            const gs::physics::Sight s =
+                                gs::physics::LineOfSight(eye, tgt, 24, &blockedAt);
+                            // A press is deliberate, so it is told, not
+                            // overruled. If Seth points at a ridge and asks for
+                            // what is behind it, that is his to ask.
+                            if (s == gs::physics::Sight::Blocked)
+                                GS_LOG("[mark] note: ground rises across the sight line %.0f metres "
+                                       "out, so this is behind a hill", blockedAt);
+                        }
                         const float ux = sv.fx / flen, uz = sv.fz / flen;
                         for (int k = 0; k < sn; ++k)
                         {

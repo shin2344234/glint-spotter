@@ -22,7 +22,7 @@
 //   MiniPin=0     ; also copy each pin onto the minimap. Crashed the game in
 //                 ; session eighty-two; leave it alone.
 //   Rumble=1      ; buzz the pad when a pin lands
-//   Cone=1.5      ; how many degrees off the crosshair a press will look
+//   Cone=0.85     ; how many degrees off the crosshair a press will look
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
 //                 ; may be and still count. Zero, the default, means none.
@@ -117,15 +117,25 @@ namespace gs::Settings
         // Nearest wins is the right rule and it cannot help if the near thing
         // was never a candidate.
         //
-        // One and a half degrees is ten metres at four hundred and sixty-five
-        // centimetres at twenty-five, which is the closest a press looks. Wide
-        // enough to contain a building's origin, far too narrow for the thing
-        // at your feet that used to steal every press.
+        // So both ends are known now. A fifth of a degree marked a shop
+        // eighteen hundred metres past the building Seth was pointing at. One
+        // and a half marked the building, which is the win, but from the
+        // ground it still landed wrong until he climbed it. That figures: at a
+        // shallow angle you look along a building's length and everything
+        // behind it is inside the cone, and from above you look down at it and
+        // almost nothing is.
+        //
+        // His call, and it is the right one, is halfway. Eighty-five
+        // hundredths of a degree is six metres at four hundred, fifteen at a
+        // kilometre, and thirty-seven centimetres at twenty-five, which is as
+        // close as a press looks. Wide enough for a building's origin, narrow
+        // enough that a shallow angle does not sweep in the horizon behind
+        // it.
         //
         // The automatic search keeps its own wider cone. That one fires on its
         // own during a flash with nobody aiming deliberately, and a miss there
         // is a glint that never got marked.
-        float coneDeg = 1.5f;
+        float coneDeg = 0.85f;
 
         // And the automatic one, which stays wide on Seth's instruction.
         //

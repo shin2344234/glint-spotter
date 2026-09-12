@@ -204,6 +204,48 @@ namespace gs::physics
         return h;
     }
 
+    Sight LineOfSight(const float* eye, const float* target, int steps, float* blockedAt)
+    {
+        const char* why = nullptr;
+        if (!Ready(&why)) return Sight::Unknown;
+        if (steps < 2) steps = 2;
+        if (steps > 32) steps = 32;
+
+        const float dx = target[0] - eye[0];
+        const float dy = target[1] - eye[1];
+        const float dz = target[2] - eye[2];
+        const float flat = std::sqrt(dx * dx + dz * dz);
+        if (flat < 1.0f) return Sight::Unknown;
+
+        // Clearance, so that standing on a slope or a target sitting on the
+        // ground does not read as a hill. Two metres of the line, plus a
+        // little more at range where a sample is a coarser thing.
+        const float down[3] = {0.0f, -1.0f, 0.0f};
+        int measured = 0;
+        for (int i = 1; i < steps; ++i)
+        {
+            // Skip the last tenth: the target is usually standing on the
+            // ground and its own hill is not an obstruction.
+            const float t = static_cast<float>(i) / static_cast<float>(steps);
+            if (t > 0.9f) break;
+            const float px = eye[0] + dx * t;
+            const float py = eye[1] + dy * t;
+            const float pz = eye[2] + dz * t;
+            const float from[3] = {px, py + 300.0f, pz};
+            const Hit h = Cast(from, down, 1200.0f, 0, false);
+            if (!h.hit) continue;               // collision not loaded here
+            ++measured;
+            const float groundY = from[1] - h.dist;
+            const float clearance = 2.0f + flat * t * 0.01f;
+            if (groundY > py + clearance)
+            {
+                if (blockedAt) *blockedAt = flat * t;
+                return Sight::Blocked;
+            }
+        }
+        return measured > 0 ? Sight::Clear : Sight::Unknown;
+    }
+
     void LogState()
     {
         const char* why = nullptr;

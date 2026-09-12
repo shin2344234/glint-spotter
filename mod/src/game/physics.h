@@ -37,6 +37,29 @@ namespace gs::physics
     // (the transform +0x29C frame). Guarded; a fault returns no hit.
     Hit Cast(const float* start, const float* dir, float maxDist, int layer, bool flag);
 
+    // Is there ground standing between the eye and a point?
+    //
+    // Seth marked a glint through a mountain. There is no way to ask this
+    // engine for terrain height at range: three investigations and two
+    // refutation passes went looking and the answer each time was that no CPU
+    // side height query exists. What does exist is the collision the game
+    // streams in around the player, a box on the order of a hundred and sixty
+    // metres across, and inside that box the ground can be measured.
+    //
+    // So this samples the sight line: at each step it drops a ray straight down
+    // from well above the line and asks where the ground is. Ground above the
+    // line means the line goes through a hill. A step that finds nothing below
+    // means collision is not loaded there and that step knows nothing, which is
+    // the common case past the window.
+    //
+    // It only ever answers Blocked when it measured the ground doing the
+    // blocking. Unknown is not Blocked, because a mod that refuses pins on
+    // suspicion is worse than one that occasionally marks through a mountain.
+    enum class Sight { Clear, Blocked, Unknown };
+
+    // `blockedAt` receives how far along the line the ground got in the way.
+    Sight LineOfSight(const float* eye, const float* target, int steps, float* blockedAt);
+
     // Log the facade's vtable, the world pointer and the frame offset.
     void LogState();
 }
