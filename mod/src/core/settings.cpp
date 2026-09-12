@@ -164,9 +164,8 @@ namespace
         fputs("Rumble=1\n", f);
         fputs("\n", f);
         fputs("; 1 makes each pin a marker the map can remove: put the cursor on it and the\n", f);
-        fputs("; map offers Remove Marker, the same as for one you placed yourself. Pins do\n", f);
-        fputs("; not survive loading a save. 0 draws pins the old way and nothing removes\n", f);
-        fputs("; them.\n", f);
+        fputs("; map offers Remove Marker, the same as for one you placed yourself. 0 draws\n", f);
+        fputs("; pins the old way and nothing removes them.\n", f);
         fputs("RealMarkers=1\n", f);
         fputs("\n", f);
         fputs("; 1 keeps your pins in GlintSpotter.pins beside the plugin and puts them back\n", f);

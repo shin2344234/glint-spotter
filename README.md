@@ -2,17 +2,17 @@
 
 Puts a map marker on the thing you are looking at, in Crimson Desert 2.02.00.
 
-Aim blinding flash at a glint and the mod pins the object it is
+Aim Blinding Flash at a glint and the mod pins the object it is
 lighting, out to the range you can actually see one. Or point at anything at
 all and press a button, and it pins that instead. The pin lands on the world
 map where the thing stands, so you can walk away and come back to it, and the
 map's own Remove Marker takes it off again when you are done.
 
-This is a test build. Read the limitations before you install it.
+Read the limitations before you install it.
 
 ## What it does
 
-- **Marks a glint automatically.** Hold blinding flash with a glint on your
+- **Marks a glint automatically.** Hold Blinding Flash with a glint on your
   crosshair and a pin appears where it is, once the crosshair has held it for a
   second. Distance is not the limit it used to be: a glint six hundred metres
   out marks as readily as one at twenty.
@@ -44,7 +44,7 @@ while it does. That is a known problem, see below.
 
 Both triggers do the same thing, and it is worth knowing which one you want.
 
-**Blinding flash** marks glints and only glints. Use it, put the
+**Blinding Flash** marks glints and only glints. Use it, put the
 crosshair on the glint, and hold it there for about a second. The pad buzzes
 when the pin lands. It is deliberately generous about aim, because nobody holds
 a crosshair still while flying.
@@ -67,7 +67,7 @@ on startup, so you can see what it read.
 
 Everything else is in `GlintSpotter.ini` beside the plugin, and every key has a
 comment saying what it does. The two worth knowing are `Rod`, which is how
-precisely a press has to be aimed, and `Kinds`, which is what blinding flash
+precisely a press has to be aimed, and `Kinds`, which is what Blinding Flash
 is willing to mark.
 
 ## Limitations
@@ -82,11 +82,11 @@ Read these before you decide whether the build is for you.
   second character sees the first one's pins.
 - **The game hitches once, for about fifteen seconds, shortly after a save
   loads.** The mod is searching memory for your character. Everything works
-  afterwards. Setting `Scan=0` removes the hitch and stops blinding flash
+  afterwards. Setting `Scan=0` removes the hitch and stops Blinding Flash
   marking anything, so it is not much of a trade yet.
 - **Loading a save from inside the game costs a few seconds.** Your pins, the
   press marker and the map buttons come back within a second or two. Blinding
-  flash takes longer, up to about half a minute, because the piece it needs is
+  Flash takes longer, up to about half a minute, because the piece it needs is
   only findable the slow way.
 - **A press can mark the wrong thing.** It picks the nearest object in the
   table that your sight line passes near, and if what you are pointing at is not
@@ -97,9 +97,9 @@ Read these before you decide whether the build is for you.
 
 ## Reporting a problem
 
-`GlintSpotter.log` appears in `bin64` beside the plugin and is overwritten each
-run. Send it with a note about what you were pointing at and how far away it
-was. That log is how nearly every fix in this mod was found, and a description
+`GlintSpotter.log` appears in `bin64` beside the plugin, and the last five runs
+are kept. Send it with a note about what you were pointing at and how far away
+it was. That log is how nearly every fix in this mod was found, and a description
 without it usually is not enough.
 
 If a marker lands somewhere wrong, the most useful thing you can say is roughly
