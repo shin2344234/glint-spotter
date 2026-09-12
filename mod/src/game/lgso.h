@@ -114,6 +114,21 @@ namespace gs::lgso
     bool NearestToLine(float ox, float oz, float ux, float uz, float maxRange,
                        Place* out, float* along, float* perp, bool* refused);
 
+    // The placements closest to the sight line, by how far off it they sit,
+    // ignoring every filter and every aperture.
+    //
+    // This exists because five apertures have now been tried and none of them
+    // answered the question underneath: is the thing Seth is pointing at even
+    // in this table? If it is, it turns up here with a small perpendicular
+    // distance and the aperture is what needs changing. If the nearest thing
+    // to his sight line is twenty metres off it, no aperture will ever find
+    // it and the table simply does not hold what he is looking at.
+    //
+    // `alongs` and `perps` receive each one's distance down the line and off
+    // it. Sorted by perpendicular distance, closest first.
+    int NearLine(float ox, float oz, float ux, float uz, float maxRange,
+                 Place* out, float* alongs, float* perps, int n);
+
     // The placements nearest a point, for the log.
     int Near(float px, float pz, Place* out, int n);
 

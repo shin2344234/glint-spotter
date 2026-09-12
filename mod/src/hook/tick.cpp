@@ -1121,6 +1121,29 @@ extern "C" void gs_OnMinimapTick(void* self)
                                                        gs::Settings::Get().rodMetres, 0.0f,
                                                        25.0f, 1.0e9f,
                                                        sight, sightDist, 4, true);
+
+                    // And, whatever the rod said, the eight things closest to
+                    // the sight line. Five apertures have been tried without
+                    // anyone checking whether the thing Seth points at is in
+                    // the table at all. If it is, it shows up here a few
+                    // centimetres off the line and the aperture is the
+                    // problem. If everything within three hundred metres is
+                    // twenty metres off the line, no aperture was ever going
+                    // to find it.
+                    {
+                        // Not called near: windef.h defines that as a macro.
+                        gs::lgso::Place onLine[8];
+                        float onAlong[8], onPerp[8];
+                        const int nn = gs::lgso::NearLine(sv.ox, sv.oz, sv.fx / flen,
+                                                          sv.fz / flen, 3000.0f,
+                                                          onLine, onAlong, onPerp, 8);
+                        GS_LOG("[mark] closest to the sight line, whatever the rod says:");
+                        for (int k = 0; k < nn; ++k)
+                            GS_LOG("[mark]   %.1f m off the line, %.0f m out, record %u element %u \"%s\" at (%.1f, %.1f, %.1f)",
+                                   onPerp[k], onAlong[k], onLine[k].record, onLine[k].element,
+                                   onLine[k].name[0] ? onLine[k].name : "unnamed",
+                                   onLine[k].x, onLine[k].y, onLine[k].z);
+                    }
                     if (sn > 0)
                     {
                         tx = sight[0].x; ty = sight[0].y; tz = sight[0].z;
@@ -1199,6 +1222,9 @@ extern "C" void gs_OnMinimapTick(void* self)
         View v;
         if (have)
             GS_LOG("[mark] the table answered, so the world ray is not cast");
+        else if (!gs::Settings::Get().rayFallback)
+            GS_LOG("[mark] the table could not answer and RayFallback is off, so nothing is "
+                   "placed. The list above says what was near the line.");
         else if (!gs::actors::Ready())
             GS_LOG("[mark] actor manager not located yet, no ray");
         else if (gs::actors::Count() == 0)

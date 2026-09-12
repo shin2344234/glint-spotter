@@ -188,6 +188,34 @@ namespace gs::lgso
         return found;
     }
 
+    int NearLine(float ox, float oz, float ux, float uz, float maxRange,
+                 Place* out, float* alongs, float* perps, int n)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        int found = 0;
+        for (int i = 0; i < g_n; ++i)
+        {
+            const float dx = g_places[i].x - ox, dz = g_places[i].z - oz;
+            const float a = dx * ux + dz * uz;
+            if (a < 1.0f || a > maxRange) continue;
+            const float p = std::fabs(dx * uz - dz * ux);
+            if (found == n && p >= perps[n - 1]) continue;
+            int pos = found < n ? found : n - 1;
+            while (pos > 0 && perps[pos - 1] > p)
+            {
+                out[pos] = out[pos - 1];
+                alongs[pos] = alongs[pos - 1];
+                perps[pos] = perps[pos - 1];
+                --pos;
+            }
+            out[pos] = g_places[i];
+            alongs[pos] = a;
+            perps[pos] = p;
+            if (found < n) ++found;
+        }
+        return found;
+    }
+
     bool NearestToLine(float ox, float oz, float ux, float uz, float maxRange,
                        Place* out, float* along, float* perp, bool* refused)
     {

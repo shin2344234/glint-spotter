@@ -22,8 +22,9 @@
 //   MiniPin=0     ; also copy each pin onto the minimap. Crashed the game in
 //                 ; session eighty-two; leave it alone.
 //   Rumble=1      ; buzz the pad when a pin lands
-//   Rod=1.0       ; metres either side of the sight line a press will look,
+//   Rod=0.35      ; metres either side of the sight line a press will look,
 //                 ; the same at every distance
+//   RayFallback=0 ; let a press that the table cannot answer guess from terrain
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
 //                 ; may be and still count. Zero, the default, means none.
@@ -117,7 +118,18 @@ namespace gs::Settings
         // during a flash with nobody aiming deliberately, often from the air
         // where the crosshair sways, and a miss there is a glint that never
         // got marked.
-        float rodMetres = 1.0f;
+        // Thirty-five centimetres: the needle's width at a hundred metres,
+        // held at every distance, which is what Seth asked for.
+        float rodMetres = 0.35f;
+
+        // Whether a press that the table cannot answer may guess from terrain.
+        //
+        // Off. The collision fallback reaches eighty metres or so and then
+        // extrapolates the last slope it measured, and session eighty-five has
+        // it placing a marker two hundred and sixty-eight metres out on that
+        // extrapolation. A guess dressed as a pin is exactly the complaint,
+        // and a press that cannot be answered should say so.
+        bool rayFallback = false;
 
         // And the automatic one, which stays wide on Seth's instruction.
         //
