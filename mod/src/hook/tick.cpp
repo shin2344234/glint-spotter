@@ -20,6 +20,7 @@
 #include "game/camera.h"
 #include "game/dump.h"
 #include "game/physics.h"
+#include "game/pinmodel.h"
 #include "core/settings.h"
 
 // Shared with thunk.asm. C linkage so the names match what MASM emits.
@@ -435,7 +436,12 @@ namespace
     int g_glintWinsLeft = 40;
     int g_tableLogsLeft = 120;
     int g_quietLogsLeft = 20;
+    // How close two automatic pins may be. Eight metres was arbitrary and
+    // it is wide enough to swallow a neighbour: glints come in clusters and
+    // pinning one should not refuse the next one along. Four.
+    constexpr float kPinApart = 4.0f;
     int g_dupLogsLeft = 20;
+    int g_pinModelLogsLeft = 3;
     uint32_t g_dupLastMs = 0;
     uint32_t g_quietLastMs = 0;
     int g_lastGlintN = -1;
@@ -628,8 +634,19 @@ namespace
                 // metres at four hundred and twenty-seven at nine hundred,
                 // which is roughly how steady a crosshair is at those ranges.
                 const float reach = gs::Settings::Get().reach;
+                // The same cone a press gets. Eight metres and three per cent
+                // was for a crosshair swaying in flight, and session
+                // seventy-nine says it costs more than it buys: Seth flew past
+                // three glints in a row, aimed at the middle one, and the
+                // middle one was the one that never got a pin. At three
+                // hundred metres the old cone is nine metres across, wide
+                // enough to hold two of the three, and the nearest along the
+                // line takes it every time. His presses that session used two
+                // metres and one and a half per cent from the same aircraft
+                // and he says they landed where he pointed, so the sway was
+                // never the problem the wide cone was solving.
                 tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             8.0f, 0.03f, 5.0f, reach > 0.0f ? reach : 1.0e9f,
+                                             2.0f, 0.015f, 5.0f, reach > 0.0f ? reach : 1.0e9f,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
@@ -684,16 +701,21 @@ namespace
         if (byTable && g_tableLogsLeft > 0)
         {
             --g_tableLogsLeft;
-            const float dx = table[0].x - pp.x, dz = table[0].z - pp.z;
-            GS_LOG("[auto] the table has %d placement(s) within four metres of the line; the nearest "
-                   "is record %u element %u \"%s\" at (%.1f, %.1f, %.1f), %.0f metres away",
-                   tableN, table[0].record, table[0].element,
-                   table[0].name[0] ? table[0].name : "unnamed",
-                   table[0].x, table[0].y, table[0].z, std::sqrt(dx * dx + dz * dz));
-            for (int k = 1; k < tableN && k < 4; ++k)
-                GS_LOG("[auto]   then record %u element %u at (%.1f, %.1f, %.1f), %.0f metres",
-                       table[k].record, table[k].element, table[k].x, table[k].y, table[k].z,
-                       tableAngles[k]);
+            const float vlen = std::sqrt(v.fx * v.fx + v.fz * v.fz);
+            const float ux = vlen > 1.0e-3f ? v.fx / vlen : 0.0f;
+            const float uz = vlen > 1.0e-3f ? v.fz / vlen : 1.0f;
+            GS_LOG("[auto] the table has %d placement(s) on the line", tableN);
+            for (int k = 0; k < tableN && k < 4; ++k)
+            {
+                const float ddx = table[k].x - v.ox, ddz = table[k].z - v.oz;
+                const float perp = std::fabs(ddx * uz - ddz * ux);
+                const float deg = std::atan2(perp, tableAngles[k]) * 57.2958f;
+                GS_LOG("[auto]   %srecord %u element %u \"%s\" at (%.1f, %.1f, %.1f), %.0f metres "
+                       "out, %.1f off the line, %.2f degrees",
+                       k == 0 ? "TAKEN " : "      ", table[k].record, table[k].element,
+                       table[k].name[0] ? table[k].name : "unnamed",
+                       table[k].x, table[k].y, table[k].z, tableAngles[k], perp, deg);
+            }
         }
 
         bool byGlint = false;
@@ -904,7 +926,7 @@ namespace
         // broken feature: aim at a glint you pinned ten minutes ago, hold it,
         // and the mod does nothing and says nothing.
         const bool matured = chosen.valid && g_heldSinceMs && now - g_heldSinceMs >= 1000;
-        if (matured && now >= g_cooldownUntil && gs::mapicon::PinNear(chosen.x, chosen.z, 8.0f) &&
+        if (matured && now >= g_cooldownUntil && gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart) &&
             g_dupLogsLeft > 0 && now - g_dupLastMs > 3000)
         {
             --g_dupLogsLeft;
@@ -913,7 +935,7 @@ namespace
                    chosen.name);
         }
         if (matured && now >= g_cooldownUntil &&
-            !gs::mapicon::PinNear(chosen.x, chosen.z, 8.0f))
+            !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
         {
             g_cooldownUntil = now + 3000;
             const float dx = chosen.x - pp.x, dz = chosen.z - pp.z;
@@ -930,7 +952,7 @@ namespace
                             : byGlint ? "automatic, the node the game marked as a detect mode target"
                             : (byTarget ? "automatic, what the game's detect system is holding"
                                         : "automatic, the node under the crosshair"),
-                    "Glint", pp, 8.0f);
+                    "Glint", pp, kPinApart);
         }
 
         // The measurement, once the flash has been on for a moment.
@@ -1044,11 +1066,16 @@ extern "C" void gs_OnMinimapTick(void* self)
                     // nineteen and thirty-three metres out on whatever a
                     // sector record had off to the side, because eight metres
                     // at nineteen is a cone twenty-four degrees wide.
-                    const float reach = gs::Settings::Get().reach;
+                    //
+                    // No ceiling here, whatever Reach says. Reach exists
+                    // because the automatic path pins on its own and once put
+                    // a marker three kilometres out during a flash. A press is
+                    // the player pointing at something and asking for it, and
+                    // there is nothing to protect him from: if he can see a
+                    // tower across the map he can have it.
                     const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oz,
                                                        sv.fx / flen, sv.fz / flen,
-                                                       2.0f, 0.015f, 3.0f,
-                                                       reach > 0.0f ? reach : 1.0e9f,
+                                                       2.0f, 0.015f, 3.0f, 1.0e9f,
                                                        sight, sightDist, 4, true);
                     if (sn > 0)
                     {
@@ -1087,6 +1114,15 @@ extern "C" void gs_OnMinimapTick(void* self)
                    a[0], a[1], a[2], a[0] + pp.ox, a[1] + pp.oy, a[2] + pp.oz);
 
         gs::camera::LogAtPress(2.0f * std::atan2(pp.q[1], pp.q[3]));
+
+        // Read only, and only a few times. Seth cannot delete the mod's pins
+        // because they were never markers, and this is the first look at where
+        // real ones live.
+        if (g_pinModelLogsLeft > 0)
+        {
+            --g_pinModelLogsLeft;
+            gs::pinmodel::LogState("on a press");
+        }
 
         View v;
         if (have)

@@ -49,6 +49,34 @@ namespace gs::sig
     constexpr const char* kAlertRootClass = ".?AVUIGamePlayControlRootAlertSystem@uiCommonScript@pa@@";
     constexpr int kSlotAlertCall = 144;   // of 168
 
+    // The game's own marker list, and the two functions that change it.
+    //
+    // Seth cannot delete the mod's pins, and the reason is that they were
+    // never markers. The mod builds a UI icon directly on the map root, which
+    // draws correctly and belongs to nothing, so the game's own delete has
+    // nothing to delete. His hand-placed markers go somewhere else first: a
+    // submodule hanging off the player that keeps one growable list per icon
+    // kind, and the map is drawn from that.
+    //
+    // The chain, from re-pinmarker-flow.md, traced through the Ack that
+    // commits a marker the server confirmed:
+    //   submodule = *(*(actor + 0x68) + 0x168)
+    //   the list for a kind is at submodule + 0xC8 + kind * 16
+    //   a record is 24 bytes: int64 id, float x, y, z, then two flag bytes
+    // Kind 0x15 is the player's pin marker, which vanilla code writes as a
+    // literal, and is the same 0x15 the mod already passes to the icon call.
+    //
+    // Nothing here is called yet. This build reads the list and prints it, so
+    // the offsets can be checked against markers Seth placed by hand before a
+    // single byte is written.
+    constexpr uintptr_t kPinUpsert = 0x004260C0;   // (submodule, ?, kind, &{records, count})
+    constexpr uintptr_t kPinRemove = 0x00426360;   // (submodule, &err, kind, &id, &flag)
+    constexpr uintptr_t kOff_Actor_Components = 0x68;
+    constexpr uintptr_t kOff_Comp_PinSubmodule = 0x168;
+    constexpr uintptr_t kOff_Pin_Lists         = 0xC8;
+    constexpr int       kPinKind               = 0x15;
+    constexpr size_t    kPinRecord             = 24;
+
     // Size the factory allocates for a root control (2760); a sanity bound.
     constexpr size_t kRootControlSize = 0xC48;
 
