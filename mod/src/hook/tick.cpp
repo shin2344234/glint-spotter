@@ -310,16 +310,10 @@ namespace
     // marked again by asking again.
     void SettleAt(float x, float z)
     {
-        // Only against other deletions. Asking the general test would let a
-        // marked thing four metres away swallow the deletion, and that thing's
-        // identity is not the deleted one's: the next look would compare
-        // identities, find no match, and pin it again.
-        for (const MarkedThing& m : g_marked)
-        {
-            if (m.kind != MarkKind::Place) continue;
-            const float dx = m.x - x, dz = m.z - z;
-            if (dx * dx + dz * dz <= kPinApart * kPinApart) return;
-        }
+        // Every deletion, with no folding of one into another. Two deletions
+        // three metres apart cover different ground than either does alone,
+        // and there is nothing to save by dropping one: the list has no cap
+        // and the next press empties it.
         RememberMarked(MarkKind::Place, 0, 0, 0, x, z);
     }
 
