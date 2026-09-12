@@ -264,6 +264,23 @@ namespace
     // allocating at all.
     std::vector<MarkedThing> g_marked;
 
+    // A pin on a plant a metre from your boots is not information.
+    //
+    // The flash lights whatever is collectible nearby, and standing over one
+    // puts it a fraction of a degree off the sight line whichever way you
+    // face, so it wins the bearing outright. The first automatic mark of
+    // session 18:22 went to a sophora one and a bit metres away while the
+    // player was aiming at something else entirely. The level table has
+    // refused anything nearer than five metres all along; the node routes
+    // never did.
+    constexpr float kNearestWorthMarking = 5.0f;
+
+    bool TooClose(const gs::player::Pos& pp, float x, float z)
+    {
+        const float dx = x - pp.x, dz = z - pp.z;
+        return dx * dx + dz * dz < kNearestWorthMarking * kNearestWorthMarking;
+    }
+
     bool AlreadyMarked(MarkKind kind, uint32_t eid, uint32_t record, uint32_t element,
                        float x, float z)
     {
@@ -1062,7 +1079,8 @@ namespace
         int pick = -1;
         for (int i = 0; i < n; ++i)
         {
-            if (AlreadyMarked(MarkKind::Node, around[i].eid, 0, 0, around[i].x, around[i].z))
+            if (AlreadyMarked(MarkKind::Node, around[i].eid, 0, 0, around[i].x, around[i].z) ||
+                TooClose(pp, around[i].x, around[i].z))
             {
                 ++markedSeen;
                 continue;
@@ -1081,8 +1099,9 @@ namespace
         }
         int glintPick = 0;
         while (glintPick < glintN &&
-               AlreadyMarked(MarkKind::Node, glints[glintPick].eid, 0, 0,
-                             glints[glintPick].x, glints[glintPick].z))
+               (AlreadyMarked(MarkKind::Node, glints[glintPick].eid, 0, 0,
+                              glints[glintPick].x, glints[glintPick].z) ||
+                TooClose(pp, glints[glintPick].x, glints[glintPick].z)))
         {
             ++glintPick;
             ++markedSeen;
@@ -1928,8 +1947,19 @@ extern "C" void gs_OnMinimapTick(void* self)
             }
         }
 
-        if (have) PlaceAt(tx, ty, tz, how, markLabel, pp, 2.0f);
+        // The pad answers either way. A press that lands buzzes once, long,
+        // from inside PlacePinNow. A press that lands on nothing, or on a
+        // place that already has a pin, used to be silent, and silence from a
+        // button is indistinguishable from a button that did not work: eight
+        // presses in one session went unanswered because the thing aimed at
+        // was already pinned.
+        bool placed = false;
+        if (have) placed = PlaceAt(tx, ty, tz, how, markLabel, pp, 2.0f);
         else GS_LOG("[mark] no target resolved, nothing placed");
+        // Shorter and weaker than the one a landed pin gives, and no sleeping
+        // to make a pattern out of it: this runs on the thread that reads the
+        // pad and does the whole search, and it is not a thread to park.
+        if (!placed && gs::Settings::Get().rumble) gs::pad::Buzz(11000, 90);
         (void)g_markX; (void)g_markZ; (void)g_markLabel;
     }
 }
