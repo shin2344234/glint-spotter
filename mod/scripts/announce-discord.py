@@ -10,13 +10,11 @@ it; the script refuses without it, and refuses if either link is missing.
 
 Posts as the bot, using DISCORD_BOT_TOKEN from the environment or from
 keys.local.env beside this script, the same file the Nexus and VirusTotal
-scripts read. It was written against a webhook, which is what Master Looter's
-copy still says, and neither project has ever had one: the key both of them
-actually hold is the bot token, and the 1.0 announcement went out by hand
-because of it.
+scripts read. It was written against a webhook that neither this project nor
+Master Looter has ever had, which is why the 1.0 announcement went out by hand.
 
 The channel is mod-releases, and its id is below rather than in the key file
-because a channel id is not a secret. GS_RELEASES_CHANNEL overrides it.
+because a channel id is not a secret. DISCORD_RELEASES_CHANNEL overrides it.
 
 Refuses to post a version twice: a marker is written under private/discord
 after a successful post and checked before the next one.
@@ -113,7 +111,7 @@ def main():
     if not token:
         print("No DISCORD_BOT_TOKEN in the environment or keys.local.env.")
         return 2
-    channel = from_keys("GS_RELEASES_CHANNEL") or RELEASES_CHANNEL
+    channel = from_keys("DISCORD_RELEASES_CHANNEL") or RELEASES_CHANNEL
     for m in messages:
         post(token, channel, m)
     os.makedirs(os.path.dirname(marker), exist_ok=True)
