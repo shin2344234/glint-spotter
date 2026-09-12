@@ -88,11 +88,14 @@ namespace
         fputs("; milliseconds. Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START.\n", f);
         fputs("Chord=RB+LB+A\n", f);
         fputs("Hold=0\n", f);
-        fputs("; 1 also copies every pin onto the minimap. Unproven, off by default.\n", f);
-        fputs("MiniPin=0\n", f);
+        fputs("; 1 also copies every pin onto the minimap, which is what the game does\n", f);
+        fputs("; with its own markers.\n", f);
+        fputs("MiniPin=1\n", f);
+        fputs("; 1 buzzes the controller when a pin lands.\n", f);
+        fputs("Rumble=1\n", f);
         fputs("; How many degrees off the crosshair a press will look. Small is good:\n", f);
         fputs("; a press is you telling the mod what you are already aiming at.\n", f);
-        fputs("Cone=0.2\n", f);
+        fputs("Cone=1.5\n", f);
         fputs("; The same for the automatic glint marker. Wide on purpose: nobody is\n", f);
         fputs("; aiming carefully during a flash, and a miss there is a glint lost.\n", f);
         fputs("AutoCone=2.0\n", f);
@@ -180,6 +183,10 @@ namespace gs::Settings
                 if (c >= 0.05f && c <= 45.0f) g_values.autoConeDeg = c;
                 else GS_LOG_ERR("settings: AutoCone=%s is out of range, keeping %.2f degrees",
                                 val, g_values.autoConeDeg);
+            }
+            else if (_stricmp(key, "Rumble") == 0)
+            {
+                g_values.rumble = atoi(val) != 0;
             }
             else if (_stricmp(key, "MiniPin") == 0)
             {

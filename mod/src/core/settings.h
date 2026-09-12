@@ -19,8 +19,9 @@
 //   Chord=RB+LB+A ; controller buttons that place a mark, held together.
 //                 ; Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START
 //   Hold=0        ; milliseconds the chord must be held before it fires
-//   MiniPin=0     ; also copy each pin onto the minimap
-//   Cone=0.2      ; how many degrees off the crosshair a press will look
+//   MiniPin=1     ; also copy each pin onto the minimap
+//   Rumble=1      ; buzz the pad when a pin lands
+//   Cone=1.5      ; how many degrees off the crosshair a press will look
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
 //                 ; may be and still count. Zero, the default, means none.
@@ -100,15 +101,30 @@ namespace gs::Settings
         // and is asking the mod which one it is, so the only job left is to
         // not answer with a neighbour.
         //
-        // Two tenths of a degree is thirty-five centimetres at a hundred
-        // metres and three and a half at a kilometre. A press that finds
-        // nothing now says what it nearly hit and at what angle, so this
-        // number can be tuned from one line of the log rather than guessed.
+        // Two tenths of a degree turned out to be too fine, and in a way
+        // worth writing down, because it is the opposite failure to the one
+        // before it. Seth pointed at a building and the pin went through it
+        // and landed on a shop eighteen hundred metres beyond, nineteen
+        // hundredths of a degree off the line.
+        //
+        // A tight angle is biased toward far things, and it has to be. The
+        // placement the table holds for a building is one point, its origin,
+        // and the part of the building a player aims at is metres away from
+        // that point. At four hundred metres a fifteen metre offset is two
+        // degrees, so the building itself never enters a cone of a fifth of a
+        // degree while something far away that happens to line up does.
+        // Nearest wins is the right rule and it cannot help if the near thing
+        // was never a candidate.
+        //
+        // One and a half degrees is ten metres at four hundred and sixty-five
+        // centimetres at twenty-five, which is the closest a press looks. Wide
+        // enough to contain a building's origin, far too narrow for the thing
+        // at your feet that used to steal every press.
         //
         // The automatic search keeps its own wider cone. That one fires on its
         // own during a flash with nobody aiming deliberately, and a miss there
         // is a glint that never got marked.
-        float coneDeg = 0.2f;
+        float coneDeg = 1.5f;
 
         // And the automatic one, which stays wide on Seth's instruction.
         //
@@ -121,7 +137,26 @@ namespace gs::Settings
         // floor below it keeps close range forgiving too.
         float autoConeDeg = 2.0f;
 
-        // A copy of each pin on the minimap, off by default.
+        // Feedback, because a marker on a map you are not looking at is not
+        // feedback. Seth: still not seeing any notification that a marker was
+        // placed or a glint was marked.
+        //
+        // The game's own text popups have not been found yet. Slot 144 of the
+        // alert root names "Toast" in its own code but never fired once in
+        // seven minutes of play, so it is not the way in, and the enum the
+        // kinds come from says Toast is 6 of 40 without saying who consumes
+        // it. That hunt continues.
+        //
+        // These two do not need it. A short buzz on the pad is unambiguous,
+        // arrives the instant the pin lands, and costs one XInput call. The
+        // minimap copy is the other half: the game creates every one of its
+        // own pin markers twice, once on each surface with the same key, which
+        // the spy captured sixty times over. Doing what vanilla does puts the
+        // marker on the screen he is already looking at.
+        bool rumble = true;
+
+        // A copy of each pin on the minimap. On now: the captures showed this
+        // is exactly what the game does with its own markers.
         //
         // The idea was immediate feedback: a mark you can see without opening
         // the map. It went in untested and the first session with it is the
@@ -131,7 +166,7 @@ namespace gs::Settings
         // the minimap call returned a live object pointer once and 1 the next,
         // so the two are not doing the same thing. Until that is understood
         // the proven path is the only one on by default.
-        bool miniPin = false;
+        bool miniPin = true;
         // One press at each place pins every candidate inside the cone,
         // labelled with its distance, so the glint can be named by reading
         // one number off the map. Set Survey=0 once that is settled.

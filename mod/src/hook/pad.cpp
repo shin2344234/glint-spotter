@@ -3,6 +3,8 @@
 #include <Windows.h>
 #include <Xinput.h>
 
+#include <atomic>
+
 #include "core/log.h"
 
 namespace
@@ -12,6 +14,11 @@ namespace
     uint32_t g_sinceMs = 0;    // when the chord went down, or zero
     bool g_fired = false;      // this hold has already had its turn
     bool g_connected = false;
+    std::atomic<uint32_t> g_buzzUntil{0};
+    std::atomic<uint16_t> g_buzzStrength{0};
+    bool g_buzzing = false;
+    using SetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_VIBRATION*);
+    SetStateFn g_setState = nullptr;
 }
 
 namespace gs::pad
@@ -24,9 +31,10 @@ namespace gs::pad
             HMODULE h = LoadLibraryW(n);
             if (!h) continue;
             g_getState = reinterpret_cast<GetStateFn>(GetProcAddress(h, "XInputGetState"));
+            g_setState = reinterpret_cast<SetStateFn>(GetProcAddress(h, "XInputSetState"));
             if (g_getState)
             {
-                GS_LOG("pad: using %ls", n);
+                GS_LOG("pad: using %ls, vibration %s", n, g_setState ? "available" : "not available");
                 return true;
             }
         }
@@ -53,6 +61,29 @@ namespace gs::pad
         if (now - g_sinceMs < holdMs) return false;
         g_fired = true;
         return true;
+    }
+
+    void Buzz(uint16_t strength, uint32_t ms)
+    {
+        const uint32_t now = GetTickCount();
+        g_buzzStrength.store(strength);
+        g_buzzUntil.store(now + ms ? now + ms : 1);
+    }
+
+    void Pump()
+    {
+        if (!g_setState || !g_connected) return;
+        const uint32_t until = g_buzzUntil.load();
+        const bool want = until != 0 && static_cast<int32_t>(GetTickCount() - until) < 0;
+        if (want == g_buzzing) return;
+        g_buzzing = want;
+        XINPUT_VIBRATION v{};
+        if (want)
+        {
+            v.wLeftMotorSpeed = g_buzzStrength.load();
+            v.wRightMotorSpeed = g_buzzStrength.load();
+        }
+        g_setState(0, &v);
     }
 
     bool Connected() { return g_connected; }

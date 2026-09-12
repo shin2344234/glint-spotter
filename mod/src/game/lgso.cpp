@@ -170,7 +170,7 @@ namespace gs::lgso
             const float perp = std::fabs(dx * uz - dz * ux);
             float allow = along * perpFrac;
             if (allow < maxPerp) allow = maxPerp;
-            if (allow > 30.0f) allow = 30.0f;
+            if (allow > 60.0f) allow = 60.0f;
             if (perp > allow) continue;
             if (!anyKind && !Worth(g_places[i].name)) continue;
             const float fx = g_places[i].x - px, fz = g_places[i].z - pz;

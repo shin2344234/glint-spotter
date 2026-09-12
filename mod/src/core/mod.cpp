@@ -816,6 +816,7 @@ namespace
             wasDown = down;
             // Whatever the ini's Chord names, held for Hold milliseconds.
             if (gs::pad::ChordHeld(g_chord, g_chordHold)) OnTrigger("the pad chord");
+            gs::pad::Pump();
             // The entity set, off the game's thread. Twice a second is plenty:
             // an entity stays in the set twelve seconds after it was last seen.
             static uint32_t lastRefresh = 0;

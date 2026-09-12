@@ -1,6 +1,7 @@
 #include "game/mapicon.h"
 
 #include <Windows.h>
+#include <intrin.h>
 #include <atomic>
 #include <cstring>
 #include <mutex>
@@ -9,6 +10,7 @@
 #include "core/settings.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
+#include "hook/pad.h"
 #include "hook/vtable.h"
 
 namespace
@@ -47,6 +49,7 @@ namespace
     size_t g_nameCount = 0;
     std::atomic<void*> g_lastWorldRoot{nullptr};
     std::atomic<void*> g_lastMiniRoot{nullptr};
+    int g_pinCallerLeft = 6;
 
     bool NewName(const char* name)
     {
@@ -140,6 +143,23 @@ namespace
             if (pin && surface == 0) g_lastPin = c;
             if (player && surface == 0) g_lastPlayer = c;
             if (c.ok) fresh = NewName(c.name8);
+        }
+        // The one thing worth knowing that a captured argument cannot say:
+        // who called. When the game builds one of its own markers, the return
+        // address names the function that holds the marker list, and that list
+        // is what the mod has to write into for Seth to be able to delete a
+        // pin. Session eighty-one hunted for the list by the coordinates it
+        // must contain and found a position trail instead, because he happens
+        // to stand near one of his own markers. A caller cannot be
+        // coincidence.
+        if (pin && g_pinCallerLeft > 0)
+        {
+            --g_pinCallerLeft;
+            const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+            const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+            GS_LOG("[spy] a MapIcon_Pin_Marker create was called from +0x%08llX (surface %d, key %lld)",
+                   static_cast<unsigned long long>(ret - base), surface,
+                   static_cast<long long>(c.keyId));
         }
         if (surface == 0) g_lastWorldRoot.store(c.self);
         else g_lastMiniRoot.store(c.self);
@@ -404,6 +424,9 @@ namespace gs::mapicon
             GS_LOG("[pin #%llu] minimap copy key=%lld returned 0x%p",
                    static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
         }
+        // And say so, because the map is not on screen when this happens.
+        if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 220);
+
         const int i = g_placedN.load();
         if (i < kMaxPins) { g_placed[i] = {x, z}; g_placedN.store(i + 1); }
         return r;

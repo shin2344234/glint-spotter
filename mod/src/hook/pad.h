@@ -23,5 +23,17 @@ namespace gs::pad
     // Buttons are XINPUT_GAMEPAD_* bits.
     bool ChordHeld(uint16_t buttons, uint32_t holdMs);
 
+    // Buzz the pad for a moment. Safe from any thread: it records what it
+    // wants and Pump, on the polling thread, makes the XInput call.
+    //
+    // This is the feedback the mod has been missing. Seth places a marker and
+    // nothing tells him, because a marker on a map he is not looking at is not
+    // a notification. The game's own text popups are still unfound. A buzz
+    // costs one call and arrives the instant the pin lands.
+    void Buzz(uint16_t strength, uint32_t ms);
+
+    // Apply or clear a pending buzz. Called from the polling loop.
+    void Pump();
+
     bool Connected();
 }

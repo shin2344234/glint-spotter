@@ -168,9 +168,44 @@ namespace gs::pinmodel
     // Every four-byte float in a block, checked against those. On a hit, the
     // bytes either side, because the record layout is the other half of what
     // this is for.
+    int WhichKnownX(float v)
+    {
+        for (int i = 0; i < static_cast<int>(sizeof(kKnownX) / sizeof(kKnownX[0])); ++i)
+            if (v > kKnownX[i] - 0.05f && v < kKnownX[i] + 0.05f) return i;
+        return -1;
+    }
+
     int HuntBlock(uintptr_t base, size_t bytes, const char* tag)
     {
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(base), bytes)) return 0;
+
+        // Two different markers or nothing.
+        //
+        // Session eighty-one matched on one coordinate and found a trail of
+        // the player's own recent positions, because Seth was standing beside
+        // the marker whose x it matched. His markers are scattered over the
+        // whole map, so a block holding two of them is the marker list and a
+        // block holding one is a coincidence.
+        uint32_t seen = 0;
+        int distinct = 0;
+        __try
+        {
+            for (size_t off = 0; off + 4 <= bytes; off += 4)
+            {
+                float v;
+                memcpy(&v, reinterpret_cast<const void*>(base + off), 4);
+                const int k = WhichKnownX(v);
+                if (k < 0 || (seen & (1u << k))) continue;
+                seen |= 1u << k;
+                ++distinct;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+        if (distinct < 2) return 0;
+
         int hits = 0;
         __try
         {
