@@ -188,11 +188,14 @@ namespace
         }
     }
 
-    // The lists, off whichever object is in play.
+    // The client copy, always. It preferred the server component for three
+    // builds, from when the mod wrote its records there, and kept the
+    // preference after the writing moved. Everything the mod puts in a list
+    // now goes through Mirror, and Mirror writes the client copy, so this has
+    // to read the same one or it answers about somebody else's markers.
     gs::pinmodel::List ReadList(int kind)
     {
-        const uintptr_t sub = g_gameSub.load();
-        return sub ? gs::pinmodel::ReadAt(sub, kind) : gs::pinmodel::Read(kind);
+        return gs::pinmodel::Read(kind);
     }
 
     // The last record, which is the one the create just appended.

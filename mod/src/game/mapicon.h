@@ -130,6 +130,9 @@ namespace gs::mapicon
     // which is how the mod counts the ones that have a record behind them.
     int LivePinsAtOrAbove(int64_t minId);
 
+    // Their keys, so a caller can take them off one by one.
+    int LivePinKeys(int64_t minId, int64_t* out, int n);
+
     // Record a place as taken. `drawn` says whether this pin is one of ours,
     // drawn onto the map by the icon call, or a real marker the game owns and
     // redraws itself. Only ours are put back when the map is rebuilt; putting

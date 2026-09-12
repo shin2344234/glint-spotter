@@ -261,15 +261,13 @@ namespace
         // hundred icons and built seven hundred and fifty, and the marker copy
         // came back at the same address, so the first test saw nothing.
         const bool fresh = sub != seen;
+        int live = 0, mine = 0;
         bool lost = false;
         if (!fresh && gs::Settings::Get().realMarkers)
         {
-            const int live = gs::mapicon::LivePinsAtOrAbove(gs::realpin::IdBase());
-            const int mine = gs::realpin::MineInList();
+            live = gs::mapicon::LivePinsAtOrAbove(gs::realpin::IdBase());
+            mine = gs::realpin::MineInList();
             lost = live > 0 && mine >= 0 && mine < live;
-            if (lost)
-                GS_LOG("[pins] %d pin(s) on the map and %d record(s) left behind them, so the "
-                       "world has been rebuilt", live, mine);
         }
         if (!fresh && !lost) return;
 
@@ -279,6 +277,23 @@ namespace
         if (lastMs && now - lastMs < 20000) return;
         lastMs = now;
         seen = sub;
+        if (lost)
+            GS_LOG("[pins] %d pin(s) on the map and %d record(s) left behind them, so the world "
+                   "has been rebuilt", live, mine);
+
+        // Take the old ones off before putting them back. On a real rebuild
+        // the icons and records are gone already and this does nothing, and
+        // any other time it is what keeps a second restore from leaving two
+        // pins on every place.
+        void* root = gs::mapicon::LastWorldRoot();
+        int64_t old[256];
+        const int oldN = gs::mapicon::LivePinKeys(gs::realpin::IdBase(), old, 256);
+        for (int i = 0; i < oldN; ++i)
+        {
+            gs::realpin::Retire(old[i]);
+            gs::mapicon::RemoveIcon(root, old[i]);
+        }
+        if (oldN) GS_LOG("[pins] %d old pin(s) taken off first", oldN);
         gs::mapicon::ForgetAll();
         g_pendingN = 0;
         if (!gs::Settings::Get().keepPins) return;
