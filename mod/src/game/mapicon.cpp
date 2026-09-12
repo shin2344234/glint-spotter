@@ -23,7 +23,7 @@ namespace
     gs::vtable::Swap g_rmSwap[2];
     CreateFn g_rmOrig[2] = {nullptr, nullptr};
     std::atomic<uint64_t> g_rmSeen[2];
-    int g_rmLogsLeft = 24;
+    int g_rmLogsLeft = 40;
 
     std::atomic<uint64_t> g_seen[2];
     std::mutex g_lastMutex;
@@ -349,7 +349,6 @@ namespace
     {
         const uint64_t n = ++g_rmSeen[surface];
         if (g_rmLogsLeft <= 0) return;
-        --g_rmLogsLeft;
         __try
         {
             const uint16_t type = static_cast<uint16_t>(reinterpret_cast<uintptr_t>(a[1]));
@@ -362,6 +361,15 @@ namespace
                 memcpy(&kind, static_cast<const uint8_t*>(a[2]) + 8, 1);
                 keyOk = true;
             }
+            // Only the player's own pin markers.
+            //
+            // Session a hundred and one spent the whole budget on the map's
+            // housekeeping: opening and closing it removes icons of kind 0x0C
+            // and 0x0E by the dozen, and Seth's actual deletion happened after
+            // the twenty-fourth of them and was never printed. Kind 0x15 is
+            // the one that matters and it is rare, so the budget lasts.
+            if (!keyOk || kind != gs::sig::kPinKind) return;
+            --g_rmLogsLeft;
             const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
             GS_LOG("[rmspy %s #%llu] this=0x%p type=0x%04X key=%lld/0x%02X dword4=%u, called from "
                    "+0x%08llX", surface == 0 ? "world" : "mini",
