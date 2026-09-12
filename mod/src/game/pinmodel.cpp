@@ -53,34 +53,18 @@ namespace gs::pinmodel
         }
     }
 
-    void LogState(const char* why)
+    // Any object that holds a vector of marker-shaped records, printed.
+    // Returns how many candidate lists it found.
+    int SweepObject(uintptr_t obj, const char* tag, uintptr_t want)
     {
-        const uintptr_t sub = Submodule();
-        if (!sub)
-        {
-            GS_LOG("[pins] %s: no submodule at actor+0x%llX -> +0x%llX yet", why,
-                   static_cast<unsigned long long>(gs::sig::kOff_Actor_Components),
-                   static_cast<unsigned long long>(gs::sig::kOff_Comp_PinSubmodule));
-            return;
-        }
-        const char* cls = gs::rtti::VtableClassName(
-            *reinterpret_cast<const void* const*>(sub));
-        GS_LOG("[pins] %s: submodule 0x%p%s%s", why, reinterpret_cast<void*>(sub),
-               cls ? ", class " : "", cls ? cls : "");
-
+        int found = 0;
         __try
         {
-            // The list the notes name, and its neighbours. If 0xC8 plus kind
-            // times sixteen is right then exactly one of these reads as a
-            // vector of positions; if it is wrong, none of them will, and the
-            // sweep says where to look instead.
-            const uintptr_t want = gs::sig::kOff_Pin_Lists +
-                                   static_cast<uintptr_t>(gs::sig::kPinKind) * 16;
             for (uintptr_t off = 0x40; off + 16 <= 0x400; off += 8)
             {
-                const uintptr_t data = *reinterpret_cast<const uintptr_t*>(sub + off);
-                const uint32_t count = *reinterpret_cast<const uint32_t*>(sub + off + 8);
-                const uint32_t cap   = *reinterpret_cast<const uint32_t*>(sub + off + 12);
+                const uintptr_t data = *reinterpret_cast<const uintptr_t*>(obj + off);
+                const uint32_t count = *reinterpret_cast<const uint32_t*>(obj + off + 8);
+                const uint32_t cap   = *reinterpret_cast<const uint32_t*>(obj + off + 12);
                 if (data < 0x10000 || (data & 7) != 0) continue;
                 if (count == 0 || count > 4096 || cap < count || cap > 65536) continue;
                 if (!gs::rtti::Readable(reinterpret_cast<const void*>(data),
@@ -97,9 +81,10 @@ namespace gs::pinmodel
                     if (LooksLikePosition(x, y, z)) ++good;
                 }
                 if (!good) continue;
+                ++found;
 
-                GS_LOG("[pins]   +%03llX: %u record(s) of %u at 0x%p, %d read as positions%s",
-                       static_cast<unsigned long long>(off), count, cap,
+                GS_LOG("[pins]   %s+%03llX: %u record(s) of %u at 0x%p, %d read as positions%s",
+                       tag, static_cast<unsigned long long>(off), count, cap,
                        reinterpret_cast<void*>(data), good,
                        off == want ? "   <- where the notes say kind 0x15 lives" : "");
                 for (uint32_t i = 0; i < count && i < 12; ++i)
@@ -116,7 +101,78 @@ namespace gs::pinmodel
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            GS_LOG_ERR("[pins] a read faulted while walking the submodule");
+        }
+        return found;
+    }
+
+    // Failing the documented chain, every component the player carries.
+    //
+    // The note that traced +0x168 rated "this resolved object is the local
+    // player" at medium confidence, and the whole path hangs off that. So if
+    // the slot gives nothing, walk the component block itself. Seth has
+    // markers scattered over the map from earlier sessions, including one at
+    // (-9714.1, -4141.2), and a list holding those coordinates is the list
+    // whatever offset it turns up at.
+    void SweepComponents(const char* why)
+    {
+        const uintptr_t actor = gs::player::Actor();
+        if (!actor) { GS_LOG("[pins] %s: no player actor", why); return; }
+        __try
+        {
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(actor + gs::sig::kOff_Actor_Components), 8))
+                return;
+            const uintptr_t comps =
+                *reinterpret_cast<const uintptr_t*>(actor + gs::sig::kOff_Actor_Components);
+            if (comps < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(comps), 0x400))
+                return;
+            GS_LOG("[pins] %s: the documented slot gave nothing; walking the component block at 0x%p",
+                   why, reinterpret_cast<void*>(comps));
+            int hits = 0;
+            for (uintptr_t c = 0; c + 8 <= 0x400; c += 8)
+            {
+                const uintptr_t obj = *reinterpret_cast<const uintptr_t*>(comps + c);
+                if (obj < 0x10000 || (obj & 7) != 0) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x400)) continue;
+                char tag[24];
+                _snprintf_s(tag, sizeof(tag), _TRUNCATE, "comp+%03llX ",
+                            static_cast<unsigned long long>(c));
+                hits += SweepObject(obj, tag, 0xFFFFFFFF);
+            }
+            GS_LOG("[pins] %s: %d list(s) of marker-shaped records across the whole block", why, hits);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            GS_LOG_ERR("[pins] a read faulted while walking the component block");
+        }
+    }
+
+    void LogState(const char* why)
+    {
+        const uintptr_t sub = Submodule();
+        if (!sub)
+        {
+            GS_LOG("[pins] %s: no submodule at actor+0x%llX -> +0x%llX yet", why,
+                   static_cast<unsigned long long>(gs::sig::kOff_Actor_Components),
+                   static_cast<unsigned long long>(gs::sig::kOff_Comp_PinSubmodule));
+            SweepComponents(why);
+            return;
+        }
+        const char* cls = gs::rtti::VtableClassName(
+            *reinterpret_cast<const void* const*>(sub));
+        GS_LOG("[pins] %s: submodule 0x%p%s%s", why, reinterpret_cast<void*>(sub),
+               cls ? ", class " : "", cls ? cls : "");
+
+        // The list the notes name, and its neighbours. If 0xC8 plus kind
+        // times sixteen is right then one of these reads as a vector of
+        // positions Seth will recognise; if it is wrong, the sweep says where
+        // the right one is instead.
+        const uintptr_t want = gs::sig::kOff_Pin_Lists +
+                               static_cast<uintptr_t>(gs::sig::kPinKind) * 16;
+        const int hits = SweepObject(sub, "", want);
+        if (hits == 0)
+        {
+            GS_LOG("[pins] the submodule holds no list of marker-shaped records");
+            SweepComponents(why);
         }
     }
 }
