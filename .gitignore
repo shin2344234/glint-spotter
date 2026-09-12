@@ -7,3 +7,5 @@ docs/investigations/logs/
 # build output, once there is a plugin here
 mod/build/
 mod/dist/
+# release keys: Nexus, VirusTotal and the Discord webhook
+*.local.env
