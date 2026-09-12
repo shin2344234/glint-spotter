@@ -1061,6 +1061,17 @@ extern "C" void gs_OnMinimapTick(void* self)
         FlushPending();
         // A map that has just been rebuilt has none of the mod's pins on it.
         if (gs::mapicon::RepinWanted()) gs::mapicon::Repin(gs::mapicon::LastWorldRoot());
+        // The map asked for one of the mod's markers to go. The request went
+        // to the server, which has never heard of it, so the mod erases its
+        // own record and takes the icon off.
+        int64_t retire[8];
+        const int retiring = gs::realpin::TakeRetired(retire, 8);
+        for (int i = 0; i < retiring; ++i)
+        {
+            gs::realpin::Retire(retire[i]);
+            gs::mapicon::RemoveIcon(gs::mapicon::LastWorldRoot(), retire[i]);
+            gs::mapicon::Forget(retire[i]);
+        }
         AutoMark(GetTickCount());
 
         // The camera object moves; the probe follows it.
@@ -1297,7 +1308,6 @@ extern "C" void gs_OnMinimapTick(void* self)
             --g_pinModelLogsLeft;
             gs::pinmodel::LogState("on a press");
             gs::realpin::LogState("before the press");
-            gs::realpin::HuntStore("on a press");
         }
 
         View v;

@@ -22,6 +22,12 @@ namespace
                              uint8_t b1, uint8_t b2, uint8_t b3);
     using ServerRemoveFn = void (*)(void* submodule, int64_t id, uint8_t second);
     using UpsertFn = void (*)(void* submodule, int32_t* outError, uint8_t kind, const void* desc);
+    using EraseFn = void (*)(void* submodule, int32_t* outError, const int64_t* id, uint8_t kind);
+
+    // The mod's own ids, and the ones the map has asked to be rid of. Eight
+    // slots is more presses than anyone makes between two ticks.
+    std::atomic<int64_t> g_nextId{gs::sig::kModIdBase};
+    std::atomic<int64_t> g_retire[8];
 
     gs::inlinehook::Hook g_createHook;
     gs::inlinehook::Hook g_removeHook;
@@ -371,6 +377,17 @@ namespace
         Say("remove", ret, reinterpret_cast<uintptr_t>(sub));
         if (g_spyLogsLeft >= 0)
             GS_LOG("[mspy]   id %lld from list %u", static_cast<long long>(id), second);
+        // A request for one of the mod's own ids is the map asking for a pin
+        // to go. The server will find nothing and do nothing, which is fine,
+        // and the work happens on the tick rather than on this thread.
+        if (id >= gs::sig::kModIdBase)
+        {
+            for (auto& slot : g_retire)
+            {
+                int64_t empty = 0;
+                if (slot.compare_exchange_strong(empty, id)) break;
+            }
+        }
         reinterpret_cast<ServerRemoveFn>(g_removeHook.trampoline)(sub, id, second);
     }
 }
@@ -439,142 +456,83 @@ namespace gs::realpin
     bool Place(float x, float z, int64_t* outId)
     {
         *outId = 0;
-        const char* why = "";
-        if (!Ready(&why))
+        if (!BytesMatch()) { GS_LOG("[real] not placing a real marker: the game has been patched "
+                                    "away from these addresses"); return false; }
+        if (g_faultsLeft <= 0) return false;
+        if (!gs::pinmodel::Submodule())
         {
-            GS_LOG("[real] not placing a real marker: %s", why);
+            GS_LOG("[real] not placing a real marker: the player's marker copy has not been found "
+                   "yet");
             return false;
         }
-        uintptr_t sub = 0;
-        if (!Chain(&sub)) return false;
 
-        const int before = Count();
-        // Height zero, and the two style bytes the game passed for the marker
-        // Seth placed by hand: the icon that came back carried a zero and a
-        // one in the two argument slots these end up in. The create refuses
-        // anything from 0x0E and 0x0F up, so both are well inside.
-        float pos[3] = {x, 0.0f, z};
-        uint8_t b1 = kStyle1, b2 = kStyle2;
-        const auto fn = reinterpret_cast<CreateFn>(g_base + gs::sig::kPinCreate);
-
-        GS_LOG("[real] asking the game for a marker at (%.1f, %.1f) on 0x%p, %s; it is holding %d",
-               x, z, reinterpret_cast<void*>(sub),
-               g_gameSub.load() ? "the object the game uses" : "the one off the player", before);
-        bool raised = false;
-        g_faultCode = 0;
-        g_faultAt = 0;
-        __try
+        // An id of the mod's own. The game hands out a small index into a
+        // bitmap, so nothing it does will ever collide with these, and a
+        // removal request carrying one is unambiguous.
+        const int64_t id = g_nextId.fetch_add(1);
+        if (!Mirror(id, x, z))
         {
-            fn(reinterpret_cast<void*>(sub), nullptr, pos, &b1, &b2, 0);
+            --g_faultsLeft;
+            GS_LOG_ERR("[real] the client copy would not take id %lld, %d attempt(s) left",
+                       static_cast<long long>(id), g_faultsLeft);
+            return false;
         }
-        __except (FaultFilter(GetExceptionInformation()))
-        {
-            raised = true;
-        }
-
-        // The record first, because session a hundred and three had the call
-        // raise and the record land anyway: list 0 held it, at the position
-        // asked for, with an id of the game's choosing. Whatever raised did so
-        // after the append, and an id in hand is worth more than a tidy return
-        // path.
-        const int after = Count();
-        int64_t id = 0;
-        const bool landed = Landed(x, z, &id);
-
-        if (landed)
-        {
-            g_faultsLeft = 3;
-            if (raised && !g_saidWhyItRaises)
-            {
-                g_saidWhyItRaises = true;
-                const uintptr_t rva = (g_faultAt > g_base) ? g_faultAt - g_base : 0;
-                GS_LOG("[real] the call raises 0x%08lX at +0x%08llX on its way out and the record "
-                       "lands anyway. That is the notify reading a thread local that only a wire "
-                       "dispatch fills in, so the map is not told and the mod draws the icon "
-                       "itself. Said once.", g_faultCode,
-                       static_cast<unsigned long long>(rva));
-            }
-            GS_LOG_OK("[real] the game holds %d marker(s); this one is id %lld", after,
-                      static_cast<long long>(id));
-            Mirror(id, x, z);
-            *outId = id;
-            return true;
-        }
-        --g_faultsLeft;
-        GS_LOG_ERR("[real] no record for this mark; the list holds %d, %d attempt(s) left. Falling "
-                   "back to a drawn pin.", after, g_faultsLeft);
-        return false;
+        g_faultsLeft = 3;
+        *outId = id;
+        return true;
     }
 
-    bool Draw(void* worldRoot, int64_t id, float x, float z)
+    int TakeRetired(int64_t* out, int n)
     {
-        if (!worldRoot || !BytesMatch()) return false;
-        // The three bytes the dispatcher hands a subscriber are the record's
-        // own bytes at +0x14, +0x15 and +0x16. The first two are what this
-        // build writes into the record; the third is whatever the game's
-        // create left on its stack, and the icon the spy captured from a
-        // hand-placed marker carried a zero and a one, so a zero here matches
-        // what the map has already been seen to accept.
-        float pos[3] = {x, 0.0f, z};
-        const auto fn = reinterpret_cast<AddedFn>(g_base + gs::sig::kMarkerAdded);
-        GS_LOG("[real] telling the map about marker id %lld at (%.1f, %.1f)",
-               static_cast<long long>(id), x, z);
-        g_faultCode = 0;
-        g_faultAt = 0;
+        int got = 0;
+        for (auto& slot : g_retire)
+        {
+            if (got >= n) break;
+            const int64_t id = slot.exchange(0);
+            if (id) out[got++] = id;
+        }
+        return got;
+    }
+
+    bool Retire(int64_t id)
+    {
+        const uintptr_t client = gs::pinmodel::Submodule();
+        if (!client || !g_base) return false;
         __try
         {
-            fn(worldRoot, id, pos, 0, 1, 0);
+            const auto* code = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinRemove);
+            if (!gs::rtti::Readable(code, sizeof(gs::sig::kPinRemovePrologue2))) return false;
+            if (memcmp(code, gs::sig::kPinRemovePrologue2,
+                       sizeof(gs::sig::kPinRemovePrologue2)) != 0)
+            {
+                GS_LOG_ERR("[real] the client copy's eraser is not where this build expects it");
+                return false;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+
+        int32_t err = -1;
+        int64_t want = id;
+        const auto fn = reinterpret_cast<EraseFn>(g_base + gs::sig::kPinRemove);
+        __try
+        {
+            fn(reinterpret_cast<void*>(client), &err, &want, 0);
         }
         __except (FaultFilter(GetExceptionInformation()))
         {
             const uintptr_t rva = (g_faultAt > g_base) ? g_faultAt - g_base : 0;
-            GS_LOG_ERR("[real] the map's own add handler raised 0x%08lX at +0x%08llX; the icon is "
-                       "drawn the old way instead", g_faultCode,
+            GS_LOG_ERR("[real] erasing id %lld raised 0x%08lX at +0x%08llX",
+                       static_cast<long long>(id), g_faultCode,
                        static_cast<unsigned long long>(rva));
             return false;
         }
-        GS_LOG_OK("[real] the map's add handler returned for id %lld", static_cast<long long>(id));
+        const gs::pinmodel::List l = gs::pinmodel::ReadAt(client, gs::sig::kPinListKind);
+        GS_LOG_OK("[real] the map asked for id %lld to go; erased, status %d, %u left",
+                  static_cast<long long>(id), err, l.ok ? l.count : 0u);
         return true;
-    }
-
-    void HuntStore(const char* why)
-    {
-        gs::actors::Entity set[512];
-        const int n = gs::actors::Snapshot(set, 512);
-        const uintptr_t mine = gs::pinmodel::Submodule();
-        int carriers = 0, filled = 0;
-        for (int i = 0; i < n; ++i)
-        {
-            uintptr_t sub = 0;
-            uint32_t c0 = 0, c1 = 0;
-            __try
-            {
-                const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(
-                    set[i].ptr + gs::sig::kOff_Actor_Components);
-                if (comps < 0x10000) continue;
-                if (!gs::rtti::Readable(reinterpret_cast<const void*>(
-                        comps + gs::sig::kOff_Comp_PinSubmodule), 8)) continue;
-                sub = *reinterpret_cast<const uintptr_t*>(comps + gs::sig::kOff_Comp_PinSubmodule);
-                if (sub < 0x10000 || (sub & 7) != 0) continue;
-                if (!gs::rtti::Readable(reinterpret_cast<const void*>(sub), 0xC8 + 2 * 16)) continue;
-                c0 = *reinterpret_cast<const uint32_t*>(sub + gs::sig::kOff_Pin_Lists + 8);
-                c1 = *reinterpret_cast<const uint32_t*>(sub + gs::sig::kOff_Pin_Lists + 16 + 8);
-                if (c0 > 4096 || c1 > 4096) continue;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                continue;
-            }
-            ++carriers;
-            if (c0 == 0 && c1 == 0) continue;
-            ++filled;
-            GS_LOG_OK("[hunt] eid %08X carries a marker list with %u and %u in it, at 0x%p%s",
-                      set[i].eid, c0, c1, reinterpret_cast<void*>(sub),
-                      sub == mine ? ", which is the one the mod writes" : "");
-        }
-        GS_LOG("[hunt] %s: %d actor(s) in the set, %d with a marker list, %d of those holding "
-               "anything. The mod's own is 0x%p.", why, n, carriers, filled,
-               reinterpret_cast<void*>(mine));
     }
 
     void LogState(const char* why)

@@ -111,7 +111,25 @@ namespace gs::sig
         0x48, 0x89, 0x54, 0x24, 0x10,   // mov [rsp+0x10], rdx   the error out
         0x53, 0x55,                     // push rbx, rbp
     };
+    // And the client copy's eraser, which is what the acknowledgement calls
+    // when the server agrees a marker is gone. Read off its own prologue:
+    //
+    //   0x426360(this = client submodule, int32* outError, const int64* id,
+    //            uint8 kind)
+    //
+    // Not found leaves a sentinel and writes an error, and changes nothing.
     constexpr uintptr_t kPinRemove = 0x00426360;   // (submodule, &err, &id, kind)
+    constexpr uint8_t   kPinRemovePrologue2[15] = {
+        0x48, 0x89, 0x5C, 0x24, 0x08,   // mov [rsp+0x08], rbx
+        0x48, 0x89, 0x6C, 0x24, 0x10,   // mov [rsp+0x10], rbp
+        0x48, 0x89, 0x74, 0x24, 0x18,   // mov [rsp+0x18], rsi
+    };
+
+    // Ids the mod gives its own markers. Far above anything the game hands
+    // out, which is a small index into a bitmap, so the two can never be
+    // confused and a request carrying one of these is the map asking the mod
+    // to take a pin away.
+    constexpr int64_t   kModIdBase = 0x40000000;
     constexpr uintptr_t kOff_Actor_Components = 0x68;
     constexpr uintptr_t kOff_Comp_PinSubmodule = 0x168;
     constexpr uintptr_t kOff_Pin_Lists         = 0xC8;

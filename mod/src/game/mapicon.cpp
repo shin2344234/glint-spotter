@@ -694,6 +694,21 @@ namespace gs::mapicon
         }
     }
 
+    bool RemoveIcon(void* worldRoot, int64_t keyId)
+    {
+        if (!worldRoot || !g_rmOrig[0] || !RootLooksRight(worldRoot)) return false;
+        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{keyId, 0x15, {}};
+        g_rmOrig[0](worldRoot, reinterpret_cast<void*>(static_cast<uintptr_t>(0x0001)), &key,
+                    reinterpret_cast<void*>(static_cast<uintptr_t>(0)), nullptr, nullptr, nullptr,
+                    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+        void* mini = g_lastMiniRoot.load();
+        if (mini && g_rmOrig[1])
+            g_rmOrig[1](mini, reinterpret_cast<void*>(static_cast<uintptr_t>(0x0001)), &key,
+                        reinterpret_cast<void*>(static_cast<uintptr_t>(0)), nullptr, nullptr,
+                        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+        return true;
+    }
+
     void Forget(int64_t keyId)
     {
         const int n = g_placedN.load();

@@ -137,6 +137,11 @@ namespace gs::mapicon
     // again and a redraw does not bring it back.
     void Forget(int64_t keyId);
 
+    // Take one of the mod's icons off the world map by its key. Used when
+    // the map asks for a marker the mod owns to go and the mod does the
+    // removal itself. Must be called on the game's UI thread.
+    bool RemoveIcon(void* worldRoot, int64_t keyId);
+
     // The world map root the spy last saw a call on, or null. The tick uses
     // this when the scan has not located the object yet.
     void* LastWorldRoot();

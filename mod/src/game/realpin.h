@@ -48,16 +48,19 @@ namespace gs::realpin
     // when it cannot, and is safe to log every press.
     bool Ready(const char** why);
 
-    // Place one. True when the record appeared, with its id in `outId`. Zero
-    // is a real id here, which is why this does not return one. The height is
-    // not passed on: the game writes zero for its own markers and the icon is
-    // drawn from this record.
+    // Put a marker record in the client copy, which is the half the map's own
+    // UI reads. `outId` comes back with an id the mod minted, far above
+    // anything the game uses. True when the record is there.
     bool Place(float x, float z, int64_t* outId);
 
-    // Tell the world map about a marker, the way the game tells it. This is
-    // the handler its own subscriber runs, so whatever the map keeps about a
-    // marker gets kept, rather than only the icon.
-    bool Draw(void* worldRoot, int64_t id, float x, float z);
+    // Ids the map has asked to remove that belong to the mod. The request goes
+    // to the server, which has never heard of them, so the mod does the
+    // removal instead. Call from the game's UI thread, drain, act.
+    int TakeRetired(int64_t* out, int n);
+
+    // Erase one of the mod's records from the client copy. The icon is the
+    // caller's business.
+    bool Retire(int64_t id);
 
     // How many markers the game is holding, or -1 when the list cannot be read.
     int Count();
@@ -76,12 +79,6 @@ namespace gs::realpin
     // in it.
     bool InstallSpy();
     void RemoveSpy();
-
-    // Every actor in the set, and whether any of them carries a marker list
-    // with something in it. The player's own is the one the mod has been
-    // writing to and the player's own markers are not in it, so either
-    // another actor of the same shape holds them or nothing does.
-    void HuntStore(const char* why);
 
     // Hand the mod the server component the sweep found, so it does not have
     // to wait for the player to place a marker before it knows where to
