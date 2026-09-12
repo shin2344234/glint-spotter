@@ -264,26 +264,25 @@ namespace gs::Settings
         // marker on the screen he is already looking at.
         bool rumble = true;
 
-        // Whether a mark asks the game for a real marker instead of drawing
-        // one.
+        // Whether a mark also writes a record into the marker list on the
+        // player's component.
         //
-        // On, and this is the answer to the one complaint that has outlived
-        // every other fix: Seth cannot delete the mod's pins. He never could,
-        // because they were never markers. The mod drew straight onto the map
-        // and the delete button had nothing to act on.
+        // Off, and three sessions bought that answer. The record lands every
+        // time: the right position, an id the game chose, the list growing by
+        // one. It buys nothing. The marker the player places by hand does not
+        // go into that list at all, which its own id proves, since it came
+        // back as zero while the first three bits of that list's allocator
+        // were already taken by the mod. So the list is a separate feature,
+        // probably the networked one, and a record in it is not a marker the
+        // map or the delete key has ever heard of.
         //
-        // The game's own create takes a position and two style bytes, writes a
-        // twenty-four byte record into the player's marker list and publishes
-        // the change, and the map draws the icon itself. A record put there by
-        // this call is indistinguishable from one the player placed by hand,
-        // so the delete button finds it, the map keeps it across an open and
-        // close, and none of the mod's redrawing machinery is needed.
+        // It also costs something. The ids start at zero, and zero is the key
+        // the game uses for the player's own marker, so a hand-placed marker
+        // replaces the mod's pin that shares the key.
         //
-        // What comes with it is the game's cap. Fifteen markers, and the
-        // oldest is dropped to make room, which is the game's rule and not
-        // one the mod gets to argue with. Off puts the old drawn pins back:
-        // as many as you like, none of them deletable.
-        bool realMarkers = true;
+        // On is still there because the record itself is sound, and whatever
+        // finally reads that list will want it.
+        bool realMarkers = false;
 
         // A copy of each pin on the minimap. Off, and this time for a reason
         // that is not a theory.

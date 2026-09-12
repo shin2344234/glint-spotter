@@ -46,6 +46,14 @@ namespace gs::sig
     constexpr int kSlotRemoveIcon = 171;
     constexpr uintptr_t kRemoveIconBody = 0x00D308F0;
 
+    // Who asked for a removal. Two functions call the same slot and only
+    // one of them is the player pressing delete: the icon builder removes
+    // an icon before it replaces one of the same key, and the remover next
+    // door is the delete itself. Session a hundred and five caught both a
+    // second apart, from +0x00D66C24 and +0x00D778EB.
+    constexpr uintptr_t kIconRemoverLo = 0x00D77700;
+    constexpr uintptr_t kIconRemoverHi = 0x00D77932;
+
     // The alert system root, which owns every on-screen message the game
     // shows: toasts, region changes, item pickups, level ups.
     //

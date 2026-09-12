@@ -132,6 +132,19 @@ namespace gs::mapicon
     // the game's back would leave two icons on one spot.
     void Remember(float x, float y, float z, const char* label, bool drawn, int64_t keyId);
 
+    // The player deleted their own marker, and where it was standing.
+    //
+    // The map's delete is positional, so a marker sitting on a mod pin is the
+    // player pointing at that pin. The spy sees the marker created, remembers
+    // where, and sees it removed again by the delete rather than by the
+    // create path replacing it. Both halves are the game's own icons going
+    // past, so nothing is hooked that was not already.
+    bool ClearWanted(float& x, float& z);
+
+    // Take the mod's nearest pin within `radius` off the map. Returns how many
+    // went, which is one or none. Must be called on the game's UI thread.
+    int ClearNear(void* worldRoot, float x, float z, float radius);
+
     // The world map root the spy last saw a call on, or null. The tick uses
     // this when the scan has not located the object yet.
     void* LastWorldRoot();

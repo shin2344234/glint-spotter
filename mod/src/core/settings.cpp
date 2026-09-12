@@ -93,11 +93,11 @@ namespace
         fputs("; moment, so this is usually the only thing that tells you it worked.\n", f);
         fputs("Rumble=1\n", f);
         fputs("\n", f);
-        fputs("; 1 asks the game for a real marker, the same kind you place by hand, so the\n", f);
-        fputs("; delete button on the map removes it. The game keeps fifteen of those and\n", f);
-        fputs("; drops the oldest to make room. 0 draws the mod's own pins instead: as many\n", f);
-        fputs("; as you like, and none of them can be deleted.\n", f);
-        fputs("RealMarkers=1\n", f);
+        fputs("; 1 also writes a record into the marker list hanging off your character.\n", f);
+        fputs("; It works and it changes nothing you can see: the marker you place by hand\n", f);
+        fputs("; does not live in that list, so the map and the delete key do not read it.\n", f);
+        fputs("; Left here because the writing is sound and something may yet read it.\n", f);
+        fputs("RealMarkers=0\n", f);
         fputs("\n", f);
         fputs("; ------------------------------------------------------------------ aiming\n", f);
         fputs("\n", f);
