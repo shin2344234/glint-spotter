@@ -275,11 +275,12 @@ namespace
 
     void RememberMarked(uint32_t eid, uint32_t record, uint32_t element, float x, float z)
     {
-        if (g_markedN >= kMarkedMax)
-        {
-            for (int i = 1; i < kMarkedMax; ++i) g_marked[i - 1] = g_marked[i];
-            g_markedN = kMarkedMax - 1;
-        }
+        // Full means keep what is here, not make room. Forgetting the oldest
+        // would let a thing marked at the start of this flash be marked again
+        // if its pin had since been deleted, which is the one case any of this
+        // exists for. Dropping the newest instead costs nothing, because its
+        // pin is on the map and the dedupe covers it.
+        if (g_markedN >= kMarkedMax) return;
         g_marked[g_markedN].eid = eid;
         g_marked[g_markedN].record = record;
         g_marked[g_markedN].element = element;
@@ -310,9 +311,20 @@ namespace
         void* root = gs::mapicon::LastWorldRoot();
         if (!root) return;
         GS_LOG("[mark] the world map root exists now; placing %d queued pin(s)", g_pendingN);
+        // What will not place stays queued. The queue used to be emptied
+        // whatever happened, so a root the map had thrown away between the
+        // queueing and the flush lost those pins with nothing left to say so.
+        int kept = 0;
         for (int i = 0; i < g_pendingN; ++i)
-            PlacePin(root, g_pending[i].x, g_pending[i].y, g_pending[i].z, g_pending[i].label);
-        g_pendingN = 0;
+        {
+            if (PlacePin(root, g_pending[i].x, g_pending[i].y, g_pending[i].z, g_pending[i].label))
+                continue;
+            g_pending[kept++] = g_pending[i];
+        }
+        if (kept)
+            GS_LOG_ERR("[mark] %d queued pin(s) would not go on the map and are still waiting",
+                       kept);
+        g_pendingN = kept;
     }
 
     bool QueuePin(float x, float y, float z, const char* label)
