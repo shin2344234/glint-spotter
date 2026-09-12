@@ -22,6 +22,7 @@ add_library(GlintSpotter SHARED
     src/core/log.cpp
     src/core/mod.cpp
     src/core/pinstore.cpp
+    src/game/saveslot.cpp
     src/game/rtti.cpp
     src/game/scan.cpp
     src/game/typescan.cpp
@@ -40,6 +41,7 @@ add_library(GlintSpotter SHARED
     src/game/physics.cpp
     src/hook/vtable.cpp
     src/hook/inlinehook.cpp
+    src/hook/iathook.cpp
     src/hook/tick.cpp
     src/hook/thunk.asm
     src/hook/pad.cpp

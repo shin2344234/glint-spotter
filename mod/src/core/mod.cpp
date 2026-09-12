@@ -10,6 +10,7 @@
 #include "core/log.h"
 #include "core/settings.h"
 #include "core/pinstore.h"
+#include "game/saveslot.h"
 #include "game/alert.h"
 #include "game/mapicon.h"
 #include "game/realpin.h"
@@ -893,6 +894,10 @@ namespace
         const gs::Settings::Values& cfg = gs::Settings::Load(g_self);
         gs::pinstore::Load(g_self);
 
+        // Before anything is loaded, so the first save the player opens is
+        // seen. Nothing else in startup can run ahead of a menu click.
+        if (cfg.keepPins) gs::saveslot::Install();
+
         Sleep(1000);
         SelfTest();
         Discover();
@@ -1292,7 +1297,8 @@ namespace gs::Mod
         // The vtable slots go back only when the process is staying up. On
         // teardown the game is leaving anyway, and a write to its memory from
         // inside DllMain buys nothing.
-        if (!processTerminating) { gs::tick::Remove(); gs::mapicon::RemoveSpy(); }
+        if (!processTerminating) { gs::tick::Remove(); gs::mapicon::RemoveSpy();
+                                   gs::saveslot::Remove(); }
         if (g_thread)
         {
             CloseHandle(g_thread);

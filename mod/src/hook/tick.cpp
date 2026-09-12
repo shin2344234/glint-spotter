@@ -23,6 +23,7 @@
 #include "game/pinmodel.h"
 #include "game/realpin.h"
 #include "core/pinstore.h"
+#include "game/saveslot.h"
 #include "hook/pad.h"
 #include "core/settings.h"
 
@@ -247,6 +248,38 @@ namespace
     // Everything it drew before that belongs to a map that no longer exists.
     std::atomic<bool> g_worldRebuilt{false};
 
+    // The last save read, held rather than acted on. Reading a save file is
+    // not quite the same as playing it: the load menu may well read one to
+    // draw a row. What settles it is the world being built afterwards, so the
+    // read waits here until that happens.
+    gs::saveslot::Id g_pendingLoad;
+    bool g_everSawLoad = false;
+
+    // What the file watch caught. A write is unambiguous, since the game only
+    // writes the save being played, so that one is acted on where it lands.
+    void PumpSaveEvents()
+    {
+        gs::saveslot::Event ev[8];
+        const int n = gs::saveslot::Take(ev, 8);
+        for (int i = 0; i < n; ++i)
+        {
+            char text[64]{};
+            gs::saveslot::Text(ev[i].id, text, sizeof(text));
+            if (ev[i].write)
+            {
+                GS_LOG("[save] the game wrote %s", text);
+                gs::pinstore::SavedTo(ev[i].id.account, ev[i].id.slot);
+            }
+            else
+            {
+                GS_LOG("[save] the game read %s; if a world follows, that is the save being "
+                       "played", text);
+                g_pendingLoad = ev[i].id;
+                g_everSawLoad = true;
+            }
+        }
+    }
+
     void RestoreOnNewWorld()
     {
         static uintptr_t seen = 0;
@@ -304,6 +337,25 @@ namespace
         lastMs = now;
         seen = sub;
         pending = false;
+
+        // Now the world is here, the read in front of it was a load, and the
+        // pins that come back below are that save's. A world with no read in
+        // front of it is a new game instead, which is only trusted once the
+        // watch has proved it can see a load at all: a watch that sees nothing
+        // would call every world a new game and hand each one an empty set.
+        if (g_pendingLoad.ok())
+        {
+            char text[64]{};
+            gs::saveslot::Text(g_pendingLoad, text, sizeof(text));
+            GS_LOG_OK("[save] the world is %s", text);
+            gs::pinstore::Loaded(g_pendingLoad.account, g_pendingLoad.slot);
+            g_pendingLoad = gs::saveslot::Id{};
+        }
+        else if (g_everSawLoad)
+        {
+            gs::pinstore::NewGame();
+        }
+
         if (lost)
             GS_LOG("[pins] %d pin(s) on the map and %d record(s) left behind them, so the world "
                    "has been rebuilt", live, mine);
@@ -1208,6 +1260,7 @@ extern "C" void gs_OnMinimapTick(void* self)
     if (n - g_lastRefreshTick >= 15)
     {
         g_lastRefreshTick = n;
+        PumpSaveEvents();
         RestoreOnNewWorld();
         FlushPending();
         // A map that has just been rebuilt has none of the mod's pins on it.
