@@ -56,11 +56,16 @@ namespace
     }
 
     // The whole walk in one guarded leaf, plain data out.
-    bool Walk(uintptr_t comp, float* out, float* world, uintptr_t* actorOut, uintptr_t* tfOut, uint32_t* parentOut)
+    // `comp` is the special mode component, which knows the actor at +8. Pass
+    // `fromActor` when the actor is already in hand, which is how the mod
+    // comes back from a load: the component is not on the player and only the
+    // heap sweep ever finds it, but the player himself is in the pools.
+    bool Walk(uintptr_t comp, float* out, float* world, uintptr_t* actorOut, uintptr_t* tfOut,
+              uint32_t* parentOut, bool fromActor = false)
     {
         __try
         {
-            const uintptr_t actor = Deref(comp + kOff_Comp_Owner);
+            const uintptr_t actor = fromActor ? comp : Deref(comp + kOff_Comp_Owner);
             if (!actor) return false;
             const uintptr_t comps = Deref(actor + kOff_Ent_Comps);
             if (!comps) return false;
@@ -148,23 +153,24 @@ namespace gs::player
                 const uintptr_t comps = Deref(pool[i] + kOff_Ent_Comps);
                 if (!comps) continue;
                 ++looked;
-                for (uintptr_t off = 0; off < kComps_SlotsEnd; off += 8)
+                bool isPlayer = false;
+                for (uintptr_t off = 0; off < kComps_SlotsEnd && !isPlayer; off += 8)
                 {
                     const uintptr_t c = Deref(comps + off);
                     if (!c) continue;
                     const char* name = NameOf(c);
-                    if (!name || !strstr(name, "ClientSpecialModeActorComponent")) continue;
-                    // Tried where it stands. The frame thread reads the stored
-                    // one several times a second and must never see a
-                    // candidate that has not answered yet.
-                    float v[3]{}, w[7]{};
-                    uintptr_t actor = 0, tf = 0;
-                    uint32_t parent = 0;
-                    if (!Walk(c, v, w, &actor, &tf, &parent)) break;
-                    if (!std::isfinite(w[0]) || !std::isfinite(w[2])) break;
-                    found = c;
-                    break;
+                    isPlayer = name && strstr(name, "ClientUserLoginActorComponent") != nullptr;
                 }
+                if (!isPlayer) continue;
+                // Tried where it stands. The frame thread reads the stored one
+                // several times a second and must never see a candidate that
+                // has not answered yet.
+                float v[3]{}, w[7]{};
+                uintptr_t actor = 0, tf = 0;
+                uint32_t parent = 0;
+                if (!Walk(pool[i], v, w, &actor, &tf, &parent, true)) continue;
+                if (!std::isfinite(w[0]) || !std::isfinite(w[2])) continue;
+                found = pool[i];
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -182,10 +188,11 @@ namespace gs::player
         }
 
         if (!found) return false;
-        g_comp.store(reinterpret_cast<void*>(found));
+        g_actor.store(found);
         g_lostAtMs = 0;
-        GS_LOG_OK("[player] found again through the actor manager: the special mode component is "
-                  "at 0x%p, %d of %d entities looked at, and no heap walk",
+        GS_LOG_OK("[player] found again through the actor manager: the player is at 0x%p, %d of %d "
+                  "entities looked at, and no heap walk. The flash still waits for the sweep, "
+                  "because the component it needs is not on him.",
                   reinterpret_cast<void*>(found), looked, n);
         return true;
     }
@@ -193,13 +200,24 @@ namespace gs::player
     Pos Read()
     {
         Pos p;
-        const auto comp = reinterpret_cast<uintptr_t>(g_comp.load());
-        if (!comp) return p;
+        // The component when there is one, the actor when there is not. After
+        // a load the mod has the actor from the pools long before the sweep
+        // hands the component back, and everything except the flash works off
+        // the actor alone.
+        auto from = reinterpret_cast<uintptr_t>(g_comp.load());
+        bool fromActor = false;
+        if (!from)
+        {
+            from = g_actor.load();
+            fromActor = true;
+        }
+        if (!from) return p;
+        const uintptr_t comp = from;
 
         float v[3]{}, w[7]{};
         uintptr_t actor = 0, tf = 0;
         uint32_t parent = 0;
-        if (!Walk(comp, v, w, &actor, &tf, &parent))
+        if (!Walk(comp, v, w, &actor, &tf, &parent, fromActor))
         {
             if (g_describeLeft > 0)
             {

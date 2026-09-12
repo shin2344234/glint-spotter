@@ -35,11 +35,17 @@ namespace gs::player
     // the scan; cleared to null if that object stops carrying its vtable.
     void SetSpecialComponent(void* comp);
 
-    // Find the special mode component again by asking the actor manager
-    // rather than the heap. A load throws the old one away and the sweep that
-    // finds it takes sixteen seconds; the pools hold the player and the
-    // component is in his block, which takes microseconds. Returns true when
-    // it took a new one. Call from a thread that is not the game's.
+    // Find the player again by asking the actor manager rather than the heap.
+    //
+    // A load throws away everything the mod holds and the sweep that finds it
+    // again reads gigabytes. The manager's pools hold the new player straight
+    // away, and he names himself: his component block carries a
+    // ClientUserLoginActorComponent and nothing else in the world does.
+    //
+    // This recovers the player, which is the position, the marker list, the
+    // pins and marking by hand. It does not recover the special mode
+    // component, which is not on him and is what the flash needs; that still
+    // waits for the sweep. Call from a thread that is not the game's.
     bool Recover();
 
     // Walk component -> actor -> transform and read the position. Every read is
