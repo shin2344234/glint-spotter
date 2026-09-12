@@ -78,6 +78,10 @@ Read these before you decide whether the build is for you.
   loads.** The mod is searching memory for your character. Everything works
   afterwards. Setting `Scan=0` removes the hitch and stops blinding flash
   marking anything, so it is not much of a trade yet.
+- **Loading a save from inside the game costs a few seconds.** Your pins, the
+  press marker and the map buttons come back within a second or two. Blinding
+  flash takes longer, up to about half a minute, because the piece it needs is
+  only findable the slow way.
 - **A press can mark the wrong thing.** It picks the nearest object in the
   table that your sight line passes near, and if what you are pointing at is not
   in that table, something behind it might be. The log names what it took and

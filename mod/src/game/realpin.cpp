@@ -553,8 +553,16 @@ namespace gs::realpin
             return false;
         }
         const gs::pinmodel::List l = gs::pinmodel::ReadAt(client, gs::sig::kPinListKind);
-        GS_LOG_OK("[real] the map asked for id %lld to go; erased, status %d, %u left",
-                  static_cast<long long>(id), err, l.ok ? l.count : 0u);
+        // A status of anything but zero is the game's not-found code, which is
+        // the ordinary answer when a world has just been rebuilt and the
+        // records went with it. It reads as a huge number because the code is
+        // registered at runtime, so it is said in words instead.
+        if (err == 0)
+            GS_LOG_OK("[real] id %lld erased, %u record(s) left",
+                      static_cast<long long>(id), l.ok ? l.count : 0u);
+        else
+            GS_LOG("[real] id %lld was already gone, %u record(s) left",
+                   static_cast<long long>(id), l.ok ? l.count : 0u);
         return true;
     }
 
