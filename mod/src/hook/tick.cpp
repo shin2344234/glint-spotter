@@ -645,8 +645,15 @@ namespace
                 // metres and one and a half per cent from the same aircraft
                 // and he says they landed where he pointed, so the sway was
                 // never the problem the wide cone was solving.
+                // Wide, and Seth asked for it to stay that way. Eight metres
+                // or the ini's AutoCone, two degrees by default, which is
+                // fourteen metres at four hundred. The flash fires while he is
+                // flying and the crosshair sways, and a cone that misses here
+                // is a glint nobody ever finds again.
+                const float autoFrac =
+                    std::tan(gs::Settings::Get().autoConeDeg * 3.14159265f / 180.0f);
                 tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             0.5f, 0.0105f, 10.0f, reach > 0.0f ? reach : 1.0e9f,
+                                             8.0f, autoFrac, 5.0f, reach > 0.0f ? reach : 1.0e9f,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
@@ -1061,30 +1068,29 @@ extern "C" void gs_OnMinimapTick(void* self)
                 {
                     gs::lgso::Place sight[4];
                     float sightDist[4];
-                    // Six tenths of a degree, and the floor is half a metre
-                    // so that it stays an angle all the way in.
+                    // The ini's Cone, as an angle and nothing else.
                     //
-                    // Two metres was still a distance pretending to be an aim.
-                    // Session eighty pressed twice and took the same thing
-                    // eight metres away, one metre off the line and seven and
-                    // a half degrees off the crosshair, while what Seth was
-                    // actually pointing at sat six hundred metres out at half
-                    // a degree. A metric floor is an enormous angle up close,
-                    // and the nearest survivor wins, so anything underfoot
-                    // takes every press.
+                    // A metric floor is an enormous angle up close, which is
+                    // how session eighty pressed twice and took the same thing
+                    // eight metres away at seven and a half degrees off the
+                    // crosshair while Seth was pointing at something six
+                    // hundred metres out at half a degree. Ten centimetres is
+                    // a floor only against zero.
                     //
-                    // Twenty-five metres is also the closest a press will look.
-                    // A map marker for something four paces away is not a
-                    // thing anybody wants, and refusing them costs nothing.
+                    // Twenty-five metres is the closest a press will look. A
+                    // map marker for something four paces away is not a thing
+                    // anybody wants.
                     //
                     // No ceiling, whatever Reach says. Reach exists because the
                     // automatic path pins on its own and once put a marker
                     // three kilometres out during a flash. A press is the
                     // player asking for a specific thing, and if he can see a
                     // tower across the map he can have it.
+                    const float coneFrac =
+                        std::tan(gs::Settings::Get().coneDeg * 3.14159265f / 180.0f);
                     const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oz,
                                                        sv.fx / flen, sv.fz / flen,
-                                                       0.5f, 0.0105f, 25.0f, 1.0e9f,
+                                                       0.1f, coneFrac, 25.0f, 1.0e9f,
                                                        sight, sightDist, 4, true);
                     if (sn > 0)
                     {
@@ -1107,8 +1113,23 @@ extern "C" void gs_OnMinimapTick(void* self)
                     }
                     else
                     {
-                        GS_LOG("[mark] nothing in the whole table sits on the line; falling back "
-                               "to the collision world, which reaches about eighty metres");
+                        gs::lgso::Place miss;
+                        float missAlong = 0, missPerp = 0;
+                        bool missRefused = false;
+                        if (gs::lgso::NearestToLine(sv.ox, sv.oz, sv.fx / flen, sv.fz / flen,
+                                                    1.0e9f, &miss, &missAlong, &missPerp,
+                                                    &missRefused))
+                            GS_LOG("[mark] nothing inside %.2f degrees. The closest the table has to "
+                                   "the line is record %u element %u \"%s\" at (%.1f, %.1f, %.1f), "
+                                   "%.0f metres out, %.1f off the line, %.2f degrees",
+                                   gs::Settings::Get().coneDeg, miss.record, miss.element,
+                                   miss.name[0] ? miss.name : "unnamed", miss.x, miss.y, miss.z,
+                                   missAlong, missPerp,
+                                   std::atan2(missPerp, missAlong) * 57.2958f);
+                        else
+                            GS_LOG("[mark] the table has nothing on this bearing at all");
+                        GS_LOG("[mark] falling back to the collision world, which reaches about "
+                               "eighty metres");
                     }
                 }
             }

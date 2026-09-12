@@ -90,6 +90,12 @@ namespace
         fputs("Hold=0\n", f);
         fputs("; 1 also copies every pin onto the minimap. Unproven, off by default.\n", f);
         fputs("MiniPin=0\n", f);
+        fputs("; How many degrees off the crosshair a press will look. Small is good:\n", f);
+        fputs("; a press is you telling the mod what you are already aiming at.\n", f);
+        fputs("Cone=0.2\n", f);
+        fputs("; The same for the automatic glint marker. Wide on purpose: nobody is\n", f);
+        fputs("; aiming carefully during a flash, and a miss there is a glint lost.\n", f);
+        fputs("AutoCone=2.0\n", f);
         fputs("; A ceiling in metres on how far out a level gimmick may be and still\n", f);
         fputs("; count as the thing the crosshair is on. Zero means none, which put a\n", f);
         fputs("; pin three kilometres away once.\n", f);
@@ -161,6 +167,20 @@ namespace gs::Settings
                 if (bits) g_values.chord = bits;
                 else GS_LOG_ERR("settings: Chord=%s named no button I know, keeping the default", val);
             }
+            else if (_stricmp(key, "Cone") == 0)
+            {
+                const float c = static_cast<float>(atof(val));
+                if (c >= 0.01f && c <= 30.0f) g_values.coneDeg = c;
+                else GS_LOG_ERR("settings: Cone=%s is out of range, keeping %.2f degrees",
+                                val, g_values.coneDeg);
+            }
+            else if (_stricmp(key, "AutoCone") == 0)
+            {
+                const float c = static_cast<float>(atof(val));
+                if (c >= 0.05f && c <= 45.0f) g_values.autoConeDeg = c;
+                else GS_LOG_ERR("settings: AutoCone=%s is out of range, keeping %.2f degrees",
+                                val, g_values.autoConeDeg);
+            }
             else if (_stricmp(key, "MiniPin") == 0)
             {
                 g_values.miniPin = atoi(val) != 0;
@@ -203,6 +223,8 @@ namespace gs::Settings
         else
             GS_LOG("settings: no reach ceiling, Chord=0x%04X held %lu ms", g_values.chord,
                    static_cast<unsigned long>(g_values.holdMs));
+        GS_LOG("settings: Cone=%.2f degrees on a press, AutoCone=%.2f on the flash",
+               g_values.coneDeg, g_values.autoConeDeg);
         GS_LOG("settings: Kinds=%s", g_values.kinds);
         GS_LOG("settings: Mark=%s", g_values.mark);
         return g_values;

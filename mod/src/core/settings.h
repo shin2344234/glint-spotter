@@ -20,6 +20,8 @@
 //                 ; Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START
 //   Hold=0        ; milliseconds the chord must be held before it fires
 //   MiniPin=0     ; also copy each pin onto the minimap
+//   Cone=0.2      ; how many degrees off the crosshair a press will look
+//   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
 //                 ; may be and still count. Zero, the default, means none.
 //   Radius=0      ; optional cap in metres on how far a node can be. Zero,
@@ -89,6 +91,35 @@ namespace gs::Settings
         // XINPUT_GAMEPAD_LEFT_SHOULDER 0x0100, RIGHT_SHOULDER 0x0200, A 0x1000.
         uint16_t chord = 0x1300;
         uint32_t holdMs = 0;
+
+        // How wide a press looks, in degrees off the crosshair.
+        //
+        // Seth's words: it does not need to be big at all, it can be very
+        // small to be extremely accurate. He is right, and the reason is that
+        // a press is not a search. He has the thing on his crosshair already
+        // and is asking the mod which one it is, so the only job left is to
+        // not answer with a neighbour.
+        //
+        // Two tenths of a degree is thirty-five centimetres at a hundred
+        // metres and three and a half at a kilometre. A press that finds
+        // nothing now says what it nearly hit and at what angle, so this
+        // number can be tuned from one line of the log rather than guessed.
+        //
+        // The automatic search keeps its own wider cone. That one fires on its
+        // own during a flash with nobody aiming deliberately, and a miss there
+        // is a glint that never got marked.
+        float coneDeg = 0.2f;
+
+        // And the automatic one, which stays wide on Seth's instruction.
+        //
+        // The two cones want opposite things and that is why they are two
+        // numbers. A press is deliberate: he already has the thing on his
+        // crosshair. The automatic marker fires during a flash with nobody
+        // aiming carefully, often from the air where the crosshair sways, and
+        // a cone that misses there is a glint that never got marked at all.
+        // Two degrees is fourteen metres at four hundred, and the eight metre
+        // floor below it keeps close range forgiving too.
+        float autoConeDeg = 2.0f;
 
         // A copy of each pin on the minimap, off by default.
         //
