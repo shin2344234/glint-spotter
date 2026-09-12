@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "core/log.h"
 #include "game/rtti.h"
@@ -247,15 +248,19 @@ namespace
     // How close two pins may be before they count as the same place. Used by
     // the dedupe below as well, which is why it lives up here.
     constexpr float kPinApart = 4.0f;
-    constexpr int kMarkedMax = 64;
-    MarkedThing g_marked[kMarkedMax];
-    int g_markedN = 0;
+    // No cap. A cap has to answer what happens when it fills, and both
+    // answers are wrong: forgetting the oldest lets something marked early in
+    // the flash be marked again once its pin is deleted, and refusing the
+    // newest does the same to the thing just marked. The list is cleared by
+    // every press and holds twenty bytes an entry, and clear() keeps the
+    // memory it has already taken, so after the first flash it stops
+    // allocating at all.
+    std::vector<MarkedThing> g_marked;
 
     bool AlreadyMarked(uint32_t eid, uint32_t record, uint32_t element, float x, float z)
     {
-        for (int i = 0; i < g_markedN; ++i)
+        for (const MarkedThing& m : g_marked)
         {
-            const MarkedThing& m = g_marked[i];
             // Two of a kind answer for themselves. Two entities three metres
             // apart are two entities, and a position test between them would
             // silence one for no reason.
@@ -275,21 +280,16 @@ namespace
 
     void RememberMarked(uint32_t eid, uint32_t record, uint32_t element, float x, float z)
     {
-        // Full means keep what is here, not make room. Forgetting the oldest
-        // would let a thing marked at the start of this flash be marked again
-        // if its pin had since been deleted, which is the one case any of this
-        // exists for. Dropping the newest instead costs nothing, because its
-        // pin is on the map and the dedupe covers it.
-        if (g_markedN >= kMarkedMax) return;
-        g_marked[g_markedN].eid = eid;
-        g_marked[g_markedN].record = record;
-        g_marked[g_markedN].element = element;
-        g_marked[g_markedN].x = x;
-        g_marked[g_markedN].z = z;
-        ++g_markedN;
+        MarkedThing m;
+        m.eid = eid;
+        m.record = record;
+        m.element = element;
+        m.x = x;
+        m.z = z;
+        g_marked.push_back(m);
     }
 
-    void ForgetMarked() { g_markedN = 0; }
+    void ForgetMarked() { g_marked.clear(); }
 
     // A record the map's own user interface can see, and an icon keyed on it.
     // Everything that puts a pin on the map goes through here.
@@ -302,7 +302,17 @@ namespace
         int64_t realId = 0;
         bool haveReal = false;
         if (gs::Settings::Get().realMarkers) haveReal = gs::realpin::Place(x, z, &realId);
-        return gs::mapicon::PlacePinNow(root, x, y, z, label, realId, haveReal) != nullptr;
+        if (gs::mapicon::PlacePinNow(root, x, y, z, label, realId, haveReal)) return true;
+        // The record went into the marker list before the icon was asked for,
+        // so a refusal here leaves one with nothing drawn on it. The pin stays
+        // queued and the next attempt mints another id, so this one has to go
+        // or the list fills with records no icon points at.
+        if (haveReal)
+        {
+            gs::realpin::Retire(realId);
+            GS_LOG("[mark] nothing drew, so the record made for it is taken back out");
+        }
+        return false;
     }
 
     void FlushPending()
