@@ -42,12 +42,6 @@ namespace
     std::atomic<int> g_placedN{0};
     std::atomic<bool> g_repinWanted{false};
 
-    // The player's own marker: where the game last put one, and whether the
-    // delete has since taken it away.
-    std::atomic<bool> g_ownSeen{false};
-    std::atomic<bool> g_clearWanted{false};
-    float g_ownX = 0.0f, g_ownZ = 0.0f;
-    float g_clearX = 0.0f, g_clearZ = 0.0f;
 
     // Only a control the running game still says is a world map root gets
     // called. The stored pointer comes from the spy and the UI is free to
@@ -161,15 +155,6 @@ namespace
         Snapshot(a, &c);
 
         const bool pin = c.ok && IsName(c, "MapIcon_Pin_Marker");
-        // The player's own marker, which is the only one the game keys on
-        // zero. Where it stands is where the cursor was, and the cursor is
-        // the only thing in this whole feature that says which pin is meant.
-        if (pin && surface == 0 && c.keyId == 0)
-        {
-            g_ownX = c.pos[0];
-            g_ownZ = c.pos[2];
-            g_ownSeen.store(true);
-        }
         const bool player = c.ok && IsName(c, "MapIcon_ActorFocus");
         bool fresh = false;
         {
@@ -387,23 +372,16 @@ namespace
             // the one that matters and it is rare, so the budget lasts.
             if (!keyOk || kind != gs::sig::kPinKind) return;
 
-            // A removal of the player's own marker, by the delete rather than
-            // by the create replacing it. The two callers are different
-            // functions and the return address separates them: the create
-            // path lives inside the icon builder, the delete inside the
-            // remover next door. Session a hundred and five caught both, one
-            // second apart, and only the second one means anything.
+            // A pin of the mod's that the game has just removed, by the
+            // delete rather than by the create replacing an icon of the same
+            // key. The two callers are different functions and the return
+            // address separates them. Session a hundred and nine is the first
+            // time this fired for one of ours.
             {
                 const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
                 const uintptr_t rva = ret > exe ? ret - exe : 0;
                 const bool byDelete = rva >= gs::sig::kIconRemoverLo && rva < gs::sig::kIconRemoverHi;
-                if (type == 0x0001 && id == 0 && byDelete && surface == 0 && g_ownSeen.load())
-                {
-                    g_clearX = g_ownX;
-                    g_clearZ = g_ownZ;
-                    g_ownSeen.store(false);
-                    g_clearWanted.store(true);
-                }
+                if (type == 0x0001 && byDelete && surface == 0) gs::mapicon::Forget(id);
             }
             --g_rmLogsLeft;
             const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
@@ -716,42 +694,17 @@ namespace gs::mapicon
         }
     }
 
-    bool ClearWanted(float& x, float& z)
+    void Forget(int64_t keyId)
     {
-        if (!g_clearWanted.exchange(false)) return false;
-        x = g_clearX;
-        z = g_clearZ;
-        return true;
-    }
-
-    int ClearNear(void* worldRoot, float x, float z, float radius)
-    {
-        if (!worldRoot || !g_rmOrig[0] || !RootLooksRight(worldRoot)) return 0;
         const int n = g_placedN.load();
-        int best = -1;
-        float bestD = radius * radius;
         for (int i = 0; i < n && i < kMaxPins; ++i)
         {
-            if (g_placed[i].gone) continue;
-            const float dx = g_placed[i].x - x, dz = g_placed[i].z - z;
-            const float d = dx * dx + dz * dz;
-            if (d <= bestD) { bestD = d; best = i; }
+            if (g_placed[i].gone || g_placed[i].id != keyId) continue;
+            g_placed[i].gone = true;
+            GS_LOG_OK("[pin] the game removed the mod's \"%s\" pin, key %lld; that place is free "
+                      "to mark again", g_placed[i].label, static_cast<long long>(keyId));
+            return;
         }
-        if (best < 0)
-        {
-            GS_LOG("[clear] your marker was deleted at (%.1f, %.1f) with no pin of the mod's "
-                   "within %.0f; nothing taken away", x, z, radius);
-            return 0;
-        }
-        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{g_placed[best].id, 0x15, {}};
-        GS_LOG("[clear] your marker was deleted at (%.1f, %.1f); taking the mod's \"%s\" pin, "
-               "key %lld, %.1f away", x, z, g_placed[best].label,
-               static_cast<long long>(key.id), std::sqrt(bestD));
-        g_rmOrig[0](worldRoot, reinterpret_cast<void*>(static_cast<uintptr_t>(0x0001)), &key,
-                    reinterpret_cast<void*>(static_cast<uintptr_t>(0)), nullptr, nullptr, nullptr,
-                    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-        g_placed[best].gone = true;
-        return 1;
     }
 
     void* LastWorldRoot() { return g_lastWorldRoot.load(); }

@@ -82,4 +82,9 @@ namespace gs::realpin
     // writing to and the player's own markers are not in it, so either
     // another actor of the same shape holds them or nothing does.
     void HuntStore(const char* why);
+
+    // Hand the mod the server component the sweep found, so it does not have
+    // to wait for the player to place a marker before it knows where to
+    // write. Ignored once the mod has seen the game use one.
+    void SetServerSubmodule(void* sub);
 }

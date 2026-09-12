@@ -1061,11 +1061,6 @@ extern "C" void gs_OnMinimapTick(void* self)
         FlushPending();
         // A map that has just been rebuilt has none of the mod's pins on it.
         if (gs::mapicon::RepinWanted()) gs::mapicon::Repin(gs::mapicon::LastWorldRoot());
-        // The player deleted their own marker. If one of the mod's pins was
-        // under it, that pin goes too.
-        float cx = 0.0f, cz = 0.0f;
-        if (gs::mapicon::ClearWanted(cx, cz))
-            gs::mapicon::ClearNear(gs::mapicon::LastWorldRoot(), cx, cz, 60.0f);
         AutoMark(GetTickCount());
 
         // The camera object moves; the probe follows it.

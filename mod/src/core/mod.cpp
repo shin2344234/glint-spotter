@@ -74,7 +74,13 @@ namespace
         // whether the object exists at runtime, and the sweep finds objects by
         // their vtable rather than by who points at them, which is how the
         // actor manager was found in the first place.
-        "LevelGimmickSceneObject"};
+        "LevelGimmickSceneObject",
+        // Where the game really keeps the player's map markers. Session a
+        // hundred and eight read the class name off the object the game
+        // itself writes to, and it is not the client component the mod had
+        // been using. Finding it in the sweep is what lets a mark be a real
+        // marker without the player placing one first.
+        "ServerContentsMiscActorComponent"};
 
     // Anything in the map icon and detect mode families. Both spellings of
     // minimap appear in this binary, so both are listed.
@@ -87,6 +93,7 @@ namespace
         "ClientDetectActorComponent", "ClientTransformSyncActorComponent",
         "ClientActorManager", "PlayerCameraTPSMode", "ClientGimmickActorComponent",
         "LevelGimmickSceneObject", "DiscoveredLevelGimmick",
+        "ServerContentsMiscActorComponent",
     };
     uintptr_t g_cameraVt = 0;
     uintptr_t g_managerVt = 0;
@@ -701,6 +708,14 @@ namespace
                                   ShortName(t.info.name)[0] != '?';
             const bool isManager = strcmp(t.info.name, ".?AVClientActorManager@pa@@") == 0;
             const bool isLevelGimmick = strstr(t.info.name, "LevelGimmickSceneObject") != nullptr;
+            const bool isServerMisc =
+                strcmp(t.info.name, ".?AVServerContentsMiscActorComponent@pa@@") == 0;
+            // One of these is the player's. Several and there is no way to tell
+            // which from a vtable alone, so the mod waits to see the game use
+            // one instead of guessing.
+            if (isServerMisc && found != 1)
+                GS_LOG("[real] %zu server marker component(s); the mod will wait to see the game "
+                       "use one rather than pick", found);
 
             size_t shown = 0;
             for (const gs::scan::Hit& h : hits)
@@ -731,6 +746,10 @@ namespace
                                       lp.valid ? lp.x : 0.0f, lp.valid ? lp.z : 0.0f);
                     gs::dump::Pointers("lgso", reinterpret_cast<uintptr_t>(t.object), 0x200);
                     gs::dump::Object("lgsohex", reinterpret_cast<uintptr_t>(t.object), 0x200);
+                }
+                else if (isServerMisc)
+                {
+                    if (found == 1) gs::realpin::SetServerSubmodule(t.object);
                 }
                 else if (isManager)
                 {

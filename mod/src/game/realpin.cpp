@@ -406,6 +406,15 @@ namespace gs::realpin
         gs::inlinehook::Remove(g_removeHook);
     }
 
+    void SetServerSubmodule(void* sub)
+    {
+        const uintptr_t p = reinterpret_cast<uintptr_t>(sub);
+        if (!p || g_gameSub.load()) return;
+        g_gameSub.store(p);
+        GS_LOG_OK("[real] the sweep found the server's marker component at 0x%p, so a mark works "
+                  "without waiting for you to place one first", sub);
+    }
+
     bool Ready(const char** why)
     {
         static const char* kNoBytes = "the game has been patched away from these addresses";
