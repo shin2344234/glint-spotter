@@ -83,6 +83,16 @@ Write-Host ("Version $Version, from version.h") -ForegroundColor Cyan
 # The changelog endpoint appends rather than replaces, so a second run for one
 # version posts the text twice. Check what is already up there and refuse
 # rather than leave a duplicated page to clean up by hand.
+
+# The two ids from nexus-ids.py, in one place. The check below reached for
+# $ids.FileId while the only copy lived in the hashtable at the bottom, so the
+# check asked for /mod-files//versions, got a 404, and took the publish down
+# with it.
+$ids = @{
+    FileId = '7953159'          # the active GlintSpotter file entry
+    ModId  = '38521561681296'   # the v3 mod id, not the number in the page URL
+}
+
 if ($Apply) {
     $key = $env:NEXUS_API_KEY
     if ([string]::IsNullOrWhiteSpace($key)) {
@@ -108,16 +118,16 @@ if ($Apply) {
                 Write-Host "Nothing was sent. Bump version.h and rebuild, or pass -Version for a different one." -ForegroundColor Red
                 exit 1
             }
-        } catch [System.Net.WebException] {
-            Write-Warning "Could not check what is already published; continuing."
+        } catch {
+            Write-Warning ("Could not check what is already published ({0}); continuing." -f $_.Exception.Message)
         }
     }
 }
 
 $args = @{
     FilePath                  = $archive
-    FileId                    = ''   # nexus-ids.py
-    ModId                     = ''   # nexus-ids.py
+    FileId                    = $ids.FileId
+    ModId                     = $ids.ModId
     Version                   = $Version
     DisplayName               = ("GlintSpotter {0}" -f $Version)
     ChangelogPath             = $changelog
