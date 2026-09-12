@@ -96,7 +96,10 @@ namespace
         fputs("; How far either side of the sight line a press looks, in metres, the\n", f);
         fputs("; same at every distance. A press fires when you ask, so it does not\n", f);
         fputs("; need the slack that grows with range the automatic marker needs.\n", f);
-        fputs("Rod=5.0\n", f);
+        fputs("Rod=8.0\n", f);
+        fputs("; How far out a press looks, in metres. Zero means no limit, which is\n", f);
+        fputs("; what put a pin seven hundred metres past what was being aimed at.\n", f);
+        fputs("PressReach=800\n", f);
         fputs("; 1 lets a press the table cannot answer guess a spot from terrain.\n", f);
         fputs("; Off, because past eighty metres that guess is an extrapolation.\n", f);
         fputs("RayFallback=0\n", f);
@@ -181,6 +184,13 @@ namespace gs::Settings
                 else GS_LOG_ERR("settings: Rod=%s is out of range, keeping %.2f metres",
                                 val, g_values.rodMetres);
             }
+            else if (_stricmp(key, "PressReach") == 0)
+            {
+                const float r = static_cast<float>(atof(val));
+                if (r == 0.0f || (r >= 50.0f && r <= 20000.0f)) g_values.pressReach = r;
+                else GS_LOG_ERR("settings: PressReach=%s is out of range, keeping %.0f",
+                                val, g_values.pressReach);
+            }
             else if (_stricmp(key, "RayFallback") == 0)
             {
                 g_values.rayFallback = atoi(val) != 0;
@@ -243,8 +253,8 @@ namespace gs::Settings
         else
             GS_LOG("settings: no reach ceiling, Chord=0x%04X held %lu ms", g_values.chord,
                    static_cast<unsigned long>(g_values.holdMs));
-        GS_LOG("settings: Rod=%.2f metres on a press, AutoCone=%.2f degrees on the flash",
-               g_values.rodMetres, g_values.autoConeDeg);
+        GS_LOG("settings: Rod=%.2f metres out to %.0f on a press, AutoCone=%.2f degrees "
+               "on the flash", g_values.rodMetres, g_values.pressReach, g_values.autoConeDeg);
         GS_LOG("settings: Kinds=%s", g_values.kinds);
         GS_LOG("settings: Mark=%s", g_values.mark);
         return g_values;

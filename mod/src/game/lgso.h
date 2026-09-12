@@ -93,8 +93,19 @@ namespace gs::lgso
     // the flash names one thing and a bonfire is not it. A deliberate press
     // wants the opposite, because the player is pointing at a ruin or a camp
     // or a bridge and asking for that, and the table holds all of it.
-    int OnBearing(float px, float pz, float ox, float oz, float ux, float uz,
-                  float maxPerp, float perpFrac, float minFromPlayer, float maxRange,
+    // `oy` is the eye's height and `slope` the view's rise per metre of
+    // ground covered, so the sight line's height at a placement's range is
+    // `oy + slope * along`. A placement further than `maxVert` from that is
+    // refused however well it lines up on the map.
+    //
+    // This was missing for forty-five builds and it is why every aperture
+    // failed. The search was two dimensional over a three dimensional world,
+    // so a bridge twelve hundred metres above Seth's head counted as being on
+    // his crosshair because its shadow was.
+    int OnBearing(float px, float pz, float ox, float oy, float oz,
+                  float ux, float uz, float slope,
+                  float maxPerp, float perpFrac, float maxVert,
+                  float minFromPlayer, float maxRange,
                   Place* out, float* dists, int n, bool anyKind = false);
 
     // The single placement closest to the view line, whatever it is called
@@ -142,7 +153,7 @@ namespace gs::lgso
     // Band by band there is nowhere to hide. One line per band, the placement
     // closest to the line inside it, or a line saying the band holds nothing.
     // `edges` is `bandCount + 1` ranges in metres.
-    void LogBands(float ox, float oz, float ux, float uz,
+    void LogBands(float ox, float oy, float oz, float ux, float uz, float slope,
                   const float* edges, int bandCount);
 
     // The placements nearest a point, for the log.

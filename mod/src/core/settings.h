@@ -22,9 +22,10 @@
 //   MiniPin=0     ; also copy each pin onto the minimap. Crashed the game in
 //                 ; session eighty-two; leave it alone.
 //   Rumble=1      ; buzz the pad when a pin lands
-//   Rod=5.0       ; metres either side of the sight line a press will look,
+//   Rod=8.0       ; metres either side of the sight line a press will look,
 //                 ; the same at every distance
 //   RayFallback=0 ; let a press that the table cannot answer guess from terrain
+//   PressReach=800 ; how far out a press will look, in metres. Zero means no limit
 //   AutoCone=2.0  ; the same for the automatic glint marker, which stays wide
 //   Reach=0       ; optional ceiling in metres on how far out a level gimmick
 //                 ; may be and still count. Zero, the default, means none.
@@ -118,7 +119,29 @@ namespace gs::Settings
         // during a flash with nobody aiming deliberately, often from the air
         // where the crosshair sways, and a miss there is a glint that never
         // got marked.
-        // Five metres, and this one is arithmetic rather than another guess.
+        // How far out a press will look. Eight hundred metres.
+        //
+        // Session eighty-seven printed the sight line band by band and the
+        // shape of it is the whole story. The closest placement to the line
+        // was ninety-nine metres off at fifty, twenty-six off at a hundred and
+        // sixteen, seven off at three hundred and seventy-five, and six tenths
+        // of a metre off at seven hundred and twenty-five.
+        //
+        // That is not aim getting better with range, it is arithmetic. The far
+        // bands are wider and hold four times as many placements, so something
+        // is always nearly on the line out there. Every aperture this feature
+        // has tried, cone or rod, therefore preferred distant things, and
+        // nearest wins could not save it because the near bands hold nothing
+        // within tens of metres of the line.
+        //
+        // A limit is the only thing that fixes that, and it belongs on the
+        // press because the press is where Seth said the range he cares about
+        // is: three to five hundred, and past five hundred. Eight hundred
+        // leaves room above that. Zero means none, and none is what produced
+        // the seven hundred and twenty-five metre pin.
+        float pressReach = 800.0f;
+
+        // Eight metres, and this one is arithmetic rather than another guess.
         //
         // Seth says the things he was missing sat between three hundred and
         // five hundred metres out, and past five hundred. Thirty-five
@@ -129,15 +152,17 @@ namespace gs::Settings
         // refuses to look at anyway.
         //
         // So the width has to come from how steadily a hand holds a crosshair,
-        // and that is somewhere around half a degree. At four hundred metres
-        // half a degree is three and a half, at five hundred four and a half,
-        // so five metres covers the range he actually works at.
+        // and that is somewhere around a degree. At four hundred metres a
+        // degree is seven metres, at five hundred nine, so eight covers the
+        // range he works at. The band log said the same thing from the other
+        // side: the closest placement to his line at three hundred and
+        // seventy-five metres was seven and a bit off it.
         //
         // The rod shape is still the point and it still does the work. Five
         // metres at sixteen hundred is eighteen hundredths of a degree, so the
         // far placements that kept stealing presses have to be genuinely under
         // the crosshair, while the nearest one on the line still wins.
-        float rodMetres = 5.0f;
+        float rodMetres = 8.0f;
 
         // Whether a press that the table cannot answer may guess from terrain.
         //

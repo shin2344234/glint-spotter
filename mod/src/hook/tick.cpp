@@ -654,8 +654,10 @@ namespace
                 // is a glint nobody ever finds again.
                 const float autoFrac =
                     std::tan(gs::Settings::Get().autoConeDeg * 3.14159265f / 180.0f);
-                tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                             8.0f, autoFrac, 5.0f, reach > 0.0f ? reach : 1.0e9f,
+                tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oy, v.oz,
+                                             v.fx / flen, v.fz / flen, v.fy / flen,
+                                             8.0f, autoFrac, 25.0f,
+                                             5.0f, reach > 0.0f ? reach : 1.0e9f,
                                              table, tableAngles, 8);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
@@ -1116,10 +1118,12 @@ extern "C" void gs_OnMinimapTick(void* self)
                     // three kilometres out during a flash. A press is the
                     // player asking for a specific thing, and if he can see a
                     // tower across the map he can have it.
-                    const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oz,
-                                                       sv.fx / flen, sv.fz / flen,
-                                                       gs::Settings::Get().rodMetres, 0.0f,
-                                                       25.0f, 1.0e9f,
+                    const float pressReach = gs::Settings::Get().pressReach;
+                    const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oy, sv.oz,
+                                                       sv.fx / flen, sv.fz / flen, sv.fy / flen,
+                                                       gs::Settings::Get().rodMetres, 0.0f, 25.0f,
+                                                       25.0f,
+                                                       pressReach > 0.0f ? pressReach : 1.0e9f,
                                                        sight, sightDist, 4, true);
 
                     // And, whatever the rod said, the eight things closest to
@@ -1142,14 +1146,19 @@ extern "C" void gs_OnMinimapTick(void* self)
                         static const float kBands[] = {25.0f, 60.0f, 120.0f, 250.0f, 500.0f,
                                                        1000.0f, 2000.0f, 4000.0f};
                         GS_LOG("[mark] the sight line, band by band:");
-                        gs::lgso::LogBands(sv.ox, sv.oz, sv.fx / flen, sv.fz / flen,
-                                           kBands, 7);
+                        gs::lgso::LogBands(sv.ox, sv.oy, sv.oz, sv.fx / flen, sv.fz / flen,
+                                           sv.fy / flen, kBands, 7);
                         GS_LOG("[mark] closest to the sight line overall, whatever the rod says:");
                         for (int k = 0; k < nn; ++k)
-                            GS_LOG("[mark]   %.1f m off the line, %.0f m out, record %u element %u \"%s\" at (%.1f, %.1f, %.1f)",
-                                   onPerp[k], onAlong[k], onLine[k].record, onLine[k].element,
+                        {
+                            const float lineY = sv.oy + (sv.fy / flen) * onAlong[k];
+                            GS_LOG("[mark]   %.1f m off the line, %.0f m out, %+.0f m in height, "
+                                   "record %u element %u \"%s\" at (%.1f, %.1f, %.1f)",
+                                   onPerp[k], onAlong[k], onLine[k].y - lineY,
+                                   onLine[k].record, onLine[k].element,
                                    onLine[k].name[0] ? onLine[k].name : "unnamed",
                                    onLine[k].x, onLine[k].y, onLine[k].z);
+                        }
                     }
                     if (sn > 0)
                     {

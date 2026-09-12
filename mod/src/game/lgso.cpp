@@ -147,8 +147,10 @@ namespace gs::lgso
         return g_n;
     }
 
-    int OnBearing(float px, float pz, float ox, float oz, float ux, float uz,
-                  float maxPerp, float perpFrac, float minFromPlayer, float maxRange,
+    int OnBearing(float px, float pz, float ox, float oy, float oz,
+                  float ux, float uz, float slope,
+                  float maxPerp, float perpFrac, float maxVert,
+                  float minFromPlayer, float maxRange,
                   Place* out, float* dists, int n, bool anyKind)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -172,6 +174,16 @@ namespace gs::lgso
             if (allow < maxPerp) allow = maxPerp;
             if (allow > 60.0f) allow = 60.0f;
             if (perp > allow) continue;
+            // And the height, which nothing checked until 0.46.0. The sight
+            // line is at oy + slope * along when it gets there; a placement
+            // far above or below that is not what the crosshair is on, whatever
+            // its shadow does. The tolerance grows a little with range because
+            // a building's origin sits at its base and a player aims at its
+            // middle.
+            const float lineY = oy + slope * along;
+            float vAllow = along * 0.08f;
+            if (vAllow < maxVert) vAllow = maxVert;
+            if (std::fabs(g_places[i].y - lineY) > vAllow) continue;
             if (!anyKind && !Worth(g_places[i].name)) continue;
             const float fx = g_places[i].x - px, fz = g_places[i].z - pz;
             const float fromPlayer = std::sqrt(fx * fx + fz * fz);
@@ -188,7 +200,7 @@ namespace gs::lgso
         return found;
     }
 
-    void LogBands(float ox, float oz, float ux, float uz,
+    void LogBands(float ox, float oy, float oz, float ux, float uz, float slope,
                   const float* edges, int bandCount)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -213,10 +225,11 @@ namespace gs::lgso
                 GS_LOG("[mark]   %5.0f to %5.0f m: nothing in the table at all", lo, hi);
                 continue;
             }
+            const float lineY = oy + slope * bestAlong;
             GS_LOG("[mark]   %5.0f to %5.0f m: %d placement(s), closest to the line is %.1f m off "
-                   "at %.0f m, record %u element %u \"%s\" at (%.1f, %.1f, %.1f)",
-                   lo, hi, inBand, bestPerp, bestAlong, g_places[best].record,
-                   g_places[best].element,
+                   "at %.0f m and %+.0f m in height, record %u element %u \"%s\" at (%.1f, %.1f, %.1f)",
+                   lo, hi, inBand, bestPerp, bestAlong, g_places[best].y - lineY,
+                   g_places[best].record, g_places[best].element,
                    g_places[best].name[0] ? g_places[best].name : "unnamed",
                    g_places[best].x, g_places[best].y, g_places[best].z);
         }
