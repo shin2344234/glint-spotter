@@ -26,13 +26,16 @@ namespace gs::aim
     };
 
     // The player's actor, its detect component and its special mode component,
-    // resolved from the special component the scan finds.
+    // resolved from the special component the scan finds. The special one is
+    // remembered together with its vtable and its owner, and dropped the
+    // moment either changes, because a load frees it and the block is reused.
     void SetPlayerActor(uintptr_t actor);
     void SetDetectComponent(uintptr_t comp);
     void SetSpecialComponent(uintptr_t comp);
 
     // True while the flash is on: the special component's +0x40 holds the
-    // player's actor id, and zero otherwise.
+    // player's actor id, and zero otherwise. False when the component is
+    // gone, or when it belongs to a body that is no longer the player's.
     bool FlashActive();
 
     // Search both components for an actor pointer that is not the player and

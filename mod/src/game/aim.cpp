@@ -46,6 +46,18 @@ namespace
     std::atomic<uintptr_t> g_player{0};
     std::atomic<uintptr_t> g_detect{0};
     std::atomic<uintptr_t> g_special{0};
+    // What the special component looked like when it was handed over: its
+    // vtable, and the actor it belongs to at +0x08. A load frees the object,
+    // and this module used to go on reading the flash flag out of whatever
+    // the game put in that block next. LuxDragon's 1.1.20 log: the block
+    // became something else with 0xFFFFFFFF at +0x40, the flash read as on
+    // for fourteen minutes, and the automatic marker pinned whatever the
+    // camera settled on during a conversation and again during a relic
+    // pickup. So both are recorded here, checked on every read, and a block
+    // that no longer matches is dropped on the spot.
+    std::atomic<uintptr_t> g_specialVt{0};
+    std::atomic<uintptr_t> g_specialOwner{0};
+    int g_staleLogsLeft = 4;
     int g_describeLeft = 8;
     uint64_t g_press = 0;
 
@@ -59,6 +71,55 @@ namespace
     {
         const uintptr_t vt = Deref(obj);
         return vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+    }
+
+    constexpr uintptr_t kOff_Comp_Owner = 0x08;   // component -> the actor it belongs to
+
+    // The component's vtable and owner, plain data out, or false when the
+    // block cannot be read. Its own frame so it can hold the handler: the
+    // game frees on other threads, and Readable only says what was true a
+    // moment ago.
+    bool ReadHeader(uintptr_t comp, uintptr_t* vt, uintptr_t* owner)
+    {
+        __try
+        {
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(comp), kOff_Special_Active + 4)) return false;
+            *vt = *reinterpret_cast<const uintptr_t*>(comp);
+            *owner = *reinterpret_cast<const uintptr_t*>(comp + kOff_Comp_Owner);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // The special component while it is still the object it was when it was
+    // handed over, else 0. Two reads a call, which is nothing against the
+    // tick, and it is what stops a freed block being read as the flash.
+    uintptr_t LiveSpecial()
+    {
+        const uintptr_t sp = g_special.load();
+        if (!sp) return 0;
+        uintptr_t vt = 0, owner = 0;
+        const bool readable = ReadHeader(sp, &vt, &owner);
+        const uintptr_t wantVt = g_specialVt.load();
+        if (readable && vt == wantVt && owner == g_specialOwner.load()) return sp;
+        // Dropped only if nobody has replaced it in the meantime: the worker
+        // hands a new one over on its own thread, and the compare above can
+        // fail against a pointer that has just been swapped out from under it.
+        uintptr_t expected = sp;
+        if (g_special.compare_exchange_strong(expected, static_cast<uintptr_t>(0)) && g_staleLogsLeft > 0)
+        {
+            --g_staleLogsLeft;
+            GS_LOG("[aim] the special mode component at 0x%p is %s; the flash reads as off until it "
+                   "is found again", reinterpret_cast<void*>(sp),
+                   !readable      ? "no longer readable"
+                   : vt != wantVt ? "carrying a different vtable, so the block has been reused"
+                                  : "owned by a different actor, so the block belongs to another "
+                                    "character now");
+        }
+        return 0;
     }
 
     bool IsActorClass(const char* n)
@@ -188,14 +249,31 @@ namespace gs::aim
 {
     void SetPlayerActor(uintptr_t actor) { g_player.store(actor); }
     void SetDetectComponent(uintptr_t comp) { g_detect.store(comp); }
-    void SetSpecialComponent(uintptr_t comp) { g_special.store(comp); }
+    void SetSpecialComponent(uintptr_t comp)
+    {
+        uintptr_t vt = 0, owner = 0;
+        if (comp && !ReadHeader(comp, &vt, &owner)) comp = 0;
+        // The shape first and the pointer last, so a reader on the tick never
+        // sees the new pointer against the old shape.
+        g_specialVt.store(vt);
+        g_specialOwner.store(owner);
+        g_special.store(comp);
+    }
     uintptr_t DetectComponent() { return g_detect.load(); }
-    uintptr_t SpecialComponent() { return g_special.load(); }
+    uintptr_t SpecialComponent() { return LiveSpecial(); }
 
     bool FlashActive()
     {
-        const uintptr_t sp = g_special.load();
+        const uintptr_t sp = LiveSpecial();
         if (!sp) return false;
+        // Still the same object, but the player has moved on: after a load
+        // the actor manager hands over the new body while this component
+        // still belongs to the old one, and until it is found again the
+        // honest answer is off. Not dropped, because the worker sets this
+        // pointer a moment before the player walk updates the actor, and
+        // that order must not throw a component away that was just found.
+        const uintptr_t player = g_player.load();
+        if (player && g_specialOwner.load() != player) return false;
         const uintptr_t at = sp + kOff_Special_Active;
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 4)) return false;
         return *reinterpret_cast<const uint32_t*>(at) != 0;
@@ -355,7 +433,7 @@ namespace gs::aim
     {
         Held best;
         const uintptr_t detect = g_detect.load();
-        const uintptr_t special = g_special.load();
+        const uintptr_t special = LiveSpecial();
         const uintptr_t player = g_player.load();
         // The scalars an older build's notes named live past +0x250, which is
         // where this class's own code stops, so they are somebody else's
@@ -377,7 +455,7 @@ namespace gs::aim
         Target t;
         const uintptr_t player = g_player.load();
         const uintptr_t detect = g_detect.load();
-        const uintptr_t special = g_special.load();
+        const uintptr_t special = LiveSpecial();
         const bool describe = g_describeLeft > 0;
         if (describe) --g_describeLeft;
 

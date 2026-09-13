@@ -59,6 +59,10 @@ namespace gs::player
     // The actor the walk resolved and the detect component in its block, both
     // zero until the first successful read.
     uintptr_t Actor();
+    // The special mode component handed over, or 0 while it is missing. It
+    // goes missing at every load, and the worker uses this to know when to
+    // look for it again.
+    uintptr_t SpecialComponent();
     uintptr_t DetectComponent();
     uintptr_t CharacterControlComponent();
 

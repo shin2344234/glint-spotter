@@ -99,6 +99,9 @@ namespace
     };
     uintptr_t g_cameraVt = 0;
     bool g_lookAgainNow = false;
+    // The recheck found the flash's component freed. The main loop goes
+    // looking for it again once the player is back.
+    bool g_specialLost = false;
     uintptr_t g_managerVt = 0;
 
     const char* ShortName(const char* decorated)
@@ -778,7 +781,11 @@ namespace
         GS_LOG("%s: 0x%p stopped carrying its vtable, will look again",
                ShortName(t.info.name), t.object);
         gs::tick::DropProbe(t.object);
-        if (strstr(t.info.name, "ClientSpecialModeActorComponent")) gs::player::SetSpecialComponent(nullptr);
+        if (strstr(t.info.name, "ClientSpecialModeActorComponent"))
+        {
+            gs::player::SetSpecialComponent(nullptr);
+            g_specialLost = true;
+        }
         t.object = nullptr;
         // Something the mod was holding has been freed, which in practice
         // means a world was thrown away. Whatever the sweep had decided about
@@ -881,6 +888,280 @@ namespace
 
     uint32_t g_startedMs = 0;
 
+    // The player's special mode component: the object the flash flag is read
+    // out of, and at startup the way in to the player himself.
+    //
+    // One attempt. The actor manager first, because it costs nothing; then
+    // the heap regions holding objects the mod already has, because one
+    // allocator tends to put its things together; then the whole heap, which
+    // is the freeze. Startup calls this until it lands.
+    //
+    // The main loop calls it again after a load. The load frees the
+    // component, and until 1.1.21 nothing ever went looking for it again:
+    // with Sweep off the general sweep is a no-op, and this code only ran
+    // inside the startup loop, which had long since returned. The README has
+    // promised since 1.1.0 that the flash comes back within half a minute of
+    // a load, and LuxDragon's 1.1.20 log is what it did instead: the aim
+    // module kept the freed pointer, the block was reused, and the flash read
+    // as on for the rest of the session.
+    //
+    // True with the component handed to the player and aim modules.
+    bool FindSpecialComponent(int attempt)
+    {
+        // Found some other way already, which the player walk can do when the
+        // component turns up in the player's own block.
+        if (const uintptr_t have = gs::player::SpecialComponent())
+        {
+            gs::tick::AddProbe("special", reinterpret_cast<void*>(have), 0x400);
+            const gs::player::Pos pp = gs::player::Read();
+            GS_LOG_OK("READY in %llu ms: the flash's component came out of the player's own block, "
+                      "no walk needed; player world (%.1f, %.1f, %.1f)",
+                      static_cast<unsigned long long>(GetTickCount() - g_startedMs), pp.x, pp.y, pp.z);
+            return true;
+        }
+
+        // The manager knows where the player is, and it costs nothing to
+        // ask. Session forty-seven spent forty-seven seconds before the
+        // first pin was possible, nearly all of it in two heap scans of
+        // fourteen seconds each, looking for an object the manager was
+        // already handing over. The scan below stays as the fallback.
+        gs::actors::Locate(GetTickCount());
+        if (gs::actors::Ready())
+        {
+            uintptr_t special = 0;
+            const uintptr_t ent = gs::actors::PlayerEntity(&special);
+            if (ent && special)
+            {
+                gs::player::SetSpecialComponent(reinterpret_cast<void*>(special));
+                const gs::player::Pos probe = gs::player::Read();
+                if (probe.valid && std::fabs(probe.x) + std::fabs(probe.z) > 1.0f)
+                {
+                    gs::tick::AddProbe("special", reinterpret_cast<void*>(special), 0x400);
+                    GS_LOG_OK("READY in %llu ms: the manager handed over the player at (%.1f, %.1f, %.1f), "
+                              "origin (%.0f, %.0f, %.0f). Aim blinding flash at a glint.",
+                              static_cast<unsigned long long>(GetTickCount() - g_startedMs),
+                              probe.x, probe.y, probe.z, probe.ox, probe.oy, probe.oz);
+                    return true;
+                }
+                gs::player::SetSpecialComponent(nullptr);
+            }
+        }
+        // One walk for every candidate vtable, not one walk each.
+        //
+        // Waiting thirty seconds for the actor manager was the wrong
+        // trade and session ninety-five paid for it: the manager offered
+        // nine hundred and ninety entities at exactly the thirty second
+        // mark and every one of them was without a position, so it could
+        // not name the player anyway, and the mod took seventy-nine
+        // seconds to come alive instead of thirty.
+        //
+        // The waste was never the timing. The class has more than one
+        // vtable, this loop scanned for them one at a time, and each walk
+        // is seventeen seconds over five gigabytes. Two of them ran, found
+        // one object each, and the first was somebody else's component.
+        // The scanner takes an array of needles and covers them in a single
+        // walk, which is what the comment on FindPointers says to do and
+        // what the general sweep already does.
+        uintptr_t needles[16]{};
+        size_t bytes[16]{};
+        size_t slotOf[16]{};
+        size_t nn = 0;
+        for (size_t i = 0; i < g_count && nn < 16; ++i)
+        {
+            if (!strstr(g_targets[i].info.name, "ClientSpecialModeActorComponent")) continue;
+            if (g_targets[i].object)
+            {
+                // Still held here while the player module has let it go,
+                // which only recovery through the actor manager does, and
+                // only after the walk from it failed for three seconds: it is
+                // the old world's. Forgotten, so the hunt below is a real one.
+                gs::tick::DropProbe(g_targets[i].object);
+                g_targets[i].object = nullptr;
+            }
+            needles[nn] = g_targets[i].info.vtableVa;
+            bytes[nn] = g_targets[i].objectBytes;
+            slotOf[nn] = i;
+            ++nn;
+        }
+        if (nn == 0 || !gs::Settings::Get().scan) return false;
+
+        // Not until there is a player to find.
+        //
+        // Session ninety-nine walked five gigabytes for fourteen seconds
+        // and found two special mode components, both of them belonging to
+        // a ClientChildOnlyInGameActor rather than the played body, so
+        // both were thrown away and the whole walk ran again sixteen
+        // seconds later. Thirty seconds of freeze to do one walk's worth
+        // of work, because the first one happened before the player was
+        // in the world.
+        //
+        // The camera says when he is, for nothing. It carries his position
+        // in world coordinates and the reader only reports that as valid
+        // when its two copies agree and land inside the map, which cannot
+        // happen before he exists. So the walk waits for it, and when it
+        // does run there is a right answer to find.
+        {
+            const gs::camera::Pose cam = gs::camera::Read();
+            if (!cam.valid || !cam.worldValid)
+            {
+                static bool said = false;
+                if (!said)
+                {
+                    said = true;
+                    GS_LOG("the heap walk is waiting for the camera to report a world "
+                           "position, which is how it knows the player exists");
+                }
+                return false;
+            }
+        }
+        // The neighbourhood first.
+        //
+        // The scan is a freeze because it reads five gigabytes. It does not
+        // have to start there: the mod already holds live pointers into the
+        // game's heap, and objects allocated by the same allocator tend to
+        // share arenas. One region is a few tens of megabytes and takes
+        // milliseconds, so trying the four we know costs nothing and may
+        // save the whole walk.
+        const uintptr_t known[] = {
+            gs::camera::This(),
+            reinterpret_cast<uintptr_t>(gs::mapicon::LastWorldRoot()),
+            gs::actors::Manager(),
+        };
+        for (uintptr_t k : known)
+        {
+            if (!k) continue;
+            gs::scan::Options near_;
+            near_.needleBytes = bytes;
+            near_.timeBudgetMs = 2000;
+            near_.onlyRegionContaining = k;
+            std::vector<gs::scan::Hit> nearHits;
+            gs::scan::FindPointers(needles, nn, nearHits, near_);
+            DropPointerTables(nearHits);
+            for (const gs::scan::Hit& h : nearHits)
+            {
+                if (!h.object) continue;
+                if (h.needle < 0 || static_cast<size_t>(h.needle) >= nn) continue;
+                Target& t = g_targets[slotOf[h.needle]];
+                t.object = h.object;
+                if (!Describe(t)) { t.object = nullptr; continue; }
+                gs::player::SetSpecialComponent(t.object);
+                const gs::player::Pos probe = gs::player::Read();
+                if (!probe.valid || !gs::player::OwnerIsPlayedBody() ||
+                    std::fabs(probe.x) + std::fabs(probe.z) <= 1.0f)
+                {
+                    gs::player::SetSpecialComponent(nullptr);
+                    t.object = nullptr;
+                    continue;
+                }
+                GS_LOG_OK("the player's component was in the same region as an object we "
+                          "already had, so no walk was needed");
+                gs::tick::AddProbe("special", t.object, 0x400);
+                return true;
+            }
+        }
+
+        gs::scan::Options opt;
+        opt.needleBytes = bytes;
+        opt.timeBudgetMs = 20000;
+        opt.maxRegionBytes = 1024ull * 1024 * 1024;
+        // Session seventeen's fast pass took a 48 KB registry entry for the
+        // player's component. Real heap arenas are megabytes.
+        opt.minRegionBytes = 1024 * 1024;
+        std::vector<gs::scan::Hit> hits;
+        const gs::scan::Report rep = gs::scan::FindPointers(needles, nn, hits, opt);
+        GS_LOG("fast pass %d: %zu candidate vtable(s), %zu hit(s) in %llu ms", attempt + 1,
+               nn, hits.size(), static_cast<unsigned long long>(rep.microseconds / 1000));
+        DropPointerTables(hits);
+        for (const gs::scan::Hit& h : hits)
+        {
+            if (!h.object) continue;
+            if (h.needle < 0 || static_cast<size_t>(h.needle) >= nn) continue;
+            Target& t = g_targets[slotOf[h.needle]];
+            t.object = h.object;
+            if (!Describe(t)) { t.object = nullptr; continue; }
+            // Every character has one of these. The player's is the one
+            // whose owner is the played body. A player standing at the
+            // origin is the menu's placeholder, not the world's.
+            gs::player::SetSpecialComponent(t.object);
+            const gs::player::Pos probe = gs::player::Read();
+            if (!probe.valid || !gs::player::OwnerIsPlayedBody() ||
+                std::fabs(probe.x) + std::fabs(probe.z) <= 1.0f)
+            {
+                GS_LOG("  0x%p is a special mode component but not the player's, skipped", t.object);
+                gs::player::SetSpecialComponent(nullptr);
+                t.object = nullptr;
+                continue;
+            }
+            gs::tick::AddProbe("special", t.object, 0x400);
+            // Walk to the player and the detect component right now rather
+            // than on the next probe sample, and say READY only when both
+            // are in hand, because the press needs both.
+            const gs::player::Pos pp = gs::player::Read();
+            gs::actors::Locate(GetTickCount());
+            if (pp.valid && gs::player::DetectComponent() && gs::player::CharacterControlComponent())
+                GS_LOG_OK("READY: player world (%.1f, %.1f, %.1f), origin (%.0f, %.0f, %.0f), actor manager %s. "
+                          "Aim blinding flash at a glint and press.", pp.x, pp.y, pp.z, pp.ox, pp.oy, pp.oz,
+                          gs::actors::Ready() ? "found" : "pending");
+            else
+                GS_LOG("special mode component found; player walk %s, detect component %s",
+                       pp.valid ? "ok" : "pending", gs::player::DetectComponent() ? "ok" : "pending");
+            return true;
+        }
+        return false;
+    }
+
+    // After a load.
+    //
+    // The load frees the special mode component and the actor manager hands
+    // over the new body a few seconds later. The player module notices both
+    // and lets the component go; this is what goes and finds it again, the
+    // way startup did, once the new body answers. Six tries ten seconds
+    // apart. The walk is the same freeze it is at startup, which the README
+    // has warned about since 1.1.0 as the cost of loading a save.
+    uintptr_t g_refindActor = 0;
+    int g_refindTriesLeft = 0;
+    uint32_t g_refindNextMs = 0;
+    int g_refindAttempt = 0;
+
+    void RefindSpecial()
+    {
+        if (gs::player::SpecialComponent())
+        {
+            // In hand. Remember whose, so a new body reads as a loss.
+            g_refindActor = gs::player::Actor();
+            g_refindTriesLeft = 0;
+            g_specialLost = false;
+            return;
+        }
+        // Without the walk there is no way to find it, and the log already
+        // says what Scan=0 costs.
+        if (!gs::Settings::Get().scan) return;
+        const uintptr_t actor = gs::player::Actor();
+        const uint32_t now = GetTickCount();
+        if (g_specialLost || (actor && actor != g_refindActor))
+        {
+            g_specialLost = false;
+            g_refindActor = actor;
+            g_refindTriesLeft = 6;
+            g_refindNextMs = now + 3000;
+            GS_LOG("the flash's component is gone and the player is at 0x%p; it is looked for again "
+                   "the way startup did, once he answers", reinterpret_cast<void*>(actor));
+        }
+        if (g_refindTriesLeft <= 0) return;
+        if (static_cast<int32_t>(now - g_refindNextMs) < 0) return;
+        if (!gs::player::Read().valid) return;
+        --g_refindTriesLeft;
+        g_refindNextMs = now + 10000;
+        if (FindSpecialComponent(g_refindAttempt++))
+        {
+            g_refindTriesLeft = 0;
+            return;
+        }
+        if (g_refindTriesLeft == 0)
+            GS_LOG_ERR("the flash's component was not found in six tries after the load; Blinding Flash "
+                       "marks nothing until the next launch. The button still works.");
+    }
+
     DWORD WorkerBody()
     {
         g_startedMs = GetTickCount();
@@ -962,8 +1243,6 @@ namespace
         // attempt, and a registry entry must never be taken for the player.
         for (int attempt = 0; attempt < 900 && !g_stop.load(); ++attempt)
         {
-            bool done = false;
-
             // The level gimmick table, which is what a press actually reads.
             //
             // It hung off the end of this loop until 0.50.1, which was fine
@@ -981,196 +1260,7 @@ namespace
                 gs::lgso::LogCatalog(40, 64);
             }
 
-            // The manager knows where the player is, and it costs nothing to
-            // ask. Session forty-seven spent forty-seven seconds before the
-            // first pin was possible, nearly all of it in two heap scans of
-            // fourteen seconds each, looking for an object the manager was
-            // already handing over. The scan below stays as the fallback.
-            gs::actors::Locate(GetTickCount());
-            if (gs::actors::Ready())
-            {
-                uintptr_t special = 0;
-                const uintptr_t ent = gs::actors::PlayerEntity(&special);
-                if (ent && special)
-                {
-                    gs::player::SetSpecialComponent(reinterpret_cast<void*>(special));
-                    const gs::player::Pos probe = gs::player::Read();
-                    if (probe.valid && std::fabs(probe.x) + std::fabs(probe.z) > 1.0f)
-                    {
-                        done = true;
-                        gs::tick::AddProbe("special", reinterpret_cast<void*>(special), 0x400);
-                        GS_LOG_OK("READY in %llu ms: the manager handed over the player at (%.1f, %.1f, %.1f), "
-                                  "origin (%.0f, %.0f, %.0f). Aim blinding flash at a glint.",
-                                  static_cast<unsigned long long>(GetTickCount() - g_startedMs),
-                                  probe.x, probe.y, probe.z, probe.ox, probe.oy, probe.oz);
-                        break;
-                    }
-                    gs::player::SetSpecialComponent(nullptr);
-                }
-            }
-            // One walk for every candidate vtable, not one walk each.
-            //
-            // Waiting thirty seconds for the actor manager was the wrong
-            // trade and session ninety-five paid for it: the manager offered
-            // nine hundred and ninety entities at exactly the thirty second
-            // mark and every one of them was without a position, so it could
-            // not name the player anyway, and the mod took seventy-nine
-            // seconds to come alive instead of thirty.
-            //
-            // The waste was never the timing. The class has more than one
-            // vtable, this loop scanned for them one at a time, and each walk
-            // is seventeen seconds over five gigabytes. Two of them ran, found
-            // one object each, and the first was somebody else's component.
-            // The scanner takes an array of needles and covers them in a single
-            // walk, which is what the comment on FindPointers says to do and
-            // what the general sweep already does.
-            if (!done)
-            {
-            uintptr_t needles[16]{};
-            size_t bytes[16]{};
-            size_t slotOf[16]{};
-            size_t nn = 0;
-            for (size_t i = 0; i < g_count && nn < 16; ++i)
-            {
-                if (!strstr(g_targets[i].info.name, "ClientSpecialModeActorComponent")) continue;
-                if (g_targets[i].object) { done = true; break; }
-                needles[nn] = g_targets[i].info.vtableVa;
-                bytes[nn] = g_targets[i].objectBytes;
-                slotOf[nn] = i;
-                ++nn;
-            }
-            if (nn == 0 || done || !gs::Settings::Get().scan) goto afterFastPass;
-
-            // Not until there is a player to find.
-            //
-            // Session ninety-nine walked five gigabytes for fourteen seconds
-            // and found two special mode components, both of them belonging to
-            // a ClientChildOnlyInGameActor rather than the played body, so
-            // both were thrown away and the whole walk ran again sixteen
-            // seconds later. Thirty seconds of freeze to do one walk's worth
-            // of work, because the first one happened before the player was
-            // in the world.
-            //
-            // The camera says when he is, for nothing. It carries his position
-            // in world coordinates and the reader only reports that as valid
-            // when its two copies agree and land inside the map, which cannot
-            // happen before he exists. So the walk waits for it, and when it
-            // does run there is a right answer to find.
-            {
-                const gs::camera::Pose cam = gs::camera::Read();
-                if (!cam.valid || !cam.worldValid)
-                {
-                    static bool said = false;
-                    if (!said)
-                    {
-                        said = true;
-                        GS_LOG("the heap walk is waiting for the camera to report a world "
-                               "position, which is how it knows the player exists");
-                    }
-                    goto afterFastPass;
-                }
-            }
-            {
-            // The neighbourhood first.
-            //
-            // The scan is a freeze because it reads five gigabytes. It does not
-            // have to start there: the mod already holds live pointers into the
-            // game's heap, and objects allocated by the same allocator tend to
-            // share arenas. One region is a few tens of megabytes and takes
-            // milliseconds, so trying the four we know costs nothing and may
-            // save the whole walk.
-            const uintptr_t known[] = {
-                gs::camera::This(),
-                reinterpret_cast<uintptr_t>(gs::mapicon::LastWorldRoot()),
-                gs::actors::Manager(),
-            };
-            for (uintptr_t k : known)
-            {
-                if (!k || done) continue;
-                gs::scan::Options near_;
-                near_.needleBytes = bytes;
-                near_.timeBudgetMs = 2000;
-                near_.onlyRegionContaining = k;
-                std::vector<gs::scan::Hit> nearHits;
-                gs::scan::FindPointers(needles, nn, nearHits, near_);
-                DropPointerTables(nearHits);
-                for (const gs::scan::Hit& h : nearHits)
-                {
-                    if (!h.object) continue;
-                    if (h.needle < 0 || static_cast<size_t>(h.needle) >= nn) continue;
-                    Target& t = g_targets[slotOf[h.needle]];
-                    t.object = h.object;
-                    if (!Describe(t)) { t.object = nullptr; continue; }
-                    gs::player::SetSpecialComponent(t.object);
-                    const gs::player::Pos probe = gs::player::Read();
-                    if (!probe.valid || !gs::player::OwnerIsPlayedBody() ||
-                        std::fabs(probe.x) + std::fabs(probe.z) <= 1.0f)
-                    {
-                        gs::player::SetSpecialComponent(nullptr);
-                        t.object = nullptr;
-                        continue;
-                    }
-                    GS_LOG_OK("the player's component was in the same region as an object we "
-                              "already had, so no walk was needed");
-                    gs::tick::AddProbe("special", t.object, 0x400);
-                    done = true;
-                    break;
-                }
-            }
-            if (done) goto afterFastPass;
-
-            gs::scan::Options opt;
-            opt.needleBytes = bytes;
-            opt.timeBudgetMs = 20000;
-            opt.maxRegionBytes = 1024ull * 1024 * 1024;
-            // Session seventeen's fast pass took a 48 KB registry entry for the
-            // player's component. Real heap arenas are megabytes.
-            opt.minRegionBytes = 1024 * 1024;
-            std::vector<gs::scan::Hit> hits;
-            const gs::scan::Report rep = gs::scan::FindPointers(needles, nn, hits, opt);
-            GS_LOG("fast pass %d: %zu candidate vtable(s), %zu hit(s) in %llu ms", attempt + 1,
-                   nn, hits.size(), static_cast<unsigned long long>(rep.microseconds / 1000));
-            DropPointerTables(hits);
-            for (const gs::scan::Hit& h : hits)
-            {
-                if (!h.object) continue;
-                if (h.needle < 0 || static_cast<size_t>(h.needle) >= nn) continue;
-                Target& t = g_targets[slotOf[h.needle]];
-                t.object = h.object;
-                if (!Describe(t)) { t.object = nullptr; continue; }
-                // Every character has one of these. The player's is the one
-                // whose owner is the played body. A player standing at the
-                // origin is the menu's placeholder, not the world's.
-                gs::player::SetSpecialComponent(t.object);
-                const gs::player::Pos probe = gs::player::Read();
-                if (!probe.valid || !gs::player::OwnerIsPlayedBody() ||
-                    std::fabs(probe.x) + std::fabs(probe.z) <= 1.0f)
-                {
-                    GS_LOG("  0x%p is a special mode component but not the player's, skipped", t.object);
-                    gs::player::SetSpecialComponent(nullptr);
-                    t.object = nullptr;
-                    continue;
-                }
-                done = true;
-                gs::tick::AddProbe("special", t.object, 0x400);
-                // Walk to the player and the detect component right now rather
-                // than on the next probe sample, and say READY only when both
-                // are in hand, because the press needs both.
-                const gs::player::Pos pp = gs::player::Read();
-                gs::actors::Locate(GetTickCount());
-                if (pp.valid && gs::player::DetectComponent() && gs::player::CharacterControlComponent())
-                    GS_LOG_OK("READY: player world (%.1f, %.1f, %.1f), origin (%.0f, %.0f, %.0f), actor manager %s. "
-                              "Aim blinding flash at a glint and press.", pp.x, pp.y, pp.z, pp.ox, pp.oy, pp.oz,
-                              gs::actors::Ready() ? "found" : "pending");
-                else
-                    GS_LOG("special mode component found; player walk %s, detect component %s",
-                           pp.valid ? "ok" : "pending", gs::player::DetectComponent() ? "ok" : "pending");
-                break;
-            }
-            }
-            }
-            afterFastPass:
-            if (done) break;
+            if (FindSpecialComponent(attempt)) break;
             if (attempt == 0)
                 GS_LOG("no world yet. Waiting for the actor manager, which answers once the save "
                        "has finished loading; set Scan=1 in the ini to walk the heap instead and "
@@ -1253,7 +1343,11 @@ namespace
             {
                 GS_LOG_OK("all %zu located, holding. Nothing more unless one changes.", hunted);
             }
-            for (int i = 0; i < ticks && !g_stop.load(); ++i) Sleep(500);
+            for (int i = 0; i < ticks && !g_stop.load(); ++i)
+            {
+                Sleep(500);
+                RefindSpecial();
+            }
         }
         return 0;
     }

@@ -99,6 +99,36 @@ namespace
         }
     }
 
+    // The flash's own component, if it is in the block at all. Every session
+    // so far found it by walking the heap, and the block was only ever read
+    // to +0x80; the transform sits at +0x1A0 and knowledge at +0x150, so it
+    // runs well past that. This looks as far as +0x400 for a special mode
+    // component whose owner is this actor. Nothing but a match on both is
+    // taken, and a read past the block's real end is guarded. If it is
+    // there, a load stops costing a walk.
+    uintptr_t FindSpecialInBlock(uintptr_t actor, uintptr_t comps, uintptr_t* atOut)
+    {
+        __try
+        {
+            for (uintptr_t off = 0; off < 0x400; off += 8)
+            {
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(comps + off), 8)) return 0;
+                const uintptr_t c = *reinterpret_cast<const uintptr_t*>(comps + off);
+                if (c < 0x10000 || (c & 7) != 0) continue;
+                const char* n = NameOf(c);
+                if (!n || !strstr(n, "ClientSpecialModeActorComponent")) continue;
+                if (Deref(c + kOff_Comp_Owner) != actor) continue;
+                *atOut = off;
+                return c;
+            }
+            return 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
     void Describe(uintptr_t comp, uintptr_t actor, uintptr_t tf)
     {
         GS_LOG("[player] component 0x%p is %s", reinterpret_cast<void*>(comp), NameOf(comp));
@@ -117,7 +147,16 @@ namespace
 
 namespace gs::player
 {
-    void SetSpecialComponent(void* comp) { g_comp.store(comp); }
+    void SetSpecialComponent(void* comp)
+    {
+        g_comp.store(comp);
+        // The aim module reads the flash flag out of this object, so it hears
+        // about the null as well as the pointer. It used to hear only the
+        // pointer, and went on reading a freed one after every load.
+        gs::aim::SetSpecialComponent(reinterpret_cast<uintptr_t>(comp));
+    }
+
+    uintptr_t SpecialComponent() { return reinterpret_cast<uintptr_t>(g_comp.load()); }
 
     bool Recover()
     {
@@ -188,6 +227,24 @@ namespace gs::player
         }
 
         if (!found) return false;
+        // The component the walk was starting from belongs to the world that
+        // was just thrown away, and Read() prefers it to the actor for as
+        // long as it is set. Dropped here, the moment there is a new body to
+        // read from, rather than on the worker's next recheck, which can be
+        // two minutes off. The worker sees the new body and goes looking.
+        // Only for a new body: the same one answering again means the walk
+        // failed for a reason the component shares, and dropping it would
+        // buy nothing but a walk.
+        if (found != g_actor.load())
+        {
+            if (void* old = g_comp.load())
+            {
+                GS_LOG("[player] the special mode component at 0x%p stopped answering and the "
+                       "manager has a new body, so it is dropped; the flash waits for it to be "
+                       "found again", old);
+                SetSpecialComponent(nullptr);
+            }
+        }
         g_actor.store(found);
         g_lostAtMs = 0;
         GS_LOG_OK("[player] found again through the actor manager: the player is at 0x%p, %d of %d "
@@ -264,12 +321,12 @@ namespace gs::player
             const char* on = NameOf(actor);
             g_ownerIsBody.store(on && strstr(on, "ClientChildOnlyInGameActor") != nullptr);
         }
-        if (g_actor.load() != actor)
-        {
-            g_actor.store(actor);
-            gs::aim::SetPlayerActor(actor);
-        }
-        if (comp) gs::aim::SetSpecialComponent(comp);
+        // The aim module's copy every time, not only when the pointer here
+        // changes. Recovery through the actor manager stores it here itself,
+        // so the compare never fired after a load and the aim went on taking
+        // the old body for the player.
+        g_actor.store(actor);
+        gs::aim::SetPlayerActor(actor);
 
         // Look through the actor's components once per actor, and again every
         // second while the flash's own component is still missing.
@@ -281,9 +338,12 @@ namespace gs::player
         // in the first 1.1.0 session from the moment the world loaded.
         static std::atomic<uintptr_t> g_scannedActor{0};
         static std::atomic<uint32_t> g_scannedMs{0};
+        // Looks into the block for the flash's own component, per actor.
+        static std::atomic<int> g_blockLooksLeft{0};
         const uint32_t nowMs = GetTickCount();
         const bool actorIsNew = g_scannedActor.load() != actor;
-        const bool stillMissing = g_detect.load() == 0;
+        const bool stillMissing = g_detect.load() == 0 ||
+                                  (!g_comp.load() && g_blockLooksLeft.load() > 0);
         if (actorIsNew || (stillMissing && nowMs - g_scannedMs.load() > 1000))
         {
             g_scannedActor.store(actor);
@@ -295,6 +355,7 @@ namespace gs::player
             {
                 g_detect.store(0);
                 gs::aim::SetDetectComponent(0);
+                g_blockLooksLeft.store(8);
             }
             // The flash's own component sits in the same block. Found by
             // name, because slots can move between patches and names do not.
@@ -315,6 +376,27 @@ namespace gs::player
                     g_charctl.store(c);
                     GS_LOG_OK("[player] character control at block+0x%llX -> 0x%p",
                               static_cast<unsigned long long>(off), reinterpret_cast<void*>(c));
+                }
+            }
+            // And the flash's own component, in case it is in here as well.
+            // Eight looks a second apart, then the walk is the only way.
+            if (!g_comp.load() && comps && g_blockLooksLeft.load() > 0)
+            {
+                const int left = g_blockLooksLeft.load() - 1;
+                g_blockLooksLeft.store(left);
+                uintptr_t at = 0;
+                const uintptr_t sp = FindSpecialInBlock(actor, comps, &at);
+                if (sp)
+                {
+                    GS_LOG_OK("[player] the special mode component is in the player's own block at "
+                              "+0x%llX -> 0x%p, so the flash needs no walk",
+                              static_cast<unsigned long long>(at), reinterpret_cast<void*>(sp));
+                    SetSpecialComponent(reinterpret_cast<void*>(sp));
+                }
+                else if (left == 0)
+                {
+                    GS_LOG("[player] the special mode component is not in the player's block within "
+                           "0x400 bytes; the flash waits for the walk");
                 }
             }
         }
