@@ -1,7 +1,9 @@
 #include "core/mod.h"
 
 #include <Windows.h>
+#include <winver.h>
 #include <atomic>
+#include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -366,7 +368,8 @@ namespace
         uintptr_t base = 0;
         size_t size = 0;
         if (gs::typescan::ModuleRange(base, size))
-            GS_LOG("game module 0x%p, %llu MB", reinterpret_cast<void*>(base),
+            GS_LOG("game module 0x%p, %llu bytes mapped (%llu MB)", reinterpret_cast<void*>(base),
+                   static_cast<unsigned long long>(size),
                    static_cast<unsigned long long>(size / (1024 * 1024)));
 
         gs::typescan::ClassInfo found[kMaxClasses]{};
@@ -432,6 +435,12 @@ namespace
             {gs::sig::kMiniMapVtable,  gs::sig::kMiniMapClass},
             {gs::sig::kAlertRootVtable, gs::sig::kAlertRootClass},
         };
+        // Counted so the pass can state its own conclusion at the end. Reading
+        // the lines below one at a time and adding them up is work nobody
+        // sending in a log should have to do.
+        int sigOk = 0, sigStale = 0, sigMissing = 0;
+        const char* missingNames[4]{};
+
         for (const Expect& e : expected)
         {
             // Read the vtable at the expected address and let RTTI name it,
@@ -439,8 +448,11 @@ namespace
             const bool agreed = gs::rtti::VtableIs(reinterpret_cast<const void*>(base + e.rva), e.name);
             uintptr_t vt = agreed ? base + e.rva : 0;
             if (agreed)
+            {
+                ++sigOk;
                 GS_LOG_OK("signatures.h +0x%08llX still matches %s",
                           static_cast<unsigned long long>(e.rva), ShortName(e.name));
+            }
             else
             {
                 // The 11 September patch moved every address. The sweep names
@@ -448,12 +460,19 @@ namespace
                 for (size_t i = 0; i < n && !vt; ++i)
                     if (found[i].vtableVa && strcmp(found[i].name, e.name) == 0) vt = found[i].vtableVa;
                 if (vt)
+                {
+                    ++sigStale;
                     GS_LOG_OK("signatures.h +0x%08llX is stale; %s found by RTTI at +0x%08llX instead",
                               static_cast<unsigned long long>(e.rva), ShortName(e.name),
                               static_cast<unsigned long long>(vt - base));
+                }
                 else
+                {
+                    if (sigMissing < 4) missingNames[sigMissing] = ShortName(e.name);
+                    ++sigMissing;
                     GS_LOG_ERR("signatures.h +0x%08llX no longer matches %s and RTTI did not offer it",
                                static_cast<unsigned long long>(e.rva), ShortName(e.name));
+                }
             }
             // Only a vtable the running game has just named gets hooked.
             if (vt && e.rva == gs::sig::kWorldMapVtable) g_worldVt = vt;
@@ -470,13 +489,52 @@ namespace
                 if (found[i].vtableVa && strcmp(found[i].name, gs::sig::kGimmickClass) == 0) gvt = found[i].vtableVa;
             if (gvt)
             {
+                const bool asRecorded = gvt == base + gs::sig::kGimmickVtable;
+                if (asRecorded) ++sigOk; else ++sigStale;
                 gs::actors::SetGimmickVtable(gvt);
                 GS_LOG_OK("ClientGimmickActorComponent vtable at +0x%08llX (%s); glint byte at +0x%llX",
                           static_cast<unsigned long long>(gvt - base),
-                          gvt == base + gs::sig::kGimmickVtable ? "as recorded" : "by RTTI, the record is stale",
+                          asRecorded ? "as recorded" : "by RTTI, the record is stale",
                           static_cast<unsigned long long>(gs::sig::kOff_Gimmick_DetectTgt));
             }
-            else GS_LOG_ERR("ClientGimmickActorComponent not found by address or RTTI; gimmicks found by name, no glint byte");
+            else
+            {
+                if (sigMissing < 4) missingNames[sigMissing] = "ClientGimmickActorComponent";
+                ++sigMissing;
+                GS_LOG_ERR("ClientGimmickActorComponent not found by address or RTTI; gimmicks found by name, no glint byte");
+            }
+        }
+
+        // One line saying how the pass went, so a log answers the question it
+        // is usually sent in to answer. A stale address RTTI found again is the
+        // normal state after a game patch and costs nothing, so it does not get
+        // an error to itself here. Not found at all is the one that takes a
+        // feature away, and that is what the error is reserved for.
+        const int sigTotal = sigOk + sigStale + sigMissing;
+        if (sigMissing == 0 && sigStale == 0)
+        {
+            GS_LOG_OK("signatures: all %d match this exe", sigTotal);
+        }
+        else if (sigMissing == 0)
+        {
+            GS_LOG_OK("signatures: %d of %d are stale and RTTI found every one of them again. That is "
+                      "the ordinary state after a game patch and nothing is lost by it.", sigStale, sigTotal);
+        }
+        else
+        {
+            // _TRUNCATE rather than strcat_s: an overlong name should cost a
+            // few characters off the end of a diagnostic, not abort the process
+            // inside the code whose whole job is reporting that something is
+            // wrong.
+            char names[256]{};
+            for (int i = 0; i < sigMissing && i < 4; ++i)
+            {
+                if (i) strncat_s(names, ", ", _TRUNCATE);
+                strncat_s(names, missingNames[i] ? missingNames[i] : "?", _TRUNCATE);
+            }
+            GS_LOG_ERR("signatures: %d of %d were not found by address or by RTTI: %s. Whatever each one "
+                       "feeds is dead this session. If the game has just patched, re-derive signatures.h "
+                       "with docs/investigations/rebase.py.", sigMissing, sigTotal, names);
         }
     }
 
@@ -855,6 +913,82 @@ namespace
                local.wSecond, fad.nFileSizeLow);
     }
 
+    // Which game this attached to, next to the plugin's own stamp above.
+    //
+    // The log had nothing to say about the exe. Whether the running build was
+    // the one signatures.h was written against had to be inferred from the
+    // per-signature lines several hundred lines down, by someone who knew what
+    // those lines meant. felixib's report in September went unexplained for
+    // want of this: spotting died after a reload, a Steam file verification
+    // fixed it, and nobody could say afterwards whether the exe had been the
+    // problem.
+    void LogGameBuild()
+    {
+        wchar_t path[MAX_PATH]{};
+        if (!GetModuleFileNameW(nullptr, path, MAX_PATH))
+        {
+            GS_LOG_ERR("game exe: its path could not be read, so its build is unknown");
+            return;
+        }
+
+        const wchar_t* leaf = wcsrchr(path, L'\\');
+        leaf = leaf ? leaf + 1 : path;
+
+        // The version resource, which is what Steam and the patch notes call a
+        // build. Absent on a stripped or repacked exe, which is itself worth
+        // seeing in a log.
+        char ver[64] = "no version resource";
+        DWORD ignored = 0;
+        const DWORD infoBytes = GetFileVersionInfoSizeW(path, &ignored);
+        if (infoBytes)
+        {
+            std::vector<uint8_t> buf(infoBytes);
+            VS_FIXEDFILEINFO* ffi = nullptr;
+            UINT ffiBytes = 0;
+            if (GetFileVersionInfoW(path, 0, infoBytes, buf.data()) &&
+                VerQueryValueW(buf.data(), L"\\", reinterpret_cast<void**>(&ffi), &ffiBytes) &&
+                ffi && ffi->dwSignature == 0xFEEF04BD)
+            {
+                sprintf_s(ver, "%u.%u.%u.%u",
+                          static_cast<unsigned>(HIWORD(ffi->dwFileVersionMS)),
+                          static_cast<unsigned>(LOWORD(ffi->dwFileVersionMS)),
+                          static_cast<unsigned>(HIWORD(ffi->dwFileVersionLS)),
+                          static_cast<unsigned>(LOWORD(ffi->dwFileVersionLS)));
+            }
+        }
+
+        WIN32_FILE_ATTRIBUTE_DATA fad{};
+        if (GetFileAttributesExW(path, GetFileExInfoStandard, &fad))
+        {
+            SYSTEMTIME utc{}, local{};
+            FileTimeToSystemTime(&fad.ftLastWriteTime, &utc);
+            SystemTimeToTzSpecificLocalTime(nullptr, &utc, &local);
+            const unsigned long long bytes =
+                (static_cast<unsigned long long>(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+            GS_LOG("game exe %ls %s, written %04d-%02d-%02d %02d:%02d:%02d, %llu bytes",
+                   leaf, ver, local.wYear, local.wMonth, local.wDay,
+                   local.wHour, local.wMinute, local.wSecond, bytes);
+        }
+        else
+        {
+            GS_LOG("game exe %ls %s", leaf, ver);
+        }
+
+        if (strcmp(ver, gs::sig::kExeVersion) == 0)
+        {
+            GS_LOG_OK("that is the build signatures.h was written against");
+        }
+        else
+        {
+            // Not an error on its own. A patch moves every address and RTTI
+            // finds most of them again, which is what the signature lines
+            // below report. Saying the exe differs is the useful part.
+            GS_LOG("signatures.h was written against %s. A different build moves every address in it. "
+                   "RTTI looks them up again at runtime, and the signature lines below say what it found.",
+                   gs::sig::kExeVersion);
+        }
+    }
+
     // 50 ms steps so a press is not missed, edge-detected so a held key fires
     // once. On its own thread because the worker spends up to 25 seconds inside
     // a scan, and session seven's press landed in one and was never seen.
@@ -1167,6 +1301,7 @@ namespace
         g_startedMs = GetTickCount();
         GS_LOG("Glint Spotter %s probe", GS_VERSION_STRING);
         LogBuildStamp(g_self);
+        LogGameBuild();
         GS_LOG("Read-only. It reads the game's own RTTI, looks for those objects in");
         GS_LOG("memory, and writes what it finds. No hooks, nothing called.");
 
