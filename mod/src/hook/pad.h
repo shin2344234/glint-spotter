@@ -7,6 +7,16 @@
 // takes the input away from the game. The library is loaded by name at runtime
 // so a machine without it just reports no controller rather than failing to
 // load the plugin.
+//
+// All four XInput slots are watched, not slot 0 alone. A pad rarely lands on a
+// slot the mod picked for it: Steam Input and DS4Windows both present a virtual
+// pad whose index depends on what else is plugged in, and Erinion's DualSense
+// report is what this cost. The first slot to answer is kept and asked on its
+// own after that, and the hunt across all four runs once a second while none
+// answers, because asking an empty slot is the slow call in this API.
+//
+// A DualSense speaking HID with nothing translating it still does not appear on
+// XInput at all. That half is not solved here.
 
 namespace gs::pad
 {
