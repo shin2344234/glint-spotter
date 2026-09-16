@@ -148,6 +148,8 @@ namespace
         fputs("\n", f);
         fputs("; Hold these controller buttons together to mark whatever the crosshair is on.\n", f);
         fputs("; Names: A B X Y LB RB LS RS UP DOWN LEFT RIGHT BACK START.\n", f);
+        fputs("; On a PlayStation pad LB is L1, RB is R1, A is Cross, B is Circle, X is\n", f);
+        fputs("; Square, Y is Triangle, BACK is Share or Create and START is Options.\n", f);
         fputs("Chord=RB+LB+A\n", f);
         fputs("\n", f);
         fputs("; Milliseconds the chord must be held before it fires. Zero fires at once.\n", f);
@@ -162,6 +164,11 @@ namespace
         fputs("; 1 buzzes the controller when a pin lands. The map is rarely open at that\n", f);
         fputs("; moment, so this is usually the only thing that tells you it worked.\n", f);
         fputs("Rumble=1\n", f);
+        fputs("\n", f);
+        fputs("; 1 reads a DualSense or DualShock 4 directly, so the chord and the buzz work\n", f);
+        fputs("; without Steam Input, and the game keeps its PlayStation button pictures.\n", f);
+        fputs("; 0 leaves those pads to Steam Input or DS4Windows. Xbox pads are unaffected.\n", f);
+        fputs("DirectPad=1\n", f);
         fputs("\n", f);
         fputs("; 1 makes each pin a marker the map can remove: put the cursor on it and the\n", f);
         fputs("; map offers Remove Marker, the same as for one you placed yourself. 0 draws\n", f);
@@ -359,6 +366,10 @@ namespace gs::Settings
             else if (_stricmp(key, "Rumble") == 0)
             {
                 g_values.rumble = atoi(val) != 0;
+            }
+            else if (_stricmp(key, "DirectPad") == 0)
+            {
+                g_values.directPad = atoi(val) != 0;
             }
             else if (_stricmp(key, "RealMarkers") == 0)
             {

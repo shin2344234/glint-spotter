@@ -45,6 +45,8 @@ add_library(GlintSpotter SHARED
     src/hook/tick.cpp
     src/hook/thunk.asm
     src/hook/pad.cpp
+    src/hook/hidpad.cpp
+    src/hook/hidpad_parse.cpp
     src/core/settings.cpp
 )
 
@@ -53,6 +55,8 @@ target_include_directories(GlintSpotter PRIVATE src)
 # the exe's version resource, which the log names so a report says which build
 # it came from.
 target_link_libraries(GlintSpotter PRIVATE psapi version)
+# hid and setupapi, for finding and reading a DualSense or DualShock 4 directly.
+target_link_libraries(GlintSpotter PRIVATE hid setupapi)
 target_compile_definitions(GlintSpotter PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_compile_options(GlintSpotter PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W3>)

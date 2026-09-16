@@ -39,6 +39,12 @@ namespace gs::actors
         uintptr_t gimmickComp = 0;
         uintptr_t detectComp = 0;    // its own ClientDetectActorComponent, or 0
         uintptr_t effectComp = 0;    // its ClientEffectActorComponent, or 0
+        // What each component's first qword read when it was found. A load
+        // frees these blocks and the game puts something else in them, so a
+        // byte read out of one afterwards is whatever moved in. Checked on
+        // every read, the way the flash flag has been checked since 1.1.21.
+        uintptr_t gimmickVt = 0;
+        uintptr_t detectVt = 0;
     };
 
     // Give the finder the manager's vtable, from the RTTI sweep. It looks for
@@ -49,6 +55,11 @@ namespace gs::actors
     // can be checked with one compare. Optional: without it the slots are
     // named through RTTI, which is slower.
     void SetGimmickVtable(uintptr_t vtable);
+
+    // Throw the set away. Everything in it points into blocks the game is
+    // about to free, and an entry that outlives its object is read as
+    // whatever lands in that memory next.
+    void Forget(const char* why);
 
     // Try to locate the live manager. Cheap when already found.
     bool Locate(uint32_t nowMs);

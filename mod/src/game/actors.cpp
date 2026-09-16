@@ -40,6 +40,7 @@ namespace
     constexpr uintptr_t kComps_SlotsEnd      = 0x80;
     constexpr uint32_t  kListCapMax          = 0x10000;
     constexpr uint32_t  kKeepMs              = 12000;
+    constexpr float     kTeleportMetres      = 300.0f;
     constexpr int       kSetMax              = 4096;
     constexpr int       kBufMax              = 16384;
 
@@ -59,9 +60,16 @@ namespace
 
     std::mutex g_setMutex;
     gs::actors::Entity g_set[kSetMax];
+    float g_lastPlayerX = 0, g_lastPlayerZ = 0;
+    bool g_lastPlayerValid = false;
     int g_setN = 0;
     uintptr_t g_buf[kBufMax];              // pool read scratch, tick thread only
     uint32_t g_lastSaidMs = 0;
+
+    // Both are defined further down, next to the code they belong with, and
+    // both are wanted before that.
+    bool PtrLike(uintptr_t p);
+    bool StillTheSame(uintptr_t comp, uintptr_t vt);
 
     uintptr_t Deref(uintptr_t at)
     {
@@ -124,7 +132,7 @@ namespace
     {
         __try
         {
-            if (e < 0x10000 || (e & 7) != 0 || e > 0x00007FFFFFFFFFFFull) return false;
+            if (!PtrLike(e)) return false;
             const uint32_t id = *reinterpret_cast<const uint32_t*>(e + kOff_Ent_Eid);
             if (!id) return false;
             const uint8_t tag = static_cast<uint8_t>(id >> 24);
@@ -238,7 +246,19 @@ namespace
         return n;
     }
 
-    bool PtrLike(uintptr_t p) { return p >= 0x10000 && (p & 7) == 0 && p <= 0x00007FFFFFFFFFFFull; }
+    // A value that could be a pointer into the game's heap.
+    //
+    // The low half has to hold something. Every access violation Master
+    // Looter's handler caught inside this file read an address of the shape
+    // 0000045A_00000060: a 32-bit value sitting in the high half, zero in the
+    // low half, plus the offset of the field being read. A real allocation
+    // four gigabytes aligned does not happen, so this costs nothing and stops
+    // the probe reading through pool slots that hold a pair of 32-bit values.
+    bool PtrLike(uintptr_t p)
+    {
+        return p >= 0x10000 && (p & 7) == 0 && p <= 0x00007FFFFFFFFFFFull &&
+               (p & 0xFFFFFFFFull) != 0;
+    }
 
     bool Sane(const float* v)
     {
@@ -401,8 +421,11 @@ namespace
 
     // Is the reveal on this entity right now: the detect component's byte,
     // or for a gimmick without one, active custom render values.
-    bool ReadLit(uintptr_t detectComp, uintptr_t gimmickComp, bool* out)
+    bool ReadLit(uintptr_t detectComp, uintptr_t detectVt, uintptr_t gimmickComp, uintptr_t gimmickVt,
+                 bool* out)
     {
+        if (!StillTheSame(detectComp, detectVt)) detectComp = 0;
+        if (!StillTheSame(gimmickComp, gimmickVt)) gimmickComp = 0;
         __try
         {
             if (detectComp)
@@ -586,8 +609,24 @@ namespace
     }
 
     // The detect mode target byte on a gimmick component.
-    bool GlintByte(uintptr_t comp, bool* out)
+    // Still the object this component was? A freed block keeps its bytes
+    // until the game hands the memory to something else, and then the first
+    // qword is that something else's vtable. One compare says which it is.
+    bool StillTheSame(uintptr_t comp, uintptr_t vt)
     {
+        __try
+        {
+            return comp != 0 && vt != 0 && *reinterpret_cast<const uintptr_t*>(comp) == vt;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    bool GlintByte(uintptr_t comp, uintptr_t vt, bool* out)
+    {
+        if (!StillTheSame(comp, vt)) return false;
         __try
         {
             *out = *reinterpret_cast<const uint8_t*>(comp + gs::sig::kOff_Gimmick_DetectTgt) != 0;
@@ -675,6 +714,16 @@ namespace gs::actors
     void SetManagerVtable(uintptr_t vtable) { g_vtable.store(vtable); }
     void SetGimmickVtable(uintptr_t vtable) { g_gimmickVt.store(vtable); }
 
+    void Forget(const char* why)
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        if (!g_setN) return;
+        GS_LOG("[actors] %s, so the %d entities held from before it are dropped", why ? why : "the world changed",
+               g_setN);
+        g_setN = 0;
+        g_lastPlayerValid = false;
+    }
+
     bool Locate(uint32_t nowMs)
     {
         const uintptr_t vt = g_vtable.load();
@@ -748,6 +797,38 @@ namespace gs::actors
         const int n = ReadPools(mgr, g_buf, kBufMax);
 
         std::lock_guard<std::mutex> lock(g_setMutex);
+
+        // A world change frees every object in the set at once, and the set
+        // would otherwise go on reading them for twelve seconds. That is where
+        // the access violations in this file came from, all of them within
+        // half a minute of a teleport, and where the nonsense came from that
+        // did not fault: on 16 September the set held an object 5,240 metres
+        // away with its glint byte reading as set, which is a freed block that
+        // something else had moved into.
+        //
+        // A jump nothing can walk or fly is the signal. Three hundred metres
+        // between two passes half a second apart is six hundred metres a
+        // second, well past a wyvern, and every teleport in that morning's
+        // logs moved between nine hundred and sixteen hundred.
+        {
+            const gs::player::Pos now = gs::player::Read();
+            if (now.valid && g_lastPlayerValid)
+            {
+                const float dx = now.x - g_lastPlayerX, dz = now.z - g_lastPlayerZ;
+                const float moved = std::sqrt(dx * dx + dz * dz);
+                if (moved > kTeleportMetres && g_setN > 0)
+                {
+                    char why[64];
+                    snprintf(why, sizeof(why), "the player moved %.0f metres in one pass", moved);
+                    GS_LOG("[actors] %s, so the %d entities from where he was are dropped rather "
+                           "than read for another twelve seconds", why, g_setN);
+                    g_setN = 0;
+                }
+            }
+            g_lastPlayerValid = now.valid;
+            if (now.valid) { g_lastPlayerX = now.x; g_lastPlayerZ = now.z; }
+        }
+
         // Drop the stale.
         int w = 0;
         for (int i = 0; i < g_setN; ++i)
@@ -783,7 +864,9 @@ namespace gs::actors
                 ne.eid = EidOf(e);
                 ne.gimmickComp = GimmickComponent(e);
                 ne.gimmick = ne.gimmickComp != 0;
+                ne.gimmickVt = ne.gimmickComp ? Deref(ne.gimmickComp) : 0;
                 ne.detectComp = DetectComponent(e);
+                ne.detectVt = ne.detectComp ? Deref(ne.detectComp) : 0;
                 ne.effectComp = EffectComponent(e);
                 ne.knowledge = ComponentAt(e, gs::sig::kOff_Comps_Knowledge, "Knowledge") != 0;
                 if (ne.gimmickComp)
@@ -801,7 +884,7 @@ namespace gs::actors
             en.lastSeenMs = nowMs;
             // The glint byte, every pass: the event that sets it can fire any time.
             bool g = false;
-            if (en.gimmickComp && GlintByte(en.gimmickComp, &g))
+            if (en.gimmickComp && GlintByte(en.gimmickComp, en.gimmickVt, &g))
             {
                 static int flipsLeft = 20;
                 if (g != en.glint && flipsLeft > 0)
@@ -814,9 +897,25 @@ namespace gs::actors
                 }
                 en.glint = g;
             }
+            else if (en.gimmickComp && !StillTheSame(en.gimmickComp, en.gimmickVt))
+            {
+                // The block is somebody else's now. The object does not glint
+                // because nothing here knows whether it does, and leaving the
+                // last answer standing is how a freed node keeps a pin.
+                en.gimmickComp = 0;
+                en.gimmickVt = 0;
+                en.gimmick = false;
+                en.glint = false;
+            }
+            if (en.detectComp && !StillTheSame(en.detectComp, en.detectVt))
+            {
+                en.detectComp = 0;
+                en.detectVt = 0;
+                en.lit = false;
+            }
             // The reveal, every pass, and its first flips in the log.
             bool lit = false;
-            if (ReadLit(en.detectComp, en.gimmickComp, &lit))
+            if (ReadLit(en.detectComp, en.detectVt, en.gimmickComp, en.gimmickVt, &lit))
             {
                 static int litFlipsLeft = 30;
                 if (lit != en.lit && litFlipsLeft > 0)

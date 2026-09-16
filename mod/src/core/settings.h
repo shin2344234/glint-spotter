@@ -22,6 +22,8 @@
 //   MiniPin=0     ; also copy each pin onto the minimap. Crashed the game in
 //                 ; session eighty-two; leave it alone.
 //   Rumble=1      ; buzz the pad when a pin lands
+//   DirectPad=1   ; read a DualSense or DualShock 4 directly, so the chord works
+//                 ; without Steam Input. 0 leaves those pads to Steam Input
 //   Rod=8.0       ; metres either side of the sight line a press will look,
 //                 ; the same at every distance
 //   RayFallback=0 ; let a press that the table cannot answer guess from terrain
@@ -267,6 +269,14 @@ namespace gs::Settings
         // the spy captured sixty times over. Doing what vanilla does puts the
         // marker on the screen you are already looking at.
         bool rumble = true;
+
+        // Whether a DualSense or DualShock 4 is read straight off HID. On by
+        // default, because the alternative is Steam Input, and Steam Input
+        // makes the game draw Xbox glyphs on a PlayStation pad. The switch is
+        // here for the case nobody could test before it shipped: a pad or a
+        // driver that objects to a second reader, or a buzz that fights the
+        // game's own output to the pad.
+        bool directPad = true;
 
         // Whether a pin is a marker the map can remove, or only a picture.
         //

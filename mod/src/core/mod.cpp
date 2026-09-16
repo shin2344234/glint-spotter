@@ -23,6 +23,7 @@
 #include "game/lgso.h"
 #include "game/camera.h"
 #include "hook/pad.h"
+#include "hook/hidpad.h"
 #include "hook/tick.h"
 #include "game/rtti.h"
 #include "game/scan.h"
@@ -1274,6 +1275,9 @@ namespace
         const uint32_t now = GetTickCount();
         if (g_specialLost || (actor && actor != g_refindActor))
         {
+            // The same load that freed the flash's component freed everything
+            // the entity set is holding.
+            gs::actors::Forget("the player's body was handed over");
             g_specialLost = false;
             g_refindActor = actor;
             g_refindTriesLeft = 6;
@@ -1523,6 +1527,7 @@ namespace gs::Mod
         if (!processTerminating && g_thread) WaitForSingleObject(g_thread, 3000);
         if (!processTerminating && g_keyThread) WaitForSingleObject(g_keyThread, 1000);
         if (g_keyThread) { CloseHandle(g_keyThread); g_keyThread = nullptr; }
+        gs::hidpad::Stop(processTerminating);
         // The vtable slots go back only when the process is staying up. On
         // teardown the game is leaving anyway, and a write to its memory from
         // inside DllMain buys nothing.

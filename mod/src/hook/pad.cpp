@@ -6,6 +6,8 @@
 #include <atomic>
 
 #include "core/log.h"
+#include "core/settings.h"
+#include "hook/hidpad.h"
 
 namespace
 {
@@ -61,16 +63,18 @@ namespace gs::pad
             if (g_getState)
             {
                 GS_LOG("pad: using %ls, vibration %s", n, g_setState ? "available" : "not available");
-                return true;
+                break;
             }
         }
-        GS_LOG("pad: no XInput library, controller chord off");
-        return false;
+        if (!g_getState) GS_LOG("pad: no XInput library, so Xbox pads are not read");
+        if (gs::Settings::Get().directPad) gs::hidpad::Start();
+        else GS_LOG("pad: DirectPad=0, so a PlayStation pad works only through Steam Input or DS4Windows");
+        return g_getState != nullptr || gs::Settings::Get().directPad;
     }
 
     bool ChordHeld(uint16_t buttons, uint32_t holdMs, int slot)
     {
-        if (!g_getState || !buttons) return false;
+        if (!buttons) return false;
         if (slot < 0 || slot >= kChords) return false;
 
         const uint32_t now = GetTickCount();
@@ -80,12 +84,15 @@ namespace gs::pad
         // does, was a pad the mod could not see at all.
         XINPUT_STATE st{};
         bool answered = false;
-        if (g_pad >= 0)
+        if (g_getState)
         {
-            answered = g_getState(static_cast<DWORD>(g_pad), &st) == ERROR_SUCCESS;
-            if (!answered) g_pad = -1;   // let it go and hunt again, it may come back elsewhere
+            if (g_pad >= 0)
+            {
+                answered = g_getState(static_cast<DWORD>(g_pad), &st) == ERROR_SUCCESS;
+                if (!answered) g_pad = -1;   // let it go and hunt again, it may come back elsewhere
+            }
+            if (!answered) answered = HuntForPad(now, st);
         }
-        if (!answered) answered = HuntForPad(now, st);
 
         if (g_pad != g_loggedPad)
         {
@@ -94,13 +101,19 @@ namespace gs::pad
             else if (g_loggedPad >= 0)
                 GS_LOG("pad: the controller on slot %d is gone", g_loggedPad);
             else
-                GS_LOG("pad: nothing on any of the four XInput slots, chord and buzz off. "
-                       "A DualSense on USB does not appear here unless Steam Input is on.");
+                GS_LOG("pad: nothing on any of the four XInput slots. A DualSense or DualShock 4 "
+                       "is read directly instead and says so when it is found.");
             g_loggedPad = g_pad;
         }
 
+        // Both at once when Steam Input is on: its virtual Xbox pad answers on
+        // XInput and the real pad underneath still reports over HID. The masks
+        // are joined before the chord is judged, so one press cannot fire twice.
+        const bool direct = gs::hidpad::Connected();
+        const uint16_t pressed = static_cast<uint16_t>((answered ? st.Gamepad.wButtons : 0) |
+                                                       (direct ? gs::hidpad::Buttons() : 0));
         const bool was = g_connected;
-        g_connected = answered;
+        g_connected = answered || direct;
         if (!g_connected)
         {
             g_sinceMs[slot] = 0;
@@ -112,7 +125,7 @@ namespace gs::pad
             return false;
         }
 
-        const bool held = (st.Gamepad.wButtons & buttons) == buttons;
+        const bool held = (pressed & buttons) == buttons;
         if (!held) { g_sinceMs[slot] = 0; g_fired[slot] = false; return false; }
 
         if (!g_sinceMs[slot]) g_sinceMs[slot] = now ? now : 1;
@@ -131,18 +144,30 @@ namespace gs::pad
 
     void Pump()
     {
-        if (!g_setState || g_pad < 0) return;
+        // XInput first when there is a pad on it. With Steam Input on, that is
+        // the virtual pad, and Steam passes the buzz on to the real one; writing
+        // to the real one as well would buzz it twice over.
+        const bool viaXInput = g_setState && g_pad >= 0;
+        const bool viaDirect = !viaXInput && gs::hidpad::CanRumble();
+        if (!viaXInput && !viaDirect) return;
         const uint32_t until = g_buzzUntil.load();
         const bool want = until != 0 && static_cast<int32_t>(GetTickCount() - until) < 0;
         if (want == g_buzzing) return;
         g_buzzing = want;
-        XINPUT_VIBRATION v{};
-        if (want)
+        if (viaXInput)
         {
-            v.wLeftMotorSpeed = g_buzzStrength.load();
-            v.wRightMotorSpeed = g_buzzStrength.load();
+            XINPUT_VIBRATION v{};
+            if (want)
+            {
+                v.wLeftMotorSpeed = g_buzzStrength.load();
+                v.wRightMotorSpeed = g_buzzStrength.load();
+            }
+            g_setState(static_cast<DWORD>(g_pad), &v);
         }
-        g_setState(static_cast<DWORD>(g_pad), &v);
+        else
+        {
+            gs::hidpad::Rumble(want ? static_cast<uint8_t>(g_buzzStrength.load() >> 8) : 0);
+        }
     }
 
     bool Connected() { return g_connected; }

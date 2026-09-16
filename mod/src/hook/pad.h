@@ -15,8 +15,9 @@
 // own after that, and the hunt across all four runs once a second while none
 // answers, because asking an empty slot is the slow call in this API.
 //
-// A DualSense speaking HID with nothing translating it still does not appear on
-// XInput at all. That half is not solved here.
+// A DualSense or DualShock 4 with nothing translating it does not appear on
+// XInput at all. hidpad.cpp reads those directly and ChordHeld joins its buttons
+// to XInput's, so a chord works on either kind of pad and on both at once.
 
 namespace gs::pad
 {
