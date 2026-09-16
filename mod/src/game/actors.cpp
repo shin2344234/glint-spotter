@@ -220,6 +220,13 @@ namespace
                 const int before = n;
                 for (uint32_t i = 0; i < 20000 && n < cap; ++i, at += 8)
                 {
+                    // A pool can end before five hundred empty slots have gone
+                    // by, and the walk used to carry on into whatever came next.
+                    // On 16 September that was an unmapped allocation boundary,
+                    // 000005050C620000, and the fault ended the whole pass, so
+                    // every pool after this one went unread until the next.
+                    // One question per page is enough to stop at the edge.
+                    if ((at & 0xFFF) == 0 && !gs::rtti::Readable(reinterpret_cast<const void*>(at), 8)) break;
                     scanned = i + 1;
                     const uintptr_t e = *reinterpret_cast<const uintptr_t*>(at);
                     if (!EntityLike(e)) { if (++misses >= 512) break; continue; }

@@ -159,6 +159,40 @@ int main()
     Expect("ReadLit refuses it instead of reading 0x1B8 off it",
            !ReadLit(0, 0, gc2, kVtable, &lit));
 
+    printf("-- a pool walk that runs off the end of its allocation --\n");
+    // Three pages reserved, the first and third committed, the middle one not.
+    // Pool A starts on the first page with four entities and nothing after
+    // them, so the walk is still counting empty slots when it reaches the
+    // unmapped page. Pool B starts on the third page. On 16 September the walk
+    // read straight into the gap, the fault ended the pass, and pool B was
+    // never read.
+    {
+        const size_t page = 0x1000;
+        auto* region = static_cast<uint8_t*>(VirtualAlloc(nullptr, page * 3, MEM_RESERVE, PAGE_NOACCESS));
+        VirtualAlloc(region, page, MEM_COMMIT, PAGE_READWRITE);
+        VirtualAlloc(region + page * 2, page, MEM_COMMIT, PAGE_READWRITE);
+        memset(region, 0, page);
+        memset(region + page * 2, 0, page);
+
+        uint8_t* one = NewBlock(0);
+        *reinterpret_cast<uint32_t*>(one + 0x60) = 0xB0100001;
+        const uintptr_t entity = reinterpret_cast<uintptr_t>(one);
+        auto* poolA = reinterpret_cast<uintptr_t*>(region);
+        auto* poolB = reinterpret_cast<uintptr_t*>(region + page * 2);
+        for (int i = 0; i < 4; ++i) { poolA[i] = entity; poolB[i] = entity; }
+
+        // The manager: a page of zeros with the two pool pointers past the
+        // {count, capacity, array} triples, where the pool scan looks.
+        uint8_t* mgr = NewBlock(0);
+        *reinterpret_cast<uintptr_t*>(mgr + 0x208) = reinterpret_cast<uintptr_t>(poolA);
+        *reinterpret_cast<uintptr_t*>(mgr + 0x210) = reinterpret_cast<uintptr_t>(poolB);
+
+        uintptr_t got[64];
+        const int n = ReadPools(reinterpret_cast<uintptr_t>(mgr), got, 64);
+        printf("      ReadPools returned %d\n", n);
+        Expect("both pools are read, the one past the gap included", n == 8);
+    }
+
     printf(failures ? "\n%d FAILED\n" : "\nall pass\n", failures);
     return failures ? 1 : 0;
 }
