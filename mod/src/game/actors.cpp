@@ -817,24 +817,52 @@ namespace gs::actors
         // between two passes half a second apart is six hundred metres a
         // second, well past a wyvern, and every teleport in that morning's
         // logs moved between nine hundred and sixteen hundred.
+        //
+        // One read of the player for the whole pass. There used to be two, one
+        // here and one for the positions below, and the game can answer them
+        // differently half a second apart.
+        const gs::player::Pos pp = gs::player::Read();
+
+        // While a world loads the player reads as a placeholder near the
+        // absolute origin, and in some places it flips between that and his
+        // real position every pass or two. The first build with the jump check
+        // took each flip for a teleport: on 16 September it dropped the set
+        // twenty-seven times in nineteen minutes. Five of those were real fast
+        // travels of one to four kilometres. The other twenty-two measured 10
+        // to 13 km, which is exactly how far that part of the map sits from
+        // (0, 0), and in between the flips it filled the set with objects
+        // placed at (0.0, 0.0, 0.0).
+        // The pinning side has refused the placeholder since session
+        // fifty-three with the same rule, a player within a hundred of the
+        // origin, so the set now sits those passes out altogether and keeps
+        // what it had.
+        if (pp.valid && std::fabs(pp.x) + std::fabs(pp.z) < 100.0f)
         {
-            const gs::player::Pos now = gs::player::Read();
-            if (now.valid && g_lastPlayerValid)
+            static int saidLeft = 3;
+            if (saidLeft > 0)
             {
-                const float dx = now.x - g_lastPlayerX, dz = now.z - g_lastPlayerZ;
-                const float moved = std::sqrt(dx * dx + dz * dz);
-                if (moved > kTeleportMetres && g_setN > 0)
-                {
-                    char why[64];
-                    snprintf(why, sizeof(why), "the player moved %.0f metres in one pass", moved);
-                    GS_LOG("[actors] %s, so the %d entities from where he was are dropped rather "
-                           "than read for another twelve seconds", why, g_setN);
-                    g_setN = 0;
-                }
+                --saidLeft;
+                GS_LOG("[actors] the player reads (%.1f, %.1f, %.1f), the placeholder a loading world "
+                       "uses, so this pass leaves the set alone", pp.x, pp.y, pp.z);
             }
-            g_lastPlayerValid = now.valid;
-            if (now.valid) { g_lastPlayerX = now.x; g_lastPlayerZ = now.z; }
+            return static_cast<uint32_t>(n);
         }
+
+        if (pp.valid && g_lastPlayerValid)
+        {
+            const float dx = pp.x - g_lastPlayerX, dz = pp.z - g_lastPlayerZ;
+            const float moved = std::sqrt(dx * dx + dz * dz);
+            if (moved > kTeleportMetres && g_setN > 0)
+            {
+                char why[64];
+                snprintf(why, sizeof(why), "the player moved %.0f metres in one pass", moved);
+                GS_LOG("[actors] %s, so the %d entities from where he was are dropped rather "
+                       "than read for another twelve seconds", why, g_setN);
+                g_setN = 0;
+            }
+        }
+        g_lastPlayerValid = pp.valid;
+        if (pp.valid) { g_lastPlayerX = pp.x; g_lastPlayerZ = pp.z; }
 
         // Drop the stale.
         int w = 0;
@@ -843,7 +871,6 @@ namespace gs::actors
         g_setN = w;
 
         int gimmicks = 0, dupes = 0, noPos = 0;
-        const gs::player::Pos pp = gs::player::Read();
         for (int i = 0; i < n; ++i)
         {
             const uintptr_t e = g_buf[i];

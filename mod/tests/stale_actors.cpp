@@ -16,9 +16,16 @@
 #include <cstdio>
 #include <cstring>
 
+// The log is counted, not printed: the set being dropped is a log line, and
+// how many times it happens is what one of these tests is about.
+int g_drops = 0;
 namespace gs::Log
 {
-    void Write(const char* level, const char* fmt, ...) { (void)level; (void)fmt; }
+    void Write(const char* level, const char* fmt, ...)
+    {
+        (void)level;
+        if (fmt && strstr(fmt, "are dropped")) ++g_drops;
+    }
 }
 
 // actors.cpp reaches for three things outside itself. None of them is what is
@@ -44,9 +51,11 @@ namespace gs::Settings
 #include "game/rtti.cpp"
 #include "game/actors.cpp"
 
+// Where the tests say the player is. Invalid until one of them says otherwise.
+gs::player::Pos g_player;
 namespace gs::player
 {
-    Pos Read() { return Pos{}; }
+    Pos Read() { return g_player; }
 }
 
 namespace
@@ -191,6 +200,95 @@ int main()
         const int n = ReadPools(reinterpret_cast<uintptr_t>(mgr), got, 64);
         printf("      ReadPools returned %d\n", n);
         Expect("both pools are read, the one past the gap included", n == 8);
+    }
+
+    printf("-- the player flips to the loading placeholder and back --\n");
+    // 16 September, 11:13 to 11:16: standing about 11,171 metres from the
+    // origin, the player read flipped between his real position and the
+    // placeholder near (0, 0) every pass or two, and the set was dropped each
+    // time as though he had teleported 11 km. A real fast travel has to still
+    // drop it, once.
+    {
+        constexpr float kX = -11114.3f, kY = 700.0f, kZ = -1128.5f;
+        const int kEntities = 4;
+
+        // An entity the set will keep: its id tagged as a world entity, and a
+        // transform with a cached world position a few metres from the player.
+        // The local position is left insane so it offers no second candidate.
+        uintptr_t ents[kEntities];
+        for (int i = 0; i < kEntities; ++i)
+        {
+            uint8_t* e = NewBlock(0);
+            uint8_t* comps = NewBlock(0);
+            uint8_t* tf = NewBlock(0);
+            *reinterpret_cast<uint32_t*>(e + 0x60) = 0xB0100100 + i;
+            *reinterpret_cast<uintptr_t*>(e + 0x68) = reinterpret_cast<uintptr_t>(comps);
+            *reinterpret_cast<uintptr_t*>(comps + 0x1A0) = reinterpret_cast<uintptr_t>(tf);
+            const float world[3] = {kX + 5.0f * i, kY, kZ + 3.0f};
+            memcpy(tf + 0x29C, world, 12);
+            const float nan[3] = {1.0e30f, 1.0e30f, 1.0e30f};
+            memcpy(tf + 0xB4, nan, 12);
+            *reinterpret_cast<uint32_t*>(tf + 0xC8) = 0xFFFFFFFF;
+            ents[i] = reinterpret_cast<uintptr_t>(e);
+        }
+        uint8_t* pool = NewBlock(0);
+        for (int i = 0; i < kEntities; ++i) reinterpret_cast<uintptr_t*>(pool)[i] = ents[i];
+        uint8_t* mgr = NewBlock(0);
+        *reinterpret_cast<uintptr_t*>(mgr + 0x208) = reinterpret_cast<uintptr_t>(pool);
+        g_mgr.store(reinterpret_cast<uintptr_t>(mgr));
+
+        auto at = [](float x, float y, float z) {
+            gs::player::Pos p{};
+            p.x = x; p.y = y; p.z = z;
+            p.valid = true;
+            return p;
+        };
+        const gs::player::Pos home = at(kX, kY, kZ);
+        const gs::player::Pos placeholder = at(-0.3f, 1.0f, 0.0f);
+
+        uint32_t now = 100000;
+        g_player = home;
+        gs::actors::Refresh(now += 500);
+        Expect("the set fills where the player stands", gs::actors::Count() == kEntities);
+
+        g_drops = 0;
+        bool heldEveryPass = true;
+        for (int flip = 0; flip < 20; ++flip)
+        {
+            g_player = (flip % 2 == 0) ? placeholder : home;
+            gs::actors::Refresh(now += 500);
+            if (gs::actors::Count() != kEntities) heldEveryPass = false;
+        }
+        printf("      twenty flips dropped the set %d time(s)\n", g_drops);
+        Expect("twenty flips to the placeholder and back drop nothing", g_drops == 0);
+        Expect("and the set keeps its entities through every one of them", heldEveryPass);
+
+        gs::actors::Entity snap[16];
+        const int got = gs::actors::Snapshot(snap, 16);
+        bool noneAtOrigin = true;
+        for (int i = 0; i < got; ++i)
+            if (std::fabs(snap[i].x) + std::fabs(snap[i].z) < 100.0f) noneAtOrigin = false;
+        Expect("no entity was placed at the origin during the placeholder passes", noneAtOrigin);
+
+        // A real fast travel, three kilometres, straight from one real
+        // position to another.
+        g_drops = 0;
+        g_player = at(kX + 3000.0f, kY, kZ);
+        gs::actors::Refresh(now += 500);
+        Expect("a real three-kilometre fast travel still drops the set once", g_drops == 1);
+        Expect("and the old place's entities are not taken back in", gs::actors::Count() == 0);
+
+        // Through the placeholder on the way, which is how a load looks.
+        g_player = home;
+        gs::actors::Refresh(now += 500);
+        g_drops = 0;
+        g_player = placeholder;
+        gs::actors::Refresh(now += 500);
+        g_player = at(kX - 4000.0f, kY, kZ);
+        gs::actors::Refresh(now += 500);
+        Expect("a load that passes through the placeholder drops it exactly once", g_drops == 1);
+
+        g_mgr.store(0);
     }
 
     printf(failures ? "\n%d FAILED\n" : "\nall pass\n", failures);
