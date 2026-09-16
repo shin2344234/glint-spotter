@@ -67,6 +67,14 @@ default because the game binds nothing to it, and `Insert`, `Home`, `Numpad5`,
 a bare letter and the rest are all accepted. The log prints both back in words
 on startup, so you can see what it read.
 
+A DualSense or DualShock 4 works with Steam Input off, which keeps the game's
+PlayStation button pictures. The mod reads the pad directly and the names map by
+position: LB is L1, RB is R1, A is Cross, B is Circle, X is Square, Y is
+Triangle, Back is Share or Create, Start is Options. So the default chord is L1,
+R1 and Cross. It buzzes over USB; over Bluetooth the chord works but there is no
+buzz yet. `DirectPad=0` hands the pad back to Steam Input if you would rather.
+Switch Pro and other pads still need Steam Input.
+
 Everything else is in `GlintSpotter.ini` beside the plugin, and every key has a
 comment saying what it does. The two worth knowing are `Rod`, which is how
 precisely a press has to be aimed, and `Kinds`, which is what Blinding Flash
