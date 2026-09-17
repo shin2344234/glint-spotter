@@ -5,8 +5,8 @@
 
 Reads the version from version.h and posts private/discord/release-<version>.txt
 as it is: two or three plain lines saying what changed, then the Nexus files
-page and the GitHub release. Write that file first and run prose_check.py on
-it; the script refuses without it, and refuses if either link is missing.
+page and the GitHub release. Write that file first and read it over; the
+script refuses without it, and refuses if either link is missing.
 
 Posts as the bot, using DISCORD_BOT_TOKEN from the environment or from
 keys.local.env beside this script, the same file the Nexus and VirusTotal
@@ -94,7 +94,7 @@ def main():
     # inventing one.
     hand = os.path.join(ROOT, "private", "discord", "release-%s.txt" % ver)
     if not os.path.exists(hand):
-        print("No %s. Write the announcement there, two or three plain lines and the links, run prose_check.py on it, then run this again." % hand)
+        print("No %s. Write the announcement there, two or three plain lines and the links, then run this again." % hand)
         return 3
     body = open(hand, encoding="utf-8").read().strip()
     if NEXUS_FILES not in body or (GITHUB_RELEASE % ver) not in body:

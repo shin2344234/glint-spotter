@@ -11,7 +11,6 @@ file over from Master Looter works: the three keys are the same account.
 ## The order
 
 ```
-py -3 prose_check.py <docs>   check the release prose before any of it goes out
 mod\build.bat                 build the plugin into mod\dist
 py -3 package.py              regenerate the ini, zip the archive, print hashes
 py -3 vtscan.py --upload      submit the archive and the plugin, wait for a verdict
@@ -21,14 +20,6 @@ gh release create v<version> mod\dist\GlintSpotter-<version>.zip
 .\publish-nexus.ps1 -Apply    send it
 py -3 announce-discord.py --apply
 ```
-
-`prose_check.py` is ported from Master Looter and checks anything written in
-Seth's voice for AI hallmarks: the mechanical bans, a list of recurring tics, and
-any sentence that appears in two documents of the same release. Pass the post,
-the changelog and the Discord text together, because the cross-document check
-only sees the files it is given. `--all` sweeps `private/nexus` and
-`private/discord`. It exits non-zero on a hard hit. When one project catches a
-new tic, add it to the other copy too, or the two drift apart.
 
 `package.py` rebuilds `GlintSpotter.ini` from the plugin's own `WriteDefaults`
 before zipping, so the ini in the archive cannot disagree with the one the
