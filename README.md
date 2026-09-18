@@ -9,7 +9,7 @@ all and press a button, and it pins that instead. The pin lands on the world
 map where the thing stands, so you can walk away and come back to it, and the
 map's own Remove Marker takes it off again when you are done.
 
-An ASI plugin for Crimson Desert 2.02.00. Read the limitations before you
+An ASI plugin for Crimson Desert 2.03.00. Read the limitations before you
 install it.
 
 ## What it does
@@ -141,7 +141,7 @@ behind a paid tier.
 
 ## Compatibility
 
-Built against Crimson Desert 2.02.00, executable 1.0.0.2850. A game patch moves
+Built against Crimson Desert 2.03.00, executable 1.0.0.2944. A game patch moves
 the addresses it reads, and the mod checks each one against the running game
 before touching it, so a patched game gets a mod that does nothing rather than a
 crash.
