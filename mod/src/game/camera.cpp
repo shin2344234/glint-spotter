@@ -77,11 +77,19 @@ namespace gs::camera
         const uintptr_t expect = base + sig::kCameraTPSUpdate;
         const bool inImage = held >= base && held < base + size;
         // The update is known by its first bytes, which read the fade weight
-        // at this+0x338, and not by its address: the 11 September patch moved
-        // every function and the address check refused a correct slot.
-        const bool looksLikeUpdate = inImage &&
-            gs::rtti::Readable(reinterpret_cast<const void*>(held), sizeof(sig::kCameraUpdatePrologue)) &&
-            memcmp(reinterpret_cast<const void*>(held), sig::kCameraUpdatePrologue, sizeof(sig::kCameraUpdatePrologue)) == 0;
+        // off this, and not by its address: the 11 September patch moved
+        // every function and the address check refused a correct slot. The
+        // field's own displacement is left out of the compare. The 17
+        // September patch moved it from +0x338 to +0x340 and nothing else in
+        // those bytes, and the vtable has already been named by RTTI, so the
+        // shape is the check and the offset is not.
+        bool looksLikeUpdate = inImage &&
+            gs::rtti::Readable(reinterpret_cast<const void*>(held), sizeof(sig::kCameraUpdatePrologue));
+        for (size_t i = 0; looksLikeUpdate && i < sizeof(sig::kCameraUpdatePrologue); ++i)
+        {
+            if (i >= sig::kCameraUpdateFieldAt && i < sig::kCameraUpdateFieldAt + 3) continue;
+            if (reinterpret_cast<const uint8_t*>(held)[i] != sig::kCameraUpdatePrologue[i]) looksLikeUpdate = false;
+        }
         if (inImage && !looksLikeUpdate)
         {
             GS_LOG_ERR("[camera] slot %d holds 0x%p and it does not start like the update (recorded at 0x%p); not hooking",

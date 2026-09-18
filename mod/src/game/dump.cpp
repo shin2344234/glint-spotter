@@ -7,6 +7,7 @@
 
 #include "core/log.h"
 #include "game/rtti.h"
+#include "game/signatures.h"
 
 namespace gs::dump
 {
@@ -206,8 +207,11 @@ namespace gs::dump
             const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(entity + 0x68);
             if (comps < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(comps), 0x80)) return;
             comp = *reinterpret_cast<const uintptr_t*>(comps + 0x30);
-            if (comp < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(comp), 0x440)) return;
-            sub = *reinterpret_cast<const uintptr_t*>(comp + 0x438);
+            // The sub-object's offset comes from signatures.h: 2944 moved it
+            // from +0x438 to +0x440, and a copy here would have stayed behind.
+            if (comp < 0x10000 ||
+                !gs::rtti::Readable(reinterpret_cast<const void*>(comp), gs::sig::kOff_Gimmick_Sub + 8)) return;
+            sub = *reinterpret_cast<const uintptr_t*>(comp + gs::sig::kOff_Gimmick_Sub);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {

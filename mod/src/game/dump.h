@@ -18,7 +18,7 @@ namespace gs::dump
     void EntityComponents(const char* tag, uintptr_t entity, size_t bytesEach);
 
     // Just the gimmick component at +0x30, and the sub-object it keeps at
-    // +0x438. Used on several nodes at once, with the flash on and again
+    // kOff_Gimmick_Sub (+0x440 on 2944). Used on several nodes at once, with the flash on and again
     // with it off: the field that means "this one is glinting" is the one
     // that moves for the revealed node and for no other.
     void GimmickState(const char* tag, uintptr_t entity, size_t bytes);

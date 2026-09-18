@@ -93,12 +93,13 @@ namespace
             const auto* remove = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinServerRemove);
             if (!gs::rtti::Readable(create, sizeof(gs::sig::kPinCreatePrologue))) return false;
             if (!gs::rtti::Readable(remove, sizeof(gs::sig::kPinRemovePrologue))) return false;
-            const auto* added = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kMarkerAdded);
-            if (!gs::rtti::Readable(added, sizeof(gs::sig::kMarkerAddedPrologue))) return false;
+            // The map's marker-added handler used to be checked here as well.
+            // Nothing calls it, its prologue is shared by hundreds of functions,
+            // and on 2944 where it went is not settled, so it no longer decides
+            // whether the two calls below are made.
             g_bytesOk =
                 memcmp(create, gs::sig::kPinCreatePrologue, sizeof(gs::sig::kPinCreatePrologue)) == 0 &&
-                memcmp(remove, gs::sig::kPinRemovePrologue, sizeof(gs::sig::kPinRemovePrologue)) == 0 &&
-                memcmp(added, gs::sig::kMarkerAddedPrologue, sizeof(gs::sig::kMarkerAddedPrologue)) == 0;
+                memcmp(remove, gs::sig::kPinRemovePrologue, sizeof(gs::sig::kPinRemovePrologue)) == 0;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {

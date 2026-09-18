@@ -460,6 +460,19 @@ namespace
                 // the same class by RTTI, and that vtable is as good.
                 for (size_t i = 0; i < n && !vt; ++i)
                     if (found[i].vtableVa && strcmp(found[i].name, e.name) == 0) vt = found[i].vtableVa;
+                // The sweep keeps only the families in kKeywords, and the alert
+                // system is in none of them. On 2850 its address matched, so that
+                // never showed; the 17 September patch to 2944 lost it for a whole
+                // session while the class sat in the image under the same name.
+                // A class the sweep missed gets a search of its own.
+                if (!vt)
+                {
+                    gs::typescan::ClassInfo own[4]{};
+                    const char* const kw[] = {ShortName(e.name)};
+                    const size_t m = gs::typescan::FindClasses(kw, 1, own, 4);
+                    for (size_t i = 0; i < m && !vt; ++i)
+                        if (own[i].vtableVa && strcmp(own[i].name, e.name) == 0) vt = own[i].vtableVa;
+                }
                 if (vt)
                 {
                     ++sigStale;
