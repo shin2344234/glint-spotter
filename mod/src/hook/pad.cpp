@@ -21,7 +21,14 @@ namespace
     int g_loggedPad = -2;            // the slot the log last named, -2 before it named any
     uint32_t g_lastHuntMs = 0;       // when the hunt across all four slots last ran
     constexpr uint32_t kHuntEveryMs = 1000;
-    std::atomic<uint32_t> g_buzzUntil{0};
+    // A buzz is a run of equal pulses: on for g_buzzOn, off for g_buzzOff,
+    // g_buzzCount times, from g_buzzStart. A single buzz is a run of one.
+    // g_buzzStart is written last, so Pump never pairs a new start with an
+    // old shape for longer than one of its own passes.
+    std::atomic<uint32_t> g_buzzStart{0};
+    std::atomic<uint32_t> g_buzzOn{0};
+    std::atomic<uint32_t> g_buzzOff{0};
+    std::atomic<uint32_t> g_buzzCount{0};
     std::atomic<uint16_t> g_buzzStrength{0};
     bool g_buzzing = false;
     using SetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_VIBRATION*);
@@ -135,11 +142,16 @@ namespace gs::pad
         return true;
     }
 
-    void Buzz(uint16_t strength, uint32_t ms)
+    void Buzz(uint16_t strength, uint32_t ms) { Pulses(strength, ms, 0, 1); }
+
+    void Pulses(uint16_t strength, uint32_t onMs, uint32_t offMs, uint32_t count)
     {
         const uint32_t now = GetTickCount();
         g_buzzStrength.store(strength);
-        g_buzzUntil.store(now + ms ? now + ms : 1);
+        g_buzzOn.store(onMs);
+        g_buzzOff.store(offMs);
+        g_buzzCount.store(count);
+        g_buzzStart.store(now ? now : 1);
     }
 
     void Pump()
@@ -150,8 +162,15 @@ namespace gs::pad
         const bool viaXInput = g_setState && g_pad >= 0;
         const bool viaDirect = !viaXInput && gs::hidpad::CanRumble();
         if (!viaXInput && !viaDirect) return;
-        const uint32_t until = g_buzzUntil.load();
-        const bool want = until != 0 && static_cast<int32_t>(GetTickCount() - until) < 0;
+        bool want = false;
+        const uint32_t start = g_buzzStart.load();
+        if (start)
+        {
+            const uint32_t on = g_buzzOn.load();
+            const uint32_t period = on + g_buzzOff.load();
+            const uint32_t elapsed = GetTickCount() - start;
+            want = period != 0 && elapsed / period < g_buzzCount.load() && elapsed % period < on;
+        }
         if (want == g_buzzing) return;
         g_buzzing = want;
         if (viaXInput)

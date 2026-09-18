@@ -45,6 +45,10 @@ namespace gs::pad
     // costs one call and arrives the instant the pin lands.
     void Buzz(uint16_t strength, uint32_t ms);
 
+    // The same, as `count` separate pulses with `offMs` of stillness between.
+    // Pump runs every 50 ms, so a gap much under that does not survive.
+    void Pulses(uint16_t strength, uint32_t onMs, uint32_t offMs, uint32_t count);
+
     // Apply or clear a pending buzz. Called from the polling loop.
     void Pump();
 

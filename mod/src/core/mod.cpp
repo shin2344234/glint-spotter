@@ -36,6 +36,8 @@ namespace
     std::atomic<bool> g_stop{false};
     HANDLE g_thread = nullptr;
     HANDLE g_keyThread = nullptr;
+    HANDLE g_tableThread = nullptr;
+    uint32_t g_startedMs = 0;
     uint32_t g_key = 0x91;
     uint16_t g_chord = 0x00C0;
     uint32_t g_chordHold = 300;
@@ -1006,6 +1008,43 @@ namespace
     // 50 ms steps so a press is not missed, edge-detected so a held key fires
     // once. On its own thread because the worker spends up to 25 seconds inside
     // a scan, and session seven's press landed in one and was never seen.
+    // The level gimmick table, on a thread of its own.
+    //
+    // It used to be tried once per turn of the loop that looks for the
+    // flash's component, and one turn of that loop is a heap pass of thirteen
+    // to seventeen seconds once the world exists. So the table, which is one
+    // module global and thirty milliseconds of reading, waited behind it every
+    // launch: on 18 September the world was there at 08:18:09 and the table
+    // at 08:18:23, and a press at 08:18:15 found nothing to look in. It needs
+    // nothing but the global, so it is tried twice a second until it answers,
+    // and again whenever it has been dropped.
+    DWORD WINAPI TableThread(LPVOID)
+    {
+        while (!g_stop.load())
+        {
+            if (gs::lgso::Count() == 0 && gs::lgso::Load() > 0 && gs::Settings::Get().verbose)
+            {
+                gs::lgso::LogKinds();
+                gs::lgso::LogCatalog(40, 64);
+            }
+            // Ready is both halves: the flash's component, which the worker
+            // finds, and this table, which a press looks in. Either can come
+            // first, and this thread sees both, so it says so. Two distinct
+            // pulses, once a session, so it cannot be taken for a pin landing,
+            // which is one long one.
+            static bool readySaid = false;
+            if (!readySaid && gs::player::SpecialComponent() != 0 && gs::lgso::Count() > 0)
+            {
+                readySaid = true;
+                GS_LOG_OK("ready to mark in %llu ms: the flash's component and the table are both in hand",
+                          static_cast<unsigned long long>(GetTickCount() - g_startedMs));
+                if (gs::Settings::Get().rumble) gs::pad::Pulses(30000, 200, 200, 2);
+            }
+            Sleep(500);
+        }
+        return 0;
+    }
+
     DWORD WINAPI KeyThread(LPVOID)
     {
         bool wasDown = false;
@@ -1034,7 +1073,6 @@ namespace
         return 0;
     }
 
-    uint32_t g_startedMs = 0;
 
     // The player's special mode component: the object the flash flag is read
     // out of, and at startup the way in to the player himself.
@@ -1215,10 +1253,19 @@ namespace
         // Session seventeen's fast pass took a 48 KB registry entry for the
         // player's component. Real heap arenas are megabytes.
         opt.minRegionBytes = 1024 * 1024;
+        // The player walk runs on another thread and can find the component in
+        // his own block while this is still reading. On 18 September it did,
+        // seven milliseconds after this walk began, and the walk went on for
+        // thirteen seconds with the answer already in hand. So the walk asks
+        // between regions whether it is still wanted.
+        opt.stop = [] { return g_stop.load() || gs::player::SpecialComponent() != 0; };
         std::vector<gs::scan::Hit> hits;
         const gs::scan::Report rep = gs::scan::FindPointers(needles, nn, hits, opt);
-        GS_LOG("fast pass %d: %zu candidate vtable(s), %zu hit(s) in %llu ms", attempt + 1,
-               nn, hits.size(), static_cast<unsigned long long>(rep.microseconds / 1000));
+        GS_LOG("fast pass %d: %zu candidate vtable(s), %zu hit(s) in %llu ms%s", attempt + 1,
+               nn, hits.size(), static_cast<unsigned long long>(rep.microseconds / 1000),
+               rep.stopped ? ", stopped early because the component turned up another way" : "");
+        if (rep.stopped)
+            return gs::player::SpecialComponent() != 0 && FindSpecialComponent(attempt);
         DropPointerTables(hits);
         for (const gs::scan::Hit& h : hits)
         {
@@ -1380,6 +1427,7 @@ namespace
         g_chord = cfg.chord;
         g_chordHold = cfg.holdMs;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
+        g_tableThread = CreateThread(nullptr, 0, TableThread, nullptr, 0, nullptr);
         GS_LOG("press %s (VK %02X), or hold the pad chord 0x%04X for %lu ms, to mark whatever the "
                "crosshair is on", gs::Settings::KeyName(cfg.key), cfg.key, cfg.chord,
                static_cast<unsigned long>(cfg.holdMs));
@@ -1395,23 +1443,9 @@ namespace
         // attempt, and a registry entry must never be taken for the player.
         for (int attempt = 0; attempt < 900 && !g_stop.load(); ++attempt)
         {
-            // The level gimmick table, which is what a press actually reads.
-            //
-            // It hung off the end of this loop until 0.50.1, which was fine
-            // while the loop always finished in forty seconds. With the heap
-            // walk switched off the loop can wait minutes, and session
-            // ninety-eight is the result: the camera gave a press a perfect
-            // position, and the press had nothing to look in. Nothing was
-            // marked all session.
-            //
-            // The table needs a module global and nothing else. It has no
-            // business waiting for the player.
-            if (gs::lgso::Count() == 0 && gs::lgso::Load() > 0 && gs::Settings::Get().verbose)
-            {
-                gs::lgso::LogKinds();
-                gs::lgso::LogCatalog(40, 64);
-            }
-
+            // The level gimmick table used to be read here, and then off the
+            // end of this loop before that. Both made a press wait on the
+            // hunt below. TableThread reads it now.
             if (FindSpecialComponent(attempt)) break;
             if (attempt == 0)
                 GS_LOG("no world yet. Waiting for the actor manager, which answers once the save "
@@ -1540,6 +1574,8 @@ namespace gs::Mod
         if (!processTerminating && g_thread) WaitForSingleObject(g_thread, 3000);
         if (!processTerminating && g_keyThread) WaitForSingleObject(g_keyThread, 1000);
         if (g_keyThread) { CloseHandle(g_keyThread); g_keyThread = nullptr; }
+        if (!processTerminating && g_tableThread) WaitForSingleObject(g_tableThread, 2000);
+        if (g_tableThread) { CloseHandle(g_tableThread); g_tableThread = nullptr; }
         gs::hidpad::Stop(processTerminating);
         // The vtable slots go back only when the process is staying up. On
         // teardown the game is leaving anyway, and a write to its memory from

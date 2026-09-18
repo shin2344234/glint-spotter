@@ -584,7 +584,9 @@ namespace gs::mapicon
         // screen when a pin lands, so this buzz is the only thing that tells
         // it happened, and it should not be waiting behind a feature that
         // might not survive the frame.
-        if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 220);
+        // 450 ms, up from 220: at 220 a pin landing mid-fight or on a horse
+        // was easy to miss.
+        if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 450);
 
         // The same icon on the minimap, only when the ini asks.
         //

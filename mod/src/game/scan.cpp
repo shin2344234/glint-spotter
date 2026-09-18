@@ -130,6 +130,11 @@ namespace gs::scan
 
         while (addr < limit && out.size() < opt.maxHits)
         {
+            if (opt.stop && opt.stop())
+            {
+                rep.stopped = true;
+                break;
+            }
             MEMORY_BASIC_INFORMATION mbi{};
             if (VirtualQuery(addr, &mbi, sizeof(mbi)) != sizeof(mbi)) break;
             rep.regionsSeen++;

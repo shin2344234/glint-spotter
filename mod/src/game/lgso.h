@@ -19,8 +19,8 @@
 // manager+0x58 and indexes it by a plain u32.
 //
 // A record is 0x70 bytes and owns lists in the usual {pointer, count,
-// capacity} shape. A list's elements are 0xC8 bytes each and carry a
-// forty-byte Transform at +0x64: quaternion, then position, then scale. That
+// capacity} shape. A list's elements are 0xD8 bytes each (0xC8 on 2850) and carry a
+// forty-byte Transform at +0x74 (+0x64 on 2850): quaternion, then position, then scale. That
 // is the same Transform the .palevel files on disk carry, which is two
 // independent sources agreeing on one layout.
 //

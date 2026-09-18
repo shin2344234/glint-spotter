@@ -60,6 +60,10 @@ namespace gs::scan
         // Wall clock ceiling. Time is what the player notices, not bytes.
         uint64_t timeBudgetMs = 4000;
 
+        // Asked once per region; true ends the walk there. For a walk whose
+        // answer can turn up some other way while it runs.
+        bool (*stop)() = nullptr;
+
         size_t maxHits = 256;
 
         // Regions smaller than this are skipped. The tables that pair vtables
@@ -104,6 +108,7 @@ namespace gs::scan
         size_t rawMatches = 0;           // pointer matched
         size_t rejectedNoRoom = 0;       // matched but too near the end of its region
         uint64_t microseconds = 0;
+        bool stopped = false;            // Options::stop asked for it
         bool timeBudgetHit = false;
     };
 

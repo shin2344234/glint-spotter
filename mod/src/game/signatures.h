@@ -282,8 +282,15 @@ constexpr uintptr_t kOff_Lgso_Records  = 0x58;
 // The positions are real and far: (-11896, 714, -2027) and (-4442, 410,
 // -3879) with the player near (-9711, 569, -4260), and they sit beside the
 // gimmick map icons the game creates for itself out there.
-constexpr uintptr_t kOff_LgsoData_Stride    = 0xC8;
-constexpr uintptr_t kOff_LgsoData_Transform = 0x64;
+//
+// 2944 put sixteen bytes in front of the Transform. Seth's first session on
+// it read record 0's first element as position (0, 0.729, 0), scale 0.68,
+// which is that same quaternion, and the table came out as 1385 placements
+// where 2850 had 17728, so no press and no flash found anything. The game's
+// own walkers now step by 0xD8 (0x004985D0: add r14, 0xd8) and read the
+// position at +0x84, +0x88, +0x8C, which puts the Transform at +0x74.
+constexpr uintptr_t kOff_LgsoData_Stride    = 0xD8;
+constexpr uintptr_t kOff_LgsoData_Transform = 0x74;
 constexpr uintptr_t kOff_Transform_Pos      = 0x10;   // after the quaternion
 
 constexpr uintptr_t kGimmickVtable         = 0x055B7800;
