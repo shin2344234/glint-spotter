@@ -53,8 +53,16 @@ namespace
             for (uint32_t i = 0; i < count && n < cap; ++i)
             {
                 const uintptr_t rec = arr[i];
-                if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x70)) continue;
-                for (uintptr_t off = 0; off + 16 <= 0x70 && n < cap; off += 8)
+                // The first list in the record that yields placements, looked
+                // for out to +0x100. 2944 put sixteen records' only list at
+                // +0x90, which the old 0x70 limit never reached: 345
+                // placements, mostly dungeons, tunnels and camps. Most records
+                // also keep a second copy of their list past +0x70, which is
+                // why only the first is taken; taking every one read the whole
+                // table twice.
+                if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x100)) continue;
+                bool took = false;
+                for (uintptr_t off = 0; off + 16 <= 0x100 && n < cap && !took; off += 8)
                 {
                     const uintptr_t a2 = *reinterpret_cast<const uintptr_t*>(rec + off);
                     const uint32_t c = *reinterpret_cast<const uint32_t*>(rec + off + 8);
@@ -63,6 +71,7 @@ namespace
                     if (c == 0 || c > cap2 || cap2 > 100000) continue;
                     const size_t span = static_cast<size_t>(c) * gs::sig::kOff_LgsoData_Stride;
                     if (!gs::rtti::Readable(reinterpret_cast<const void*>(a2), span)) continue;
+                    const int before = n;
                     for (uint32_t e = 0; e < c && n < cap; ++e)
                     {
                         const uintptr_t el = a2 + static_cast<uintptr_t>(e) * gs::sig::kOff_LgsoData_Stride;
@@ -110,6 +119,7 @@ namespace
                             if (!ok || w < 2) pl.name[0] = 0;
                         }
                     }
+                    took = n > before;
                 }
             }
         }

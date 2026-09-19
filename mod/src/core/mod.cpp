@@ -1186,16 +1186,26 @@ namespace
         // when its two copies agree and land inside the map, which cannot
         // happen before he exists. So the walk waits for it, and when it
         // does run there is a right answer to find.
+        //
+        // The camera is not enough on its own. On 19 September it read valid
+        // at launch, before any world, and the walk started at once and held
+        // this thread for sixty-five seconds; hawkeye69's 1.1.24 log did the
+        // same for four and a half minutes. The actor manager is only looked
+        // for from this thread, so nothing found the player in that time and
+        // every press drew a picture pin with no game marker behind it. So
+        // the walk also waits for the minimap to have run for about ten
+        // seconds: by then the manager has normally handed the player over
+        // and the walk is never needed.
         {
             const gs::camera::Pose cam = gs::camera::Read();
-            if (!cam.valid || !cam.worldValid)
+            if (!cam.valid || !cam.worldValid || gs::tick::Count() < 600)
             {
                 static bool said = false;
                 if (!said)
                 {
                     said = true;
-                    GS_LOG("the heap walk is waiting for the camera to report a world "
-                           "position, which is how it knows the player exists");
+                    GS_LOG("the heap walk is waiting for the world: the camera reporting a "
+                           "position and the minimap running for ten seconds");
                 }
                 return false;
             }
@@ -1556,10 +1566,35 @@ namespace
     }
 }
 
+namespace
+{
+    // The ASI loader puts this plugin into a second, small process at every
+    // launch as well as the game; Private Storage Master's log measures it at
+    // a 671744 byte image. Starting there rotated the logs a second time with
+    // nothing written, so each launch used two of the five slots and only
+    // .02 and .04 ever held a session. The game's image is hundreds of
+    // megabytes, and the size is checked rather than the name because the
+    // name is what the two may share.
+    bool HostIsGame()
+    {
+        const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+        if (!base) return false;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+        return nt->OptionalHeader.SizeOfImage > 64u * 1024 * 1024;
+    }
+
+    bool g_hosted = false;
+}
+
 namespace gs::Mod
 {
     void Initialize(void* selfModule)
     {
+        if (!HostIsGame()) return;
+        g_hosted = true;
         _set_invalid_parameter_handler(OnInvalidParameter);
         g_self = selfModule;
         Log::Start(selfModule);
@@ -1568,6 +1603,7 @@ namespace gs::Mod
 
     void Shutdown(bool processTerminating)
     {
+        if (!g_hosted) return;
         g_stop.store(true);
         // On process teardown the loader lock is held and other threads are
         // already gone, so waiting on one is how a plugin hangs an exit.

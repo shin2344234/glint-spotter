@@ -1654,11 +1654,19 @@ extern "C" void gs_OnMinimapTick(void* self)
                     // three kilometres out during a flash. A press is the
                     // player asking for a specific thing, and if they can see a
                     // tower across the map they can have it.
+                    //
+                    // Except looking down. Erinion stood over an undiscovered
+                    // fast travel point on 19 September, aimed straight at it
+                    // and got nothing: it was twenty-one metres out, 0.1 off
+                    // the line, and the floor threw it away. Pointed twenty
+                    // degrees or more below level, the crosshair is on the
+                    // ground near you and near is what is meant.
                     const float pressReach = gs::Settings::Get().pressReach;
+                    const float pressNear = sv.fy / flen < -0.36f ? 5.0f : 25.0f;
                     const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oy, sv.oz,
                                                        sv.fx / flen, sv.fz / flen, sv.fy / flen,
                                                        gs::Settings::Get().rodMetres, 0.0f, 25.0f,
-                                                       25.0f,
+                                                       pressNear,
                                                        pressReach > 0.0f ? pressReach : 1.0e9f,
                                                        sight, sightDist, 4, true);
 

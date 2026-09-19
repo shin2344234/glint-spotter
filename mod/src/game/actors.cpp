@@ -59,11 +59,47 @@ namespace
     uint32_t g_lastScanMs = 0;
 
     std::mutex g_setMutex;
-    gs::actors::Entity g_set[kSetMax];
+    // On the heap. Entity has members that start non-zero, so as a plain
+    // array it is 575 KB of the file itself.
+    gs::actors::Entity* const g_set = new gs::actors::Entity[kSetMax];
     float g_lastPlayerX = 0, g_lastPlayerZ = 0;
     bool g_lastPlayerValid = false;
     int g_setN = 0;
+    uint32_t g_setGen = 0;   // bumped whenever the set is dropped outside Refresh
     uintptr_t g_buf[kBufMax];              // pool read scratch, tick thread only
+
+    // Where each object sits in the working set, for Refresh alone. A plain
+    // table, with no allocation per pass. Twice the set's size, so it is never more than half
+    // full and a probe stays short.
+    constexpr int kSlotBits = 13;
+    constexpr int kSlotCount = 1 << kSlotBits;
+    static_assert(kSlotCount >= kSetMax * 2, "the slot table must stay under half full");
+    struct Slot { uintptr_t ptr; int at; };
+    Slot g_slotOf[kSlotCount];
+
+    int SlotHome(uintptr_t p)
+    {
+        // Objects are 16-byte aligned, so the low bits carry nothing.
+        const uint64_t h = static_cast<uint64_t>(p >> 4) * 0x9E3779B97F4A7C15ull;
+        return static_cast<int>(h >> (64 - kSlotBits));
+    }
+
+    void SlotsClear() { memset(g_slotOf, 0, sizeof(g_slotOf)); }
+
+    void SlotPut(uintptr_t p, int at)
+    {
+        for (int i = SlotHome(p);; i = (i + 1) & (kSlotCount - 1))
+            if (g_slotOf[i].ptr == 0 || g_slotOf[i].ptr == p) { g_slotOf[i] = {p, at}; return; }
+    }
+
+    int SlotFind(uintptr_t p, int missing)
+    {
+        for (int i = SlotHome(p);; i = (i + 1) & (kSlotCount - 1))
+        {
+            if (g_slotOf[i].ptr == p) return g_slotOf[i].at;
+            if (g_slotOf[i].ptr == 0) return missing;
+        }
+    }
     uint32_t g_lastSaidMs = 0;
 
     // Both are defined further down, next to the code they belong with, and
@@ -728,6 +764,7 @@ namespace gs::actors
         GS_LOG("[actors] %s, so the %d entities held from before it are dropped", why ? why : "the world changed",
                g_setN);
         g_setN = 0;
+        ++g_setGen;
         g_lastPlayerValid = false;
     }
 
@@ -803,7 +840,25 @@ namespace gs::actors
 
         const int n = ReadPools(mgr, g_buf, kBufMax);
 
-        std::lock_guard<std::mutex> lock(g_setMutex);
+        // The set is worked on as a copy and put back in one short step.
+        //
+        // This held g_setMutex for the whole pass, and a pass is every pool
+        // entry read, positioned and looked up by class: on 19 September
+        // hawkeye69's world offered 5920 entries against 1034 held, with a
+        // nested search for each. The automatic marker reads the set under
+        // that lock from the game's own UI thread every quarter second while
+        // the flash is up, so a frame that arrived mid-pass waited for all of
+        // it, and he saw the flash stutter.
+        // On the heap, once, for the same reason as g_set.
+        static gs::actors::Entity* const s_work = new gs::actors::Entity[kSetMax];
+        int workN = 0;
+        uint32_t gen = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_setMutex);
+            workN = g_setN;
+            for (int i = 0; i < workN; ++i) s_work[i] = g_set[i];
+            gen = g_setGen;
+        }
 
         // A world change frees every object in the set at once, and the set
         // would otherwise go on reading them for twelve seconds. That is where
@@ -852,13 +907,13 @@ namespace gs::actors
         {
             const float dx = pp.x - g_lastPlayerX, dz = pp.z - g_lastPlayerZ;
             const float moved = std::sqrt(dx * dx + dz * dz);
-            if (moved > kTeleportMetres && g_setN > 0)
+            if (moved > kTeleportMetres && workN > 0)
             {
                 char why[64];
                 snprintf(why, sizeof(why), "the player moved %.0f metres in one pass", moved);
                 GS_LOG("[actors] %s, so the %d entities from where he was are dropped rather "
-                       "than read for another twelve seconds", why, g_setN);
-                g_setN = 0;
+                       "than read for another twelve seconds", why, workN);
+                workN = 0;
             }
         }
         g_lastPlayerValid = pp.valid;
@@ -866,17 +921,19 @@ namespace gs::actors
 
         // Drop the stale.
         int w = 0;
-        for (int i = 0; i < g_setN; ++i)
-            if (nowMs - g_set[i].lastSeenMs <= kKeepMs) g_set[w++] = g_set[i];
-        g_setN = w;
+        for (int i = 0; i < workN; ++i)
+            if (nowMs - s_work[i].lastSeenMs <= kKeepMs) s_work[w++] = s_work[i];
+        workN = w;
+
+        SlotsClear();
+        for (int i = 0; i < workN; ++i) SlotPut(s_work[i].ptr, i);
 
         int gimmicks = 0, dupes = 0, noPos = 0;
         for (int i = 0; i < n; ++i)
         {
             const uintptr_t e = g_buf[i];
-            int j = 0;
-            for (; j < g_setN; ++j) if (g_set[j].ptr == e) break;
-            if (j < g_setN && g_set[j].lastSeenMs == nowMs) { ++dupes; continue; }   // listed twice this pass
+            int j = e ? SlotFind(e, workN) : workN;
+            if (j < workN && s_work[j].lastSeenMs == nowMs) { ++dupes; continue; }   // listed twice this pass
             float pos[3];
             const char* how = "";
             if (!pp.valid || !WorldPos(e, pp, pos, &how))
@@ -889,10 +946,10 @@ namespace gs::actors
                 }
                 continue;
             }
-            if (j == g_setN)
+            if (j == workN)
             {
-                if (g_setN >= kSetMax) continue;
-                Entity& ne = g_set[g_setN];
+                if (workN >= kSetMax) continue;
+                Entity& ne = s_work[workN];
                 ne = Entity{};
                 ne.ptr = e;
                 ne.eid = EidOf(e);
@@ -910,9 +967,10 @@ namespace gs::actors
                     ne.locked = locked;
                     if (!ne.name[0]) GimmickName(ne.gimmickComp, ne.name, sizeof(ne.name));
                 }
-                ++g_setN;
+                SlotPut(e, workN);
+                ++workN;
             }
-            Entity& en = g_set[j];
+            Entity& en = s_work[j];
             en.x = pos[0]; en.y = pos[1]; en.z = pos[2];
             en.how = how;
             en.lastSeenMs = nowMs;
@@ -967,32 +1025,40 @@ namespace gs::actors
             }
         }
         int glints = 0, lits = 0, pickups = 0;
-        for (int i = 0; i < g_setN; ++i)
+        for (int i = 0; i < workN; ++i)
         {
-            if (g_set[i].gimmick) ++gimmicks;
-            if (g_set[i].glint) ++glints;
-            if (g_set[i].lit) ++lits;
-            if (g_set[i].pickup) ++pickups;
+            if (s_work[i].gimmick) ++gimmicks;
+            if (s_work[i].glint) ++glints;
+            if (s_work[i].lit) ++lits;
+            if (s_work[i].pickup) ++pickups;
         }
-        g_gimmicks = gimmicks;
-        g_glints = glints;
-        g_lits = lits;
-        g_pickups = pickups;
+        {
+            std::lock_guard<std::mutex> lock(g_setMutex);
+            // Forget ran while this pass was reading, so what it read is the
+            // old world's. Dropped, and the next pass starts from nothing.
+            if (gen != g_setGen) return static_cast<uint32_t>(n);
+            for (int i = 0; i < workN; ++i) g_set[i] = s_work[i];
+            g_setN = workN;
+            g_gimmicks = gimmicks;
+            g_glints = glints;
+            g_lits = lits;
+            g_pickups = pickups;
+        }
 
         // A line every thirty seconds so the log says what the ray has to work with.
         if (nowMs - g_lastSaidMs > 30000)
         {
             g_lastSaidMs = nowMs;
             GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d gimmicks, %d of them pickups, %d with the glint byte set, %d lit",
-                   n, dupes, noPos, g_setN, gimmicks, pickups, glints, lits);
+                   n, dupes, noPos, workN, gimmicks, pickups, glints, lits);
             // The nearest pickups, which is what the player can actually see.
             int order[6];
             float dist[6];
             int named = 0;
-            for (int i = 0; i < g_setN; ++i)
+            for (int i = 0; i < workN; ++i)
             {
-                if (!g_set[i].pickup) continue;
-                const float dx = g_set[i].x - pp.x, dz = g_set[i].z - pp.z;
+                if (!s_work[i].pickup) continue;
+                const float dx = s_work[i].x - pp.x, dz = s_work[i].z - pp.z;
                 const float d = std::sqrt(dx * dx + dz * dz);
                 if (named == 6 && d >= dist[5]) continue;
                 int pos2 = named < 6 ? named : 5;
@@ -1002,18 +1068,18 @@ namespace gs::actors
             }
             for (int k = 0; k < named; ++k)
             {
-                const Entity& en = g_set[order[k]];
+                const Entity& en = s_work[order[k]];
                 GS_LOG("[actors]   pickup eid %08X \"%s\"%s%s at (%.1f, %.1f, %.1f), %.0f away, from %s", en.eid,
                        en.name[0] ? en.name : "?", en.knowledge ? ", knowledge" : "", en.locked ? ", locked" : "",
                        en.x, en.y, en.z, dist[k], en.how ? en.how : "?");
             }
             int shown = 0;
-            for (int i = 0; i < g_setN && shown < 3; ++i)
-                if (g_set[i].glint)
+            for (int i = 0; i < workN && shown < 3; ++i)
+                if (s_work[i].glint)
                 {
                     ++shown;
-                    const float dx = g_set[i].x - pp.x, dz = g_set[i].z - pp.z;
-                    GS_LOG("[actors]   byte set on eid %08X at (%.1f, %.1f, %.1f), %.0f away", g_set[i].eid, g_set[i].x, g_set[i].y, g_set[i].z, std::sqrt(dx * dx + dz * dz));
+                    const float dx = s_work[i].x - pp.x, dz = s_work[i].z - pp.z;
+                    GS_LOG("[actors]   byte set on eid %08X at (%.1f, %.1f, %.1f), %.0f away", s_work[i].eid, s_work[i].x, s_work[i].y, s_work[i].z, std::sqrt(dx * dx + dz * dz));
                 }
         }
         return static_cast<uint32_t>(n);
