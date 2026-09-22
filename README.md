@@ -9,15 +9,16 @@ all and press a button, and it pins that instead. The pin lands on the world
 map where the thing stands, so you can walk away and come back to it, and the
 map's own Remove Marker takes it off again when you are done.
 
-An ASI plugin for Crimson Desert 2.03.00. Read the limitations before you
-install it.
+An ASI plugin for Crimson Desert, game build 1.0.0.2949. Read the limitations
+before you install it.
 
 ## What it does
 
 - **Marks a glint automatically.** Hold Blinding Flash with a glint on your
   crosshair and a pin appears where it is, once the crosshair has held it for a
   second. Distance is not the limit it used to be: a glint six hundred metres
-  out marks as readily as one at twenty.
+  out marks as readily as one at twenty. A glint you have already looted is
+  left alone, because the mod reads which ones your save has as taken.
 - **Marks anything on request.** Right bumper, left bumper and A together, or
   F9 on the keyboard, pins whatever the crosshair is on. Ruins, camps, ore veins,
   bridges, dungeon mouths, shops. Anything the game keeps in its own level data,
@@ -27,9 +28,9 @@ install it.
 - **Removes a pin with the map's own button.** Put the cursor on one and the
   prompt changes to Remove Marker, the same as for a marker you placed by hand.
   Press it and the pin goes.
-- **Refuses a glint it can see a hill in front of.** Where the game has collision
-  loaded, the mod samples the ground along the sight line and will not pin
-  through a rise. Past that range it says nothing rather than guessing.
+- **Pins a glint behind a hill.** The flash draws glints through terrain, so a
+  glint you can see is one you can mark. Where the game has collision loaded,
+  the log says when ground rises across the sight line.
 
 ## Installing
 
@@ -38,9 +39,8 @@ the game closed, copy `GlintSpotter.asi` into `bin64` next to it. Copy
 `GlintSpotter.ini` there as well, or let the mod write one the first time it
 runs.
 
-Start the game, load a save, and wait. The mod needs about forty seconds after
-the world appears to find everything it needs, and it hitches the game once
-while it does. That is a known problem, see below.
+Start the game and load a save. The mod is ready about a second after the world
+appears, and the pad pulses twice to say so.
 
 ## Using it
 
@@ -92,10 +92,10 @@ Read these before you decide whether the build is for you.
   dropped them: the mod watches which save file the game opens, so a second
   character has its own. Saving into a slot you have never used before takes
   that save's pins along with it.
-- **The game can freeze for a second or two shortly after a save loads.** The
-  mod is searching memory for your character. It happens once per launch and
-  everything works afterwards. Setting `Scan=0` removes it and stops Blinding
-  Flash marking anything, so it is not much of a trade.
+- **After a game patch, the first load can stall for up to a minute.** The mod
+  finds your character through two addresses it keeps a record of, and when a
+  patch moves them it searches memory instead. That happens once per launch,
+  and everything works afterwards.
 - **Loading a save from inside the game costs a few seconds.** Your pins, the
   press marker and the map buttons come back within a second or two. Blinding
   Flash takes longer, up to about half a minute, because the piece it needs is
@@ -141,10 +141,10 @@ behind a paid tier.
 
 ## Compatibility
 
-Built against Crimson Desert 2.03.00, executable 1.0.0.2944. A game patch moves
-the addresses it reads, and the mod checks each one against the running game
-before touching it, so a patched game gets a mod that does nothing rather than a
-crash.
+Built against Crimson Desert executable 1.0.0.2949, the 21 September patch. A
+game patch moves the addresses it reads, and the mod checks each one against the
+running game before touching it, so a patched game gets a mod that does nothing
+rather than a crash.
 
 It runs alongside other ASI plugins, including Crimson Route and Master Looter.
 It only ever replaces vtable slots it has verified, and it forwards to whatever
