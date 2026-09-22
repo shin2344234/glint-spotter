@@ -12,11 +12,18 @@
 // runtime by RTTI or by byte pattern. Re-derive the constants with
 // docs/investigations/rebase.py, which prints this block for a new exe.
 //
+// 2949, the 21 September patch, put sixteen bytes into the code somewhere
+// between 0x495700 and 0xD77700. Everything above that moved by exactly 0x10
+// and everything below it, the two client pin functions included, did not.
+// Each address below was checked by reading its recorded prologue out of the
+// new exe rather than by assuming the shift. Vtables, the physics facade, the
+// frame offset and the level gimmick manager's global did not move at all.
+//
 // The full write-up is in FEASIBILITY.md.
 
 namespace gs::sig
 {
-    constexpr const char* kExeVersion = "1.0.0.2944";
+    constexpr const char* kExeVersion = "1.0.0.2949";
 
     // The two root UI controls that own every map icon. Slot 35 is the per frame
     // update, slot 170 creates an icon. The vtables are also found by RTTI at
@@ -49,7 +56,7 @@ namespace gs::sig
     // but the bucket lookup is inlined into it: it reads its own table off the
     // root at +0x198 onwards, and root+0x3B0 is now a list the update walks.
     constexpr int kSlotRemoveIcon = 171;
-    constexpr uintptr_t kRemoveIconBody = 0x00DB8AE0;
+    constexpr uintptr_t kRemoveIconBody = 0x00DB8AF0;
 
     // Who asked for a removal. Two functions call the same slot and only
     // one of them is the player pressing delete: the icon builder removes
@@ -60,8 +67,8 @@ namespace gs::sig
     // A record only; no code reads these. They are still the 2850 values. On
     // 2944 slot 171 has thirteen callers instead of two, and 0x00DD3540 is only
     // the likeliest remover by shape. A spy log of a real delete settles it.
-    constexpr uintptr_t kIconRemoverLo = 0x00D77700;
-    constexpr uintptr_t kIconRemoverHi = 0x00D77932;
+    constexpr uintptr_t kIconRemoverLo = 0x00D77710;
+    constexpr uintptr_t kIconRemoverHi = 0x00D77942;
 
     // The alert system root, which owns every on-screen message the game
     // shows: toasts, region changes, item pickups, level ups.
@@ -166,8 +173,8 @@ namespace gs::sig
     // deserializer, and the call it makes. The four deserializers and the
     // create, upsert and erase came out the same size to the byte as on 2850,
     // every prologue matched, and none of the offsets in this chain moved.
-    constexpr uintptr_t kPinCreate       = 0x028C3630;
-    constexpr uintptr_t kPinServerRemove = 0x028C3B00;
+    constexpr uintptr_t kPinCreate       = 0x028C3640;
+    constexpr uintptr_t kPinServerRemove = 0x028C3B10;
     constexpr uint8_t   kPinCreatePrologue[15] = {
         0x4C, 0x89, 0x4C, 0x24, 0x20,   // mov [rsp+0x20], r9
         0x4C, 0x89, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8
@@ -206,7 +213,7 @@ namespace gs::sig
     // argument whole, which is not what 2850 did. Nothing calls this address,
     // and it no longer gates the marker calls: the prologue is shared by
     // hundreds of functions, so it never proved much.
-    constexpr uintptr_t kMarkerAdded = 0x00DC4420;
+    constexpr uintptr_t kMarkerAdded = 0x00DC4430;
     constexpr uint8_t   kMarkerAddedPrologue[16] = {
         0x48, 0x89, 0x5C, 0x24, 0x18,   // mov [rsp+0x18], rbx
         0x55, 0x56, 0x57,               // push rbp, rsi, rdi
@@ -224,7 +231,7 @@ namespace gs::sig
     constexpr uintptr_t kCameraTPSVtable   = 0x057003E0;
     constexpr const char* kCameraTPSClass  = ".?AVPlayerCameraTPSMode@gameClientScript@pa@@";
     constexpr int       kSlotCameraUpdate  = 2;
-    constexpr uintptr_t kCameraTPSUpdate   = 0x011CA540;
+    constexpr uintptr_t kCameraTPSUpdate   = 0x011CA550;
     constexpr uint8_t   kCameraUpdatePrologue[22] = {
         0x48, 0x8B, 0xC4,                         // mov rax, rsp
         0x48, 0x89, 0x58, 0x08,                   // mov [rax+8], rbx
@@ -265,6 +272,14 @@ namespace gs::sig
 // matches. This beats the heap sweep: one read of a fixed global instead of
 // gigabytes of scanning.
 constexpr uintptr_t kLgsoManagerGlobal = 0x06D6E428;
+
+// Globals that hold the ClientActorManager. The startup scan for them reads the
+// whole image a pointer at a time, and while a world is loading that took 42 to
+// 72 seconds on 22 September and four and a half minutes in hawkeye69's 1.1.24
+// log, so the ready buzz came a minute or more after the world. Every 2944 and
+// 2949 log found it at one of these two. They are checked first, against the
+// manager's vtable, and the scan only runs if neither holds one.
+constexpr uintptr_t kActorManagerGlobals[2] = {0x06D69A38, 0x06DDA900};
 constexpr uintptr_t kOff_Lgso_Count    = 0x08;
 constexpr uintptr_t kOff_Lgso_Records  = 0x58;
 
@@ -356,7 +371,7 @@ constexpr uintptr_t kGimmickVtable         = 0x055B7800;
     // and normal out) and what it uses. Found at runtime by byte pattern, with
     // the facade and the frame offset decoded from its own RIP-relative
     // operands; these are the fallback and the record.
-    constexpr uintptr_t kRayCastWrapper   = 0x03A10360;
+    constexpr uintptr_t kRayCastWrapper   = 0x03A10370;
     constexpr uintptr_t kPhysicsFacade    = 0x06A50FF0;
     constexpr uintptr_t kPhysicsFrameOff  = 0x06D56520;
     constexpr int       kSlotCastRay      = 61;   // still 61 on 2944, by TtWorldCastRay's one xref

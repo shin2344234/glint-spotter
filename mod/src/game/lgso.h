@@ -45,7 +45,13 @@ namespace gs::lgso
         uint16_t record = 0;
         uint16_t element = 0;
         char name[56]{};   // the element's own name, empty when it has none
+        uintptr_t at = 0;  // the element itself, good until the manager changes
     };
+
+    // A copy of every placement held, for a caller that walks them all.
+    // Returns how many were copied; `generation`, when given, receives the
+    // Generation() the copy belongs to.
+    int CopyAll(Place* out, int cap, uint32_t* generation = nullptr);
 
     // Every distinct name in the table, with how many placements carry it.
     // Printed once so the log says what kinds are in there and a filter can be
@@ -58,6 +64,11 @@ namespace gs::lgso
     int Load();
 
     int Count();
+
+    // Goes up every time the table is read again or dropped, so a copy taken
+    // with CopyAll can tell it is stale. A count cannot: a new manager can
+    // hold the same number of placements at different addresses.
+    uint32_t Generation();
 
     // The placements the crosshair is on, nearest the player first.
     //
@@ -102,11 +113,16 @@ namespace gs::lgso
     // failed. The search was two dimensional over a three dimensional world,
     // so a bridge twelve hundred metres above my head counted as being on
     // the crosshair because its shadow was.
+    //
+    // `skip`, when given, drops a placement before the nearest `n` are kept.
+    // Filtering the kept list afterwards instead would let `n` skipped
+    // placements hide every one behind them for as long as the aim held.
     int OnBearing(float px, float pz, float ox, float oy, float oz,
                   float ux, float uz, float slope,
                   float maxPerp, float perpFrac, float maxVert,
                   float minFromPlayer, float maxRange,
-                  Place* out, float* dists, int n, bool anyKind = false);
+                  Place* out, float* dists, int n, bool anyKind = false,
+                  bool (*skip)(const Place&) = nullptr);
 
     // The single placement closest to the view line, whatever it is called
     // and however far off the line it sits.

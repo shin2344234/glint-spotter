@@ -25,6 +25,7 @@
 #include "game/realpin.h"
 #include "core/pinstore.h"
 #include "game/saveslot.h"
+#include "game/savemap.h"
 #include "hook/pad.h"
 #include "core/settings.h"
 
@@ -782,6 +783,22 @@ namespace
     uint32_t g_targetLastMs = 0;
     int g_glintWinsLeft = 40;
     int g_tableLogsLeft = 120;
+    int g_doneLogsLeft = 60;
+
+    // A placement the save has in its Clear state has been taken, so there is
+    // no glint there any more. Dropped inside the table query, before its
+    // nearest 32 are kept, so the next placement on the line gets its turn.
+    bool SkipTaken(const gs::lgso::Place& p)
+    {
+        if (!gs::savemap::Completed(p.at)) return false;
+        if (g_doneLogsLeft > 0)
+        {
+            --g_doneLogsLeft;
+            GS_LOG("[auto] skipping record %u element %u \"%s\" at (%.1f, %.1f, %.1f): the save has it taken",
+                   p.record, p.element, p.name[0] ? p.name : "unnamed", p.x, p.y, p.z);
+        }
+        return true;
+    }
     int g_quietLogsLeft = 20;
     // How close two automatic pins may be. Eight metres was arbitrary and
     // it is wide enough to swallow a neighbour: glints come in clusters and
@@ -1026,7 +1043,7 @@ namespace
                                              v.fx / flen, v.fz / flen, v.fy / flen,
                                              8.0f, autoFrac, 25.0f,
                                              5.0f, reach > 0.0f ? reach : 1.0e9f,
-                                             table, tableAngles, 32);
+                                             table, tableAngles, 32, false, SkipTaken);
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
                 // the thing I am looking at.
@@ -1117,17 +1134,19 @@ namespace
             const float vlen = std::sqrt(v.fx * v.fx + v.fz * v.fz);
             const float ux = vlen > 1.0e-3f ? v.fx / vlen : 0.0f;
             const float uz = vlen > 1.0e-3f ? v.fz / vlen : 1.0f;
-            GS_LOG("[auto] the table has %d placement(s) on the line", tableN);
+            GS_LOG("[auto] the table has %d placement(s) on the line; the save has %d placement(s) as taken",
+                   tableN, gs::savemap::TakenCount());
             for (int k = 0; k < tableN && k < 4; ++k)
             {
                 const float ddx = table[k].x - v.ox, ddz = table[k].z - v.oz;
                 const float perp = std::fabs(ddx * uz - ddz * ux);
                 const float deg = std::atan2(perp, tableAngles[k]) * 57.2958f;
                 GS_LOG("[auto]   %srecord %u element %u \"%s\" at (%.1f, %.1f, %.1f), %.0f metres "
-                       "out, %.1f off the line, %.2f degrees",
+                       "out, %.1f off the line, %.2f degrees, at 0x%p",
                        k == tablePick ? "TAKEN " : "      ", table[k].record, table[k].element,
                        table[k].name[0] ? table[k].name : "unnamed",
-                       table[k].x, table[k].y, table[k].z, tableAngles[k], perp, deg);
+                       table[k].x, table[k].y, table[k].z, tableAngles[k], perp, deg,
+                       reinterpret_cast<void*>(table[k].at));
             }
         }
 
@@ -1177,6 +1196,25 @@ namespace
                            missRefused ? ", and the Kinds list refuses it" : "");
                 else
                     GS_LOG("[auto] nothing pinned, and the table has nothing on this bearing at all");
+
+                // And the rest of what is on the line, named, whatever the
+                // Kinds list thinks of it. Seth flashed at glints from a
+                // mountain on 22 September and the only line about them said
+                // which one placement was closest, so what he could see and
+                // what the mod refused could not be matched up.
+                if (qlen > 1.0e-3f)
+                {
+                    gs::lgso::Place near_[6];
+                    float along[6], perp[6];
+                    const int nn = gs::lgso::NearLine(v.ox, v.oz, v.fx / qlen, v.fz / qlen,
+                                                      2000.0f, near_, along, perp, 6);
+                    for (int k = 0; k < nn; ++k)
+                        GS_LOG("[auto]   on the line: \"%s\" record %u element %u, %.0f m out, "
+                               "%.1f off the line, y %.0f%s",
+                               near_[k].name[0] ? near_[k].name : "unnamed", near_[k].record,
+                               near_[k].element, along[k], perp[k], near_[k].y,
+                               gs::lgso::Worth(near_[k].name) ? "" : "  (the Kinds list refuses it)");
+                }
             }
             pick = -1;
         }
@@ -1415,20 +1453,25 @@ namespace
             {
                 const float eye[3] = {v.ox, v.oy, v.oz};
                 const float tgt[3] = {chosen.x, chosen.y, chosen.z};
-                float blockedAt = 0.0f;
+                float blockedAt = 0.0f, blockedHeight = 0.0f;
                 const gs::physics::Sight s =
-                    gs::physics::LineOfSight(eye, tgt, 16, &blockedAt);
-                if (s == gs::physics::Sight::Blocked)
+                    gs::physics::LineOfSight(eye, tgt, 16, &blockedAt, &blockedHeight);
+                // Said, not obeyed. The flash draws its glints through
+                // terrain, so ground in the way is not a reason the player
+                // cannot see the thing, and the readings were wrong besides:
+                // on 22 September Seth stood on a mountain at 625 with a
+                // glint at 537 in plain view and this called a ridge at 621
+                // two hundred metres out. It refused three glints that
+                // session and passed one.
+                if (s == gs::physics::Sight::Blocked && g_losLogsLeft > 0 &&
+                    now - g_losLastMs > 3000)
                 {
-                    if (g_losLogsLeft > 0 && now - g_losLastMs > 3000)
-                    {
-                        --g_losLogsLeft;
-                        g_losLastMs = now;
-                        GS_LOG("[auto] \"%s\" is behind ground that rises across the sight line "
-                               "%.0f metres out; not pinned", chosen.name, blockedAt);
-                    }
-                    g_heldSinceMs = now;   // start the hold again rather than spin
-                    return;
+                    --g_losLogsLeft;
+                    g_losLastMs = now;
+                    GS_LOG("[auto] \"%s\" has ground across the sight line %.0f metres out, %.0f "
+                           "high against your %.0f and its %.0f. Pinned anyway: the flash shows "
+                           "glints through hills.", chosen.name, blockedAt, blockedHeight,
+                           eye[1], chosen.y);
                 }
             }
 

@@ -58,7 +58,8 @@ namespace gs::physics
     enum class Sight { Clear, Blocked, Unknown };
 
     // `blockedAt` receives how far along the line the ground got in the way.
-    Sight LineOfSight(const float* eye, const float* target, int steps, float* blockedAt);
+    Sight LineOfSight(const float* eye, const float* target, int steps, float* blockedAt,
+                      float* blockedHeight = nullptr);
 
     // Log the facade's vtable, the world pointer and the frame offset.
     void LogState();

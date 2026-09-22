@@ -43,6 +43,8 @@ add_library(GlintSpotter SHARED
     src/hook/inlinehook.cpp
     src/hook/iathook.cpp
     src/hook/tick.cpp
+    src/hook/watch.cpp
+    src/game/savemap.cpp
     src/hook/thunk.asm
     src/hook/pad.cpp
     src/hook/hidpad.cpp

@@ -204,7 +204,8 @@ namespace gs::physics
         return h;
     }
 
-    Sight LineOfSight(const float* eye, const float* target, int steps, float* blockedAt)
+    Sight LineOfSight(const float* eye, const float* target, int steps, float* blockedAt,
+                      float* blockedHeight)
     {
         const char* why = nullptr;
         if (!Ready(&why)) return Sight::Unknown;
@@ -246,11 +247,17 @@ namespace gs::physics
             // mountain is not three metres. One sample over the line is a bank
             // at the side of a road, so it takes two in a row.
             const float clearance = 8.0f + flat * t * 0.03f;
+            // Above the line is the whole test. A second clause requiring the
+            // ground to clear the target as well was tried on 22 September
+            // and taken back: looking down, the line never drops below the
+            // target, so the clause changed nothing; looking up, it cleared
+            // ridges that do cut the line. No caller refuses on this now.
             if (groundY > py + clearance)
             {
                 if (++blockedRun >= 2)
                 {
                     if (blockedAt) *blockedAt = flat * t;
+                    if (blockedHeight) *blockedHeight = groundY;
                     return Sight::Blocked;
                 }
             }

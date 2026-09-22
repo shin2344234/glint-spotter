@@ -339,6 +339,10 @@ namespace gs::Settings
             {
                 g_values.verbose = atoi(val) != 0;
             }
+            else if (_stricmp(key, "Watch") == 0)
+            {
+                g_values.watch = atoi(val);
+            }
             else if (_stricmp(key, "Scan") == 0)
             {
                 g_values.scan = atoi(val) != 0;

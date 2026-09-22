@@ -21,6 +21,7 @@ namespace
     gs::lgso::Place g_places[kMax];
     int g_n = 0;
     uintptr_t g_loadedFrom = 0;
+    uint32_t g_generation = 0;
 
     uintptr_t Deref(uintptr_t at)
     {
@@ -89,6 +90,7 @@ namespace
                         pl.x = p[0]; pl.y = p[1]; pl.z = p[2];
                         pl.record = static_cast<uint16_t>(i);
                         pl.element = static_cast<uint16_t>(e);
+                        pl.at = el;
                         pl.name[0] = 0;
                         // The name. A pointer near the head of an element
                         // leads to string descriptors, each a character
@@ -139,6 +141,7 @@ namespace gs::lgso
         if (!mgr)
         {
             if (g_loadedFrom) GS_LOG("[lgso] the manager is gone; the table is dropped");
+            if (g_loadedFrom || g_n) ++g_generation;
             g_loadedFrom = 0;
             g_n = 0;
             return 0;
@@ -146,6 +149,7 @@ namespace gs::lgso
         if (mgr == g_loadedFrom && g_n > 0) return g_n;
         g_n = ReadInto(mgr, g_places, kMax);
         g_loadedFrom = mgr;
+        ++g_generation;
         GS_LOG_OK("[lgso] %d placement(s) read from the level gimmick table at 0x%p", g_n,
                   reinterpret_cast<void*>(mgr));
         return g_n;
@@ -157,11 +161,18 @@ namespace gs::lgso
         return g_n;
     }
 
+    uint32_t Generation()
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        return g_generation;
+    }
+
     int OnBearing(float px, float pz, float ox, float oy, float oz,
                   float ux, float uz, float slope,
                   float maxPerp, float perpFrac, float maxVert,
                   float minFromPlayer, float maxRange,
-                  Place* out, float* dists, int n, bool anyKind)
+                  Place* out, float* dists, int n, bool anyKind,
+                  bool (*skip)(const Place&))
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         int found = 0;
@@ -204,6 +215,7 @@ namespace gs::lgso
             const float fx = g_places[i].x - px, fz = g_places[i].z - pz;
             const float fromPlayer = std::sqrt(fx * fx + fz * fz);
             if (fromPlayer < minFromPlayer) continue;
+            if (skip && skip(g_places[i])) continue;
             int pos = found;
             while (pos > 0 && dists[pos - 1] > along)
             {
@@ -439,6 +451,15 @@ namespace gs::lgso
                    recs[r].name[0] ? recs[r].name : "(no name)",
                    Worth(recs[r].name) ? "" : "(refused)");
         }
+    }
+
+    int CopyAll(Place* out, int cap, uint32_t* generation)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (generation) *generation = g_generation;
+        const int n = g_n < cap ? g_n : cap;
+        memcpy(out, g_places, sizeof(Place) * static_cast<size_t>(n));
+        return n;
     }
 
     int Near(float px, float pz, Place* out, int n)

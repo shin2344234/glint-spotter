@@ -789,6 +789,35 @@ namespace gs::actors
         // session forty-nine did exactly that: zero globals at startup, the
         // answer latched, and the entity set stayed empty for the whole
         // session. An empty answer is not an answer, so it is asked again.
+        if (!g_slotsScanned)
+        {
+            // The recorded globals first. Only one that holds an object with
+            // the manager's vtable counts.
+            const uintptr_t image = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+            int known = 0;
+            for (uintptr_t rva : gs::sig::kActorManagerGlobals)
+            {
+                const uintptr_t inst = Deref(image + rva);
+                if (inst && Deref(inst) == vt && known < 16) g_slots[known++] = image + rva;
+            }
+            if (known > 0)
+            {
+                g_slotsScanned = true;
+                g_lastScanMs = nowMs;
+                g_slotN = known;
+                GS_LOG("[actors] %d recorded global(s) hold the ClientActorManager; no scan needed", known);
+            }
+            else
+            {
+                // Not built yet, most likely. Ask the recorded globals again
+                // on the next call rather than start the slow scan, and give
+                // them a minute before deciding the patch moved them.
+                static uint32_t firstMs = 0;
+                if (!firstMs) firstMs = nowMs ? nowMs : 1;
+                if (nowMs - firstMs < 60000) return false;
+                GS_LOG("[actors] neither recorded global has held the manager for a minute; scanning the image");
+            }
+        }
         if (!g_slotsScanned || (g_slotN == 0 && nowMs - g_lastScanMs > 3000))
         {
             g_slotsScanned = true;
@@ -1303,6 +1332,35 @@ namespace gs::actors
         const int c = g_setN < n ? g_setN : n;
         memcpy(out, g_set, static_cast<size_t>(c) * sizeof(Entity));
         return c;
+    }
+
+    bool Owner(uintptr_t p, Entity* out, const char** role)
+    {
+        std::lock_guard<std::mutex> lock(g_setMutex);
+        for (int i = 0; i < g_setN; ++i)
+        {
+            const Entity& e = g_set[i];
+            const char* r = nullptr;
+            if (p == e.ptr) r = "the actor";
+            else if (p == e.gimmickComp) r = "the gimmick component";
+            else if (p == e.detectComp) r = "the detect component";
+            else if (p == e.effectComp) r = "the effect component";
+            if (!r) continue;
+            *out = e;
+            *role = r;
+            return true;
+        }
+        // The gimmick's lighting sub-object, read through each gimmick.
+        for (int i = 0; i < g_setN; ++i)
+        {
+            const Entity& e = g_set[i];
+            if (!e.gimmickComp) continue;
+            if (Deref(e.gimmickComp + gs::sig::kOff_Gimmick_Sub) != p) continue;
+            *out = e;
+            *role = "the gimmick's lighting sub-object";
+            return true;
+        }
+        return false;
     }
 
     int Count()

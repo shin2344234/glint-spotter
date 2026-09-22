@@ -25,6 +25,8 @@
 #include "hook/pad.h"
 #include "hook/hidpad.h"
 #include "hook/tick.h"
+#include "hook/watch.h"
+#include "game/savemap.h"
 #include "game/rtti.h"
 #include "game/scan.h"
 #include "game/signatures.h"
@@ -1068,6 +1070,18 @@ namespace
                 // answering, which after a load is the whole problem.
                 gs::player::Recover();
             }
+            // The live watch, when the ini asks for it: armed once the player
+            // is found, so the entity set can name what each call is about,
+            // and again every three seconds for threads started since.
+            if (gs::Settings::Get().watch && gs::player::Read().valid)
+            {
+                static uint32_t lastArm = 0, lastDrain = 0;
+                if (now - lastArm >= 3000) { lastArm = now; gs::watch::Arm(); }
+                if (now - lastDrain >= 250) { lastDrain = now; gs::watch::Drain(); }
+            }
+            // Which placements the save has taken, for the automatic marker.
+            // A thread of its own; it waits for the world and the table.
+            if (gs::player::Read().valid) gs::savemap::Start();
             Sleep(50);
         }
         return 0;
@@ -1605,6 +1619,7 @@ namespace gs::Mod
     {
         if (!g_hosted) return;
         g_stop.store(true);
+        if (!processTerminating) gs::watch::Disarm();
         // On process teardown the loader lock is held and other threads are
         // already gone, so waiting on one is how a plugin hangs an exit.
         if (!processTerminating && g_thread) WaitForSingleObject(g_thread, 3000);
@@ -1613,6 +1628,7 @@ namespace gs::Mod
         if (!processTerminating && g_tableThread) WaitForSingleObject(g_tableThread, 2000);
         if (g_tableThread) { CloseHandle(g_tableThread); g_tableThread = nullptr; }
         gs::hidpad::Stop(processTerminating);
+        gs::savemap::Stop(processTerminating);
         // The vtable slots go back only when the process is staying up. On
         // teardown the game is leaving anyway, and a write to its memory from
         // inside DllMain buys nothing.

@@ -197,6 +197,7 @@ namespace gs::Settings
         // What stays on is what explains a decision: which placement was taken
         // and why, the sight line band by band on a press, and every pin.
         bool verbose = false;
+        int watch = 0;         // Watch=1: the flash flag; Watch=2: the save list counts. A diagnostic
 
         // Whether to walk the heap looking for the player's own component.
         //

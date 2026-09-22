@@ -83,6 +83,11 @@ namespace gs::actors
     // The accumulated set. Entries older than twelve seconds are dropped on
     // Refresh. `out` receives up to n entries; returns how many.
     int Snapshot(Entity* out, int n);
+
+    // Which entity a pointer belongs to, and as what: the actor itself, one
+    // of its gimmick, detect or effect components, or the gimmick's lighting
+    // sub-object. For the live watch, which is handed raw arguments.
+    bool Owner(uintptr_t p, Entity* out, const char** role);
     int Count();
     int GimmickCount();
     int GlintCount();
