@@ -164,4 +164,7 @@ rather than a crash.
 
 It runs alongside other ASI plugins, including Crimson Route and Master Looter.
 It only ever replaces vtable slots it has verified, and it forwards to whatever
-was there before, so two mods on one slot both work.
+was there before, so two mods on one slot both work. Order matters for one of
+them. Crimson Route only hooks the map's update while the game's own function is
+still there, so the mod now waits for Route to hook it first. Through 1.1.29 it
+went first, and Route drew no routes on the minimap or the world map.
