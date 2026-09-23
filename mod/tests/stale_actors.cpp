@@ -42,6 +42,7 @@ namespace gs::aim
 namespace gs::typescan
 {
     bool ModuleRange(uintptr_t& base, size_t& size) { base = 0; size = 0; return false; }
+    int FindGlobals(uintptr_t, uintptr_t*, int) { return 0; }
 }
 namespace gs::Settings
 {

@@ -133,4 +133,48 @@ namespace gs::typescan
 
         return found;
     }
+
+    int FindGlobals(uintptr_t vtable, uintptr_t* out, int cap)
+    {
+        uintptr_t base = 0;
+        size_t size = 0;
+        if (!ModuleRange(base, size)) return 0;
+        int n = 0;
+        // Region by region, so a guard page or an unmapped section in the image
+        // ends one region's walk and not the whole scan. Code holds no pointers
+        // to heap objects, so the execute regions are skipped.
+        uintptr_t at = base;
+        while (at < base + size && n < cap)
+        {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (!VirtualQuery(reinterpret_cast<const void*>(at), &mbi, sizeof(mbi))) break;
+            const uintptr_t rb = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+            const uintptr_t re = rb + mbi.RegionSize;
+            const DWORD data = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY;
+            const bool walk = mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) && (mbi.Protect & data) != 0;
+            if (walk)
+            {
+                __try
+                {
+                    const uintptr_t* p = reinterpret_cast<const uintptr_t*>((rb + 7) & ~uintptr_t(7));
+                    const uintptr_t* end = reinterpret_cast<const uintptr_t*>(re);
+                    for (; p + 1 <= end && n < cap; ++p)
+                    {
+                        const uintptr_t v = *p;
+                        // A heap pointer: high, aligned, outside the image.
+                        if (v < 0x10000 || (v & 7) != 0 || v > 0x00007FFFFFFFFFFFull ||
+                            (v >= base && v < base + size)) continue;
+                        if (!rtti::Readable(reinterpret_cast<const void*>(v), 8)) continue;
+                        if (*reinterpret_cast<const uintptr_t*>(v) != vtable) continue;
+                        out[n++] = reinterpret_cast<uintptr_t>(p);
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+            at = re;
+        }
+        return n;
+    }
 }

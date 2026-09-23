@@ -33,4 +33,9 @@ namespace gs::typescan
 
     // Where the module starts and how far it runs, for callers that want to log it.
     bool ModuleRange(uintptr_t& base, size_t& size);
+
+    // Every qword in the module's data sections that points at an object whose
+    // first qword is this vtable, up to cap of them. It reads the whole image,
+    // so it is for when a recorded global has stopped holding the object.
+    int FindGlobals(uintptr_t vtable, uintptr_t* out, int cap);
 }

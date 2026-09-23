@@ -21,8 +21,6 @@
 
 namespace
 {
-    constexpr uintptr_t kRecordVtable = 0x058AFFC8;   // FieldGimmickSaveData
-    constexpr uintptr_t kFieldVtable  = 0x058B0A48;   // FieldSaveData
     constexpr size_t kRecordBytes = 0x3D8;            // the stride of the records in their vector
     constexpr uintptr_t kOff_FieldRecords = 0x30;     // FieldSaveData's first vector, as its copy builds it
     constexpr size_t kOff_Pos = 0x1E8, kOff_OriginPos = 0x210, kOff_State = 0x21C;
@@ -77,6 +75,49 @@ namespace
     uintptr_t g_lastComp = 0;     // the component Fields last reached
 
     uintptr_t g_base = 0;
+
+    // The classes the route passes through, as recorded on 2976. Each is held
+    // up against the running game's RTTI and found again by name when a patch
+    // has moved it, which every patch so far has.
+    struct Cls { uintptr_t rva; const char* name; uintptr_t va; };
+    Cls g_cls[] = {
+        {0x058B0B20, ".?AVFieldGimmickSaveData@pa@@", 0},
+        {0x058AF0E0, ".?AVFieldSaveData@pa@@", 0},
+        {0x05B25988, ".?AVServerActorManager@pa@@", 0},
+        {0x05B257A8, ".?AVServerUserActor@pa@@", 0},
+        {0x05B1D318, ".?AVServerContentsMiscActorComponent@pa@@", 0},
+    };
+    enum { kRecord, kField, kServerManager, kServerUser, kContentsMisc, kClassCount };
+    uintptr_t Vt(int i) { return g_cls[i].va; }
+
+    bool ResolveClasses()
+    {
+        int stale = 0;
+        for (Cls& c : g_cls)
+        {
+            c.va = gs::rtti::VtableIs(reinterpret_cast<const void*>(g_base + c.rva), c.name) ? g_base + c.rva : 0;
+            if (!c.va) ++stale;
+        }
+        if (stale)
+        {
+            const char* kw[kClassCount];
+            for (int i = 0; i < kClassCount; ++i) kw[i] = g_cls[i].name;
+            static gs::typescan::ClassInfo found[16];
+            const size_t n = gs::typescan::FindClasses(kw, kClassCount, found, 16);
+            for (Cls& c : g_cls)
+                for (size_t i = 0; i < n && !c.va; ++i)
+                    if (found[i].vtableVa && strcmp(found[i].name, c.name) == 0) c.va = found[i].vtableVa;
+        }
+        for (const Cls& c : g_cls)
+        {
+            if (c.va) continue;
+            GS_LOG_ERR("[savemap] RTTI does not offer %s, so taken glints are not filtered", c.name);
+            return false;
+        }
+        if (stale)
+            GS_LOG_OK("[savemap] %d of %d save classes had moved and RTTI found each one again", stale, kClassCount);
+        return true;
+    }
     std::vector<gs::lgso::Place> g_places;
     std::vector<uintptr_t> g_fields;          // FieldSaveData objects
     std::unordered_map<uintptr_t, uint32_t> g_lastState;   // record address -> state last seen
@@ -178,7 +219,7 @@ namespace
         if (!CopyOut(at, b, sizeof(b))) return false;
         uintptr_t vt;
         memcpy(&vt, b, 8);
-        if (vt != g_base + kRecordVtable) return false;
+        if (vt != Vt(kRecord)) return false;
         r.at = at;
         r.hasPos = PosOf(b, kOff_OriginPos, r.pos) || PosOf(b, kOff_Pos, r.pos);
         memcpy(&r.state, b + kOff_State, 4);
@@ -190,7 +231,7 @@ namespace
 
     // A FieldSaveData's record vector: a pointer at +0x30 and a u32 count at
     // +0x38, which is how the load routine walks it (ServerContentsMisc slot
-    // 10, 0x028B8CCF: rsi = [r12+0x30], end = rsi + [r12+0x38] * 0x3D8).
+    // 10 on 2949, 0x028B8CCF: rsi = [r12+0x30], end = rsi + [r12+0x38] * 0x3D8).
     // Checked by the vtable of the first and last record, so a wrong reading
     // of the layout gives nothing rather than rubbish.
     bool FieldRecords(uintptr_t field, uintptr_t* begin, size_t* count)
@@ -201,8 +242,8 @@ namespace
             return false;
         if (!ptr || !n) { *begin = 0; *count = 0; return ptr == 0 || n == 0; }
         if (n > 200000) return false;
-        if (Deref(ptr) != g_base + kRecordVtable ||
-            Deref(ptr + (static_cast<size_t>(n) - 1) * kRecordBytes) != g_base + kRecordVtable)
+        if (Deref(ptr) != Vt(kRecord) ||
+            Deref(ptr + (static_cast<size_t>(n) - 1) * kRecordBytes) != Vt(kRecord))
             return false;
         *begin = ptr;
         *count = n;
@@ -305,9 +346,9 @@ namespace
     // ---- where they are, with no search ----
     //
     // The load routine is slot 10 of the player's server
-    // ServerContentsMiscActorComponent (0x028B72F0). For each FieldSaveData
-    // in the save it builds a copy and inserts it with 0x028EEC50 into a map
-    // at this+0x2C0, keyed by the field. From the insert:
+    // ServerContentsMiscActorComponent (0x028B7360 on 2976). For each
+    // FieldSaveData in the save it builds a copy and inserts it with 0x028EECC0
+    // into a map at this+0x2C0, keyed by the field. From the insert:
     //
     //   map +0x00 u32 bucket count   +0x04 u32 entries   +0x08 u32 capacity
     //       +0x10 buckets, 0x100 bytes each of {u32 n, then {key, index} pairs}
@@ -319,43 +360,125 @@ namespace
     // [manager+0xB8] a list whose first entry is the player's ServerUserActor,
     // and [actor+0x68]+0x368 the component. Every step is checked against its
     // vtable.
-    constexpr uintptr_t kServerManagerGlobal = 0x06DA6798;
-    constexpr uintptr_t kServerManagerVtable = 0x05B25B98;
-    constexpr uintptr_t kServerUserVtable    = 0x05B255A0;
-    constexpr uintptr_t kContentsMiscVtable  = 0x05B1D168;
+    //
+    // The game fills that global at runtime and no code in the image writes it
+    // with a plain move, so it cannot be read out of a new exe the way the
+    // vtables can. When it does not hold the manager, the image is searched for
+    // the global that does, and the log names it so the record can be brought
+    // up to date. 0x06DA6798 on 2949; 0x06DA67D8 on 2976, from the search in
+    // Seth's 23 September playtest.
+    constexpr uintptr_t kServerManagerGlobal = 0x06DA67D8;
+    constexpr int kUsersMax = 64;   // list entries asked for the component
     constexpr uintptr_t kOff_Mgr_User = 0xB8, kOff_Actor_Comps = 0x68, kOff_Comps_ContentsMisc = 0x368;
     constexpr uintptr_t kOff_FieldMap = 0x2C0, kOff_Map_Count = 0x04, kOff_Map_Entries = 0x18;
     constexpr uintptr_t kOff_Node_Field = 0x08;
 
     const char* g_why = "";
 
-    uintptr_t ServerComponent()
+    // Globals the search found holding the manager, for when the recorded one
+    // does not.
+    uintptr_t g_mgrGlobals[4];
+    int g_mgrGlobalN = 0;
+    int g_mgrScans = 0;
+    uint32_t g_mgrScanMs = 0;
+
+    uintptr_t ServerManager()
     {
-        const uintptr_t mgr = Deref(g_base + kServerManagerGlobal);
-        if (!mgr || Deref(mgr) != g_base + kServerManagerVtable) { g_why = "no server actor manager"; return 0; }
-        // +0xB8 points at a list, and the player is in it: the 15:30 wide read
-        // logged "[ServerActorManager+0xB8]+0x0 holds it". The first entries
-        // are checked rather than the first alone.
-        const uintptr_t list = Deref(mgr + kOff_Mgr_User);
-        uintptr_t user = 0;
-        for (int i = 0; list && i < 8 && !user; ++i)
+        const uintptr_t vt = Vt(kServerManager);
+        const uintptr_t recorded = Deref(g_base + kServerManagerGlobal);
+        if (recorded && Deref(recorded) == vt) return recorded;
+        for (int i = 0; i < g_mgrGlobalN; ++i)
         {
-            const uintptr_t a = Deref(list + 8ull * i);
-            if (a && Deref(a) == g_base + kServerUserVtable) user = a;
+            const uintptr_t m = Deref(g_mgrGlobals[i]);
+            if (m && Deref(m) == vt) return m;
         }
-        if (!user) { g_why = "no player on the server"; return 0; }
-        const uintptr_t comps = Deref(user + kOff_Actor_Comps);
-        const uintptr_t comp = comps ? Deref(comps + kOff_Comps_ContentsMisc) : 0;
-        if (!comp || Deref(comp) != g_base + kContentsMiscVtable) { g_why = "no ServerContentsMiscActorComponent"; return 0; }
-        return comp;
+        // Three searches at most, a minute apart. Fields is only asked once the
+        // world is up, so the first one comes after the manager exists.
+        const uint32_t now = GetTickCount();
+        if (g_mgrScans >= 3 || (g_mgrScans && now - g_mgrScanMs < 60000)) return 0;
+        ++g_mgrScans;
+        g_mgrScanMs = now;
+        g_mgrGlobalN = gs::typescan::FindGlobals(vt, g_mgrGlobals, 4);
+        const uint32_t took = GetTickCount() - now;
+        if (!g_mgrGlobalN)
+        {
+            GS_LOG("[savemap] no global in the image holds the ServerActorManager (searched in %u ms)", took);
+            return 0;
+        }
+        for (int i = 0; i < g_mgrGlobalN; ++i)
+            GS_LOG_OK("[savemap] the ServerActorManager is held at global +0x%llX, not the recorded +0x%llX "
+                      "(searched in %u ms)", static_cast<unsigned long long>(g_mgrGlobals[i] - g_base),
+                      static_cast<unsigned long long>(kServerManagerGlobal), took);
+        return Deref(g_mgrGlobals[0]);
     }
 
-    bool Fields(std::vector<uintptr_t>& out)
+    struct Candidate { uintptr_t comp; int entry; uintptr_t actorVt; };
+
+    // Every ServerContentsMiscActorComponent hanging off an actor in the
+    // manager's list, the player's first.
+    //
+    // +0xB8 points at a list, and the player is in it: the 15:30 wide read
+    // logged "[ServerActorManager+0xB8]+0x0 holds it". Only the
+    // ServerUserActor was asked, and after a save loaded mid-session that
+    // stopped working. The retest on 23 September dumped the list forty
+    // seconds after loading slot103: entry 0 was the ServerUserActor with
+    // nothing at +0x368, and the only component was on entry 3, a
+    // ServerChildOnlyInGameActor, which is also what the 22 September wide
+    // read found at the component's +0x08. So every entry is asked, the
+    // players before the rest, and Fields takes the first whose field map
+    // holds FieldSaveData.
+    int ServerComponents(Candidate* out, int cap)
+    {
+        const uintptr_t mgr = ServerManager();
+        if (!mgr) { g_why = "no server actor manager"; return 0; }
+        const uintptr_t list = Deref(mgr + kOff_Mgr_User);
+        int n = 0;
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            for (int i = 0; list && i < kUsersMax && n < cap; ++i)
+            {
+                const uintptr_t a = Deref(list + 8ull * i);
+                const uintptr_t avt = a ? Deref(a) : 0;
+                if (!avt || (avt == Vt(kServerUser)) != (pass == 0)) continue;
+                const uintptr_t comps = Deref(a + kOff_Actor_Comps);
+                const uintptr_t comp = comps ? Deref(comps + kOff_Comps_ContentsMisc) : 0;
+                if (comp && Deref(comp) == Vt(kContentsMisc)) out[n++] = {comp, i, avt};
+            }
+        }
+        if (!n) g_why = list ? "no ServerContentsMiscActorComponent on any actor in the list" : "the manager has no list";
+        return n;
+    }
+
+    // What the list held when the records could not be reached, so a log from
+    // a failure says which step broke and on which entry.
+    void DumpUsers()
+    {
+        const uintptr_t mgr = ServerManager();
+        if (!mgr) { GS_LOG("[savemap]   no ServerActorManager in any known global"); return; }
+        const uintptr_t list = Deref(mgr + kOff_Mgr_User);
+        GS_LOG("[savemap]   manager 0x%p, list at +0x%llX is 0x%p", reinterpret_cast<void*>(mgr),
+               static_cast<unsigned long long>(kOff_Mgr_User), reinterpret_cast<void*>(list));
+        for (int i = 0; list && i < kUsersMax; ++i)
+        {
+            const uintptr_t a = Deref(list + 8ull * i);
+            if (!a) continue;
+            const uintptr_t avt = Deref(a);
+            const char* an = avt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(avt)) : nullptr;
+            if (!an) continue;
+            const uintptr_t comps = Deref(a + kOff_Actor_Comps);
+            const uintptr_t comp = comps ? Deref(comps + kOff_Comps_ContentsMisc) : 0;
+            const uintptr_t cvt = comp ? Deref(comp) : 0;
+            const char* cn = cvt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(cvt)) : nullptr;
+            GS_LOG("[savemap]   entry %d 0x%p %s, components 0x%p, +0x%llX holds 0x%p %s", i,
+                   reinterpret_cast<void*>(a), an, reinterpret_cast<void*>(comps),
+                   static_cast<unsigned long long>(kOff_Comps_ContentsMisc), reinterpret_cast<void*>(comp),
+                   cn ? cn : "(no class)");
+        }
+    }
+
+    bool FieldsOf(uintptr_t comp, std::vector<uintptr_t>& out)
     {
         out.clear();
-        const uintptr_t comp = ServerComponent();
-        if (!comp) return false;
-        g_lastComp = comp;
         const uintptr_t map = comp + kOff_FieldMap;
         uint32_t n = 0;
         if (!CopyOut(map + kOff_Map_Count, &n, 4) || n > 100000) { g_why = "the field map does not read"; return false; }
@@ -366,10 +489,30 @@ namespace
             const uintptr_t node = Deref(entries + 8ull * i);
             if (!node) continue;
             const uintptr_t field = node + kOff_Node_Field;
-            if (Deref(field) == g_base + kFieldVtable) out.push_back(field);
+            if (Deref(field) == Vt(kField)) out.push_back(field);
         }
         if (out.empty()) g_why = "the field map holds no FieldSaveData";
         return !out.empty();
+    }
+
+    bool Fields(std::vector<uintptr_t>& out)
+    {
+        out.clear();
+        Candidate cands[8];
+        const int n = ServerComponents(cands, 8);
+        for (int i = 0; i < n; ++i)
+        {
+            if (!FieldsOf(cands[i].comp, out)) continue;
+            if (cands[i].comp != g_lastComp && Say())
+            {
+                const char* an = gs::rtti::VtableClassName(reinterpret_cast<const void*>(cands[i].actorVt));
+                GS_LOG("[savemap] the records are on list entry %d, a %s, one of %d component(s) in the list",
+                       cands[i].entry, an ? an : "(no class)", n);
+            }
+            g_lastComp = cands[i].comp;
+            return true;
+        }
+        return false;
     }
 
     DWORD WINAPI Run(LPVOID)
@@ -377,8 +520,12 @@ namespace
         size_t size = 0;
         if (!gs::typescan::ModuleRange(g_base, size)) return 0;
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        if (!ResolveClasses()) return 0;
 
-        bool surveyed = false, missSaid = false;
+        // The component the survey was made from. A save loaded mid-session
+        // gives the player a new one, and that save gets a survey of its own.
+        uintptr_t surveyed = 0;
+        bool missSaid = false;
         uint32_t missSince = 0, steadySince = 0;
         int lastCount = -1;
         std::vector<Rec> recs;
@@ -396,20 +543,39 @@ namespace
             if (!Fields(g_fields))
             {
                 if (!missSince) missSince = now;
-                if (!missSaid && now - missSince > 20000 && Say())
+                if (!missSaid && now - missSince > 20000)
                 {
                     missSaid = true;
-                    GS_LOG_ERR("[savemap] the save's gimmick records are out of reach (%s), so taken glints are not "
-                               "filtered", g_why);
+                    // What was taken belongs to the save it was read from. Kept
+                    // through a load, it would hide glints in the next save that
+                    // share nothing with it but a placement.
+                    {
+                        std::lock_guard<std::mutex> lock(g_mutex);
+                        g_taken.clear();
+                    }
+                    if (Say())
+                    {
+                        GS_LOG_ERR("[savemap] the save's gimmick records are out of reach (%s), so taken glints are "
+                                   "not filtered", g_why);
+                        DumpUsers();
+                    }
                 }
                 continue;
             }
+            if (missSaid && Say())
+                GS_LOG_OK("[savemap] the save's gimmick records are in reach again, %u s after they were lost",
+                          (now - missSince) / 1000);
             missSince = 0;
+            missSaid = false;
             ReadAll(recs);
 
-            if (!surveyed)
+            if (surveyed != g_lastComp)
             {
-                surveyed = true;
+                if (surveyed && Say())
+                    GS_LOG("[savemap] the player's server component is new (0x%p, was 0x%p), so a save was loaded; "
+                           "reading its records afresh", reinterpret_cast<void*>(g_lastComp),
+                           reinterpret_cast<void*>(surveyed));
+                surveyed = g_lastComp;
                 size_t total = 0;
                 for (uintptr_t f : g_fields)
                 {

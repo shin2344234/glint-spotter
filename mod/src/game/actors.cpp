@@ -113,52 +113,6 @@ namespace
         return *reinterpret_cast<const uintptr_t*>(at);
     }
 
-    // Every qword in the module's data sections that points at an object whose
-    // first qword is the manager's vtable. Runs once.
-    int FindGlobals(uintptr_t vtable, uintptr_t* out, int cap)
-    {
-        uintptr_t base = 0;
-        size_t size = 0;
-        if (!gs::typescan::ModuleRange(base, size)) return 0;
-        int n = 0;
-        // Region by region, so a guard page or an unmapped section in the image
-        // ends one region's walk and not the whole scan. Code holds no pointers
-        // to heap objects, so the execute regions are skipped.
-        uintptr_t at = base;
-        while (at < base + size && n < cap)
-        {
-            MEMORY_BASIC_INFORMATION mbi{};
-            if (!VirtualQuery(reinterpret_cast<const void*>(at), &mbi, sizeof(mbi))) break;
-            const uintptr_t rb = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
-            const uintptr_t re = rb + mbi.RegionSize;
-            const DWORD data = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY;
-            const bool walk = mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) && (mbi.Protect & data) != 0;
-            if (walk)
-            {
-                __try
-                {
-                    const uintptr_t* p = reinterpret_cast<const uintptr_t*>((rb + 7) & ~uintptr_t(7));
-                    const uintptr_t* end = reinterpret_cast<const uintptr_t*>(re);
-                    for (; p + 1 <= end && n < cap; ++p)
-                    {
-                        const uintptr_t v = *p;
-                        // A heap pointer: high, aligned, outside the image.
-                        if (v < 0x10000 || (v & 7) != 0 || v > 0x00007FFFFFFFFFFFull ||
-                            (v >= base && v < base + size)) continue;
-                        if (!gs::rtti::Readable(reinterpret_cast<const void*>(v), 8)) continue;
-                        if (*reinterpret_cast<const uintptr_t*>(v) != vtable) continue;
-                        out[n++] = reinterpret_cast<uintptr_t>(p);
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                }
-            }
-            at = re;
-        }
-        return n;
-    }
-
     // An entity: readable, with an id whose top byte says player or world
     // object. Master Looter's EntityLike.
     //
@@ -815,7 +769,7 @@ namespace gs::actors
                 static uint32_t firstMs = 0;
                 if (!firstMs) firstMs = nowMs ? nowMs : 1;
                 if (nowMs - firstMs < 60000) return false;
-                GS_LOG("[actors] neither recorded global has held the manager for a minute; scanning the image");
+                GS_LOG("[actors] no recorded global has held the manager for a minute; scanning the image");
             }
         }
         if (!g_slotsScanned || (g_slotN == 0 && nowMs - g_lastScanMs > 3000))
@@ -823,7 +777,7 @@ namespace gs::actors
             g_slotsScanned = true;
             g_lastScanMs = nowMs;
             const int before = g_slotN;
-            g_slotN = FindGlobals(vt, g_slots, 16);
+            g_slotN = gs::typescan::FindGlobals(vt, g_slots, 16);
             if (g_slotN != before || g_slotN > 0)
                 GS_LOG("[actors] %d global(s) in the image hold a ClientActorManager", g_slotN);
         }

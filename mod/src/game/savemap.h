@@ -7,8 +7,8 @@
 // so the flash could pin a sealed artifact taken an hour earlier. The save
 // knows which ones are gone: a load does not spawn them again.
 //
-// It keeps that in FieldGimmickSaveData (vtable 0x058AFFC8 on 2949, 0x3D8
-// bytes, the records of a vector inside FieldSaveData, vtable 0x058B0A48).
+// It keeps that in FieldGimmickSaveData (vtable 0x058B0B20 on 2976, 0x3D8
+// bytes, the records of a vector inside FieldSaveData, vtable 0x058AF0E0).
 // Each record carries the gimmick's origin transform, position at +0x210,
 // and its saved state as a hash at +0x21C, _initStateNameHash. State hashes
 // are Jenkins lookup3 of the state's name (Master Looter's statehash.py).
@@ -23,7 +23,7 @@
 //
 // The records are reached with no search. The player's server
 // ServerContentsMiscActorComponent loads each FieldSaveData into a map at
-// +0x2C0 (its slot 10, 0x028B72F0, inserting with 0x028EEC50), and the
+// +0x2C0 (its slot 10, 0x028B7360, inserting with 0x028EECC0), and the
 // component is found from the server actor manager's global. The route and
 // the map's layout are spelt out in savemap.cpp.
 //
