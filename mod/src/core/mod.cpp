@@ -41,6 +41,7 @@ namespace
     HANDLE g_thread = nullptr;
     HANDLE g_keyThread = nullptr;
     HANDLE g_tableThread = nullptr;
+    HANDLE g_slotThread = nullptr;
     uint32_t g_startedMs = 0;
     uint32_t g_key = 0x91;
     uint16_t g_chord = 0x00C0;
@@ -1102,6 +1103,85 @@ namespace
         return 0;
     }
 
+    // What a vtable holds at index, or 0 if it cannot be read.
+    uintptr_t SlotHolds(uintptr_t vtable, int index)
+    {
+        __try
+        {
+            return reinterpret_cast<const uintptr_t*>(vtable)[index];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
+    // The tick's two slot 35 swaps, each made when its map root is free to take.
+    //
+    // Crimson Route hooks slot 35 on both map roots as well, and it only hooks
+    // a slot that still holds the game's own function. It gets there about
+    // sixteen seconds after launch and this plugin about five, so on 23
+    // September it found neither slot on any launch, logged
+    // minimap_hook=not_installed, and drew no route on either map. With Route
+    // loaded, each swap now waits for Route's hook and stacks on top of it.
+    // Route hooks during startup, well before a save is loaded, so once the
+    // player exists a slot it has not taken is one it never will, and the swap
+    // goes ahead. The two minutes are for a session that never reaches the
+    // world.
+    DWORD WINAPI SlotThread(LPVOID)
+    {
+        const bool route = GetModuleHandleW(L"CrimsonRoute.asi") != nullptr;
+        uintptr_t base = 0;
+        size_t size = 0;
+        gs::typescan::ModuleRange(base, size);
+        if (route)
+            GS_LOG("[tick] Crimson Route is loaded and hooks slot %d on both map roots only while the game's "
+                   "own function is there, so the tick waits for it and stacks on top",
+                   gs::sig::kSlotUpdate);
+
+        // Why a root's swap can go ahead now, or null to keep waiting.
+        const uint32_t start = GetTickCount();
+        auto clear = [&](uintptr_t vt) -> const char* {
+            if (!route) return "";
+            const uintptr_t held = SlotHolds(vt, gs::sig::kSlotUpdate);
+            if (held && (held < base || held >= base + size)) return "Crimson Route has hooked it, stacking on top";
+            if (gs::player::Actor() != 0) return "the player is in the world and Crimson Route never hooked it";
+            if (GetTickCount() - start >= 120000) return "two minutes and Crimson Route never hooked it";
+            return nullptr;
+        };
+
+        bool worldDone = g_worldVt == 0;
+        bool miniDone = g_miniVt == 0;
+        while (!g_stop.load())
+        {
+            if (!worldDone)
+            {
+                if (const char* why = clear(g_worldVt))
+                {
+                    worldDone = true;
+                    if (*why) GS_LOG("[tick] slot %d on the world map root: %s", gs::sig::kSlotUpdate, why);
+                    gs::tick::InstallWorldMap(g_worldVt);
+                }
+            }
+            if (!miniDone)
+            {
+                if (const char* why = clear(g_miniVt))
+                {
+                    miniDone = true;
+                    if (*why) GS_LOG("[tick] slot %d on the minimap root: %s", gs::sig::kSlotUpdate, why);
+                    if (gs::tick::Install(g_miniVt))
+                    {
+                        gs::tick::SetProbe(gs::Settings::Get().verbose);
+                        GS_LOG("[tick] probe on: root fields that change are logged every 3 s");
+                    }
+                }
+            }
+            if (worldDone && miniDone) break;
+            Sleep(250);
+        }
+        return 0;
+    }
+
 
     // The player's special mode component: the object the flash flag is read
     // out of, and at startup the way in to the player himself.
@@ -1454,13 +1534,12 @@ namespace
         // marks is known to be gone once it is picked up.
         gs::pickup::Install();
         // The per-frame tick on the game's thread, stacked on the minimap root's
-        // update, with the diff probe on for this discovery session.
-        gs::tick::InstallWorldMap(g_worldVt);
-        if (gs::tick::Install(g_miniVt))
-        {
-            gs::tick::SetProbe(cfg.verbose);
-            GS_LOG("[tick] probe on: root fields that change are logged every 3 s");
-        }
+        // update, with the diff probe on for this discovery session. A thread
+        // of its own, because with Crimson Route loaded it waits for Route to
+        // hook the same slots first, and nothing below should wait with it.
+        g_slotThread = CreateThread(nullptr, 0, SlotThread, nullptr, 0, nullptr);
+        if (g_slotThread) gs::load::AddThread("slots", g_slotThread);
+        else SlotThread(nullptr);
 
         if (g_cameraVt) gs::camera::Install(g_cameraVt);
         else GS_LOG_ERR("PlayerCameraTPSMode vtable not found; no camera this session");
@@ -1648,6 +1727,9 @@ namespace gs::Mod
         if (g_keyThread) { CloseHandle(g_keyThread); g_keyThread = nullptr; }
         if (!processTerminating && g_tableThread) WaitForSingleObject(g_tableThread, 2000);
         if (g_tableThread) { CloseHandle(g_tableThread); g_tableThread = nullptr; }
+        // Before tick::Remove, so a swap cannot land after the slots go back.
+        if (!processTerminating && g_slotThread) WaitForSingleObject(g_slotThread, 1000);
+        if (g_slotThread) { CloseHandle(g_slotThread); g_slotThread = nullptr; }
         gs::hidpad::Stop(processTerminating);
         gs::savemap::Stop(processTerminating);
         // The vtable slots go back only when the process is staying up. On

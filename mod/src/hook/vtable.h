@@ -10,9 +10,12 @@
 // before this is ever called.
 //
 // Whatever was in the slot is handed back so the replacement can forward to it.
-// That is how two mods stack on one slot: Crimson Route's detour on slot 35 of
-// these same vtables is the thing this must never trample, and it does not,
-// because this only ever touches the slot it was asked for.
+// That is how two mods stack on one slot, provided the other one goes first.
+// Crimson Route hooks slot 35 of these same vtables only while the slot still
+// holds the game's own function. A swap made before Route's leaves Route no
+// slot at all, and it turns its map drawing off; that was every launch on 23
+// September. So the worker holds the slot 35 swaps until Route has hooked
+// them (SlotThread in core/mod.cpp), and this then stacks on Route's detour.
 
 namespace gs::vtable
 {
@@ -26,8 +29,12 @@ namespace gs::vtable
 
     // Write replacement into vtable[index]. Returns false and leaves the vtable
     // untouched if the page cannot be made writable, or if the slot already
-    // holds the replacement.
-    bool Install(uintptr_t vtable, int index, void* replacement, Swap& out);
+    // holds the replacement. When publish is given, the slot's old value goes
+    // there before the slot changes: a thunk that jumps through a global can
+    // be called the instant the write lands if the game is already running
+    // that slot.
+    bool Install(uintptr_t vtable, int index, void* replacement, Swap& out,
+                 void* volatile* publish = nullptr);
 
     // Put the original back, but only if the slot still holds our replacement.
     // If someone hooked on top of us after we installed, restoring would cut

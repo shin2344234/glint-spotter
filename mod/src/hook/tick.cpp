@@ -2205,13 +2205,15 @@ namespace gs::tick
     bool Install(uintptr_t miniVtable)
     {
         if (!miniVtable || g_swap.installed) return false;
+        // The thunk jumps through gs_minimapOriginal with no check, so it is
+        // set before the slot changes. Waiting for Crimson Route can put this
+        // swap after the minimap has started running.
         if (!vtable::Install(miniVtable, sig::kSlotUpdate,
-                             reinterpret_cast<void*>(&gs_MinimapTickThunk), g_swap))
+                             reinterpret_cast<void*>(&gs_MinimapTickThunk), g_swap, &gs_minimapOriginal))
         {
             GS_LOG_ERR("[tick] could not take slot %d on the minimap vtable", sig::kSlotUpdate);
             return false;
         }
-        gs_minimapOriginal = g_swap.original;
         GS_LOG_OK("[tick] slot %d on minimap vtable 0x%p was 0x%p, now the thunk; it tail-jumps there",
                   sig::kSlotUpdate, reinterpret_cast<void*>(miniVtable), g_swap.original);
         return true;

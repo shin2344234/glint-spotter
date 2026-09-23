@@ -6,7 +6,7 @@
 
 namespace gs::vtable
 {
-    bool Install(uintptr_t vtable, int index, void* replacement, Swap& out)
+    bool Install(uintptr_t vtable, int index, void* replacement, Swap& out, void* volatile* publish)
     {
         out = Swap{};
         if (!vtable || index < 0 || !replacement) return false;
@@ -23,6 +23,7 @@ namespace gs::vtable
         out.slot = slot;
         out.original = *slot;
         out.replacement = replacement;
+        if (publish) *publish = out.original;
         *slot = replacement;
         out.installed = true;
 

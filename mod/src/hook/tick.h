@@ -9,10 +9,12 @@
 // root control's update at slot 35 runs every frame the minimap is drawn, which
 // is all of play, and it runs on the UI thread that also owns icon creation.
 //
-// Another mod holds that slot already. This stacks: the slot's current value is
-// read, kept, and tail-jumped to from an assembly thunk that forwards every
-// argument register untouched. Nothing is assumed about the signature or about
-// whose function was there.
+// Crimson Route hooks that slot too, and only while it still holds the game's
+// function, so with Route loaded the worker holds this back until Route has
+// hooked it (SlotThread in core/mod.cpp). This then stacks: the slot's current
+// value is read, kept, and tail-jumped to from an assembly thunk that forwards
+// every argument register untouched. Nothing is assumed about the signature or
+// about whose function was there.
 
 namespace gs::tick
 {
