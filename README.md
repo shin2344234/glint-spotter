@@ -19,6 +19,11 @@ before you install it.
   second. Distance is not the limit it used to be: a glint six hundred metres
   out marks as readily as one at twenty. A glint you have already looted is
   left alone, because the mod reads which ones your save has as taken.
+- **Marks teleporters you haven't unlocked yet.** Flash toward an abyss ruin and
+  it gets a pin like a glint does. Ruins you've already switched on are skipped.
+- **Cleans up after itself.** A glint's pin comes off the map about a second
+  after you pick the item up, and a teleporter's comes off when you switch it
+  on. A pin you placed with the button comes off when you walk up to it.
 - **Marks anything on request.** Right bumper, left bumper and A together, or
   F9 on the keyboard, pins whatever the crosshair is on. Ruins, camps, ore veins,
   bridges, dungeon mouths, shops. Anything the game keeps in its own level data,
@@ -61,7 +66,10 @@ the line the nearest thing was, and `Rod` in the ini is that number.
 **To remove a pin**, open the map, put the cursor on it, and press the button
 the prompt offers, which changes to Remove Marker exactly as it does over one of
 your own. There is no extra key and no chord, and the pin goes out of the
-file at the same time, so it stays gone across a reload.
+file at the same time, so it stays gone across a reload. Most pins never need
+it: `ClearTaken` takes a glint's pin off once you've looted it, and `ClearNear`
+is how close you walk to a button pin before it goes, 10 metres by default, 0 to
+keep them.
 
 Both binds are yours to change. `Chord` takes controller button names, so
 `Chord=LB+RB+X` or `Chord=RS` work as written. `Key` takes a key name: `F9` by
@@ -80,7 +88,7 @@ Switch Pro and other pads still need Steam Input.
 Everything else is in `GlintSpotter.ini` beside the plugin, and every key has a
 comment saying what it does. The two worth knowing are `Rod`, which is how
 precisely a press has to be aimed, and `Kinds`, which is what Blinding Flash
-is willing to mark.
+is willing to mark. `Teleporters=0` stops it marking abyss ruins.
 
 ## Limitations
 
@@ -93,7 +101,9 @@ Read these before you decide whether the build is for you.
   file to clear every pin at once. Pins belong to the save you were in when you
   dropped them: the mod watches which save file the game opens, so a second
   character has its own. Saving into a slot you have never used before takes
-  that save's pins along with it.
+  that save's pins along with it. The same file remembers what you've picked up
+  that the save can't show, sealed artifacts mostly, but only from the moment
+  the game saves, because reloading before that puts the item back.
 - **After a game patch, the first load can stall for up to a minute.** The mod
   finds your character through two addresses it keeps a record of, and when a
   patch moves them it searches memory instead. That happens once per launch,
@@ -122,6 +132,10 @@ bands, so that one number is usually enough to place the mistake.
 
 Set `Verbose=1` before a run if something is badly broken. It writes about a
 thousand lines a minute and stutters the frame, so turn it back off afterwards.
+
+If the game stutters with the mod in, the `[load]` lines say whether it's the
+mod. Once a minute they give how long it spent on the game's own thread and how
+much CPU its own threads used.
 
 ## Source and licence
 
