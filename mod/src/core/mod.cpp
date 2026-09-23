@@ -9,6 +9,7 @@
 #include <cstring>
 #include <vector>
 
+#include "core/load.h"
 #include "core/log.h"
 #include "core/settings.h"
 #include "core/pinstore.h"
@@ -16,6 +17,7 @@
 #include "game/alert.h"
 #include "game/mapicon.h"
 #include "game/realpin.h"
+#include "game/pickup.h"
 #include "game/player.h"
 #include "game/aim.h"
 #include "game/actors.h"
@@ -1026,7 +1028,10 @@ namespace
         bool wasSettled = false;
         while (!g_stop.load())
         {
-            gs::lgso::Load(gs::player::Read().valid);
+            {
+                gs::load::Timer t(gs::load::kTableLoad);
+                gs::lgso::Load(gs::player::Read().valid);
+            }
             const bool settled = gs::lgso::Settled();
             if (settled && !wasSettled && gs::Settings::Get().verbose)
             {
@@ -1061,9 +1066,12 @@ namespace
             const bool down = (GetAsyncKeyState(static_cast<int>(g_key)) & 0x8000) != 0;
             if (down && !wasDown) OnTrigger("key");
             wasDown = down;
-            // Whatever the ini's Chord names, held for Hold milliseconds.
-            if (gs::pad::ChordHeld(g_chord, g_chordHold, 0)) OnTrigger("the pad chord");
-            gs::pad::Pump();
+            {
+                gs::load::Timer t(gs::load::kPadPump);
+                // Whatever the ini's Chord names, held for Hold milliseconds.
+                if (gs::pad::ChordHeld(g_chord, g_chordHold, 0)) OnTrigger("the pad chord");
+                gs::pad::Pump();
+            }
             // The entity set, off the game's thread. Twice a second is plenty:
             // an entity stays in the set twelve seconds after it was last seen.
             static uint32_t lastRefresh = 0;
@@ -1071,10 +1079,10 @@ namespace
             if (now - lastRefresh >= 500)
             {
                 lastRefresh = now;
-                gs::actors::Refresh(now);
+                { gs::load::Timer t(gs::load::kRefresh); gs::actors::Refresh(now); }
                 // Twice a second, and only when the player has stopped
                 // answering, which after a load is the whole problem.
-                gs::player::Recover();
+                { gs::load::Timer t(gs::load::kRecover); gs::player::Recover(); }
             }
             // The live watch, when the ini asks for it: armed once the player
             // is found, so the entity set can name what each call is about,
@@ -1088,6 +1096,7 @@ namespace
             // Which placements the save has taken, for the automatic marker.
             // A thread of its own; it waits for the world and the table.
             if (gs::player::Read().valid) gs::savemap::Start();
+            gs::load::Report(now);
             Sleep(50);
         }
         return 0;
@@ -1441,6 +1450,9 @@ namespace
         // marker of its own to go.
         if (cfg.spy || cfg.realMarkers) gs::realpin::InstallSpy();
         else if (cfg.spy) GS_LOG_ERR("[alert] the alert root vtable was not found; no popup groundwork this session");
+        // The game's pick up message, so a sealed artifact the save never
+        // marks is known to be gone once it is picked up.
+        gs::pickup::Install();
         // The per-frame tick on the game's thread, stacked on the minimap root's
         // update, with the diff probe on for this discovery session.
         gs::tick::InstallWorldMap(g_worldVt);
@@ -1458,6 +1470,8 @@ namespace
         g_chordHold = cfg.holdMs;
         g_keyThread = CreateThread(nullptr, 0, KeyThread, nullptr, 0, nullptr);
         g_tableThread = CreateThread(nullptr, 0, TableThread, nullptr, 0, nullptr);
+        gs::load::AddThread("key", g_keyThread);
+        gs::load::AddThread("table", g_tableThread);
         GS_LOG("press %s (VK %02X), or hold the pad chord 0x%04X for %lu ms, to mark whatever the "
                "crosshair is on", gs::Settings::KeyName(cfg.key), cfg.key, cfg.chord,
                static_cast<unsigned long>(cfg.holdMs));
@@ -1619,6 +1633,7 @@ namespace gs::Mod
         g_self = selfModule;
         Log::Start(selfModule);
         g_thread = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);
+        gs::load::AddThread("worker", g_thread);
     }
 
     void Shutdown(bool processTerminating)
@@ -1639,7 +1654,7 @@ namespace gs::Mod
         // teardown the game is leaving anyway, and a write to its memory from
         // inside DllMain buys nothing.
         if (!processTerminating) { gs::tick::Remove(); gs::mapicon::RemoveSpy();
-                                   gs::saveslot::Remove(); }
+                                   gs::saveslot::Remove(); gs::pickup::Remove(); }
         if (g_thread)
         {
             CloseHandle(g_thread);

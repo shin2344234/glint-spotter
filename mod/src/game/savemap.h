@@ -43,6 +43,15 @@ namespace gs::savemap
     // records have been read.
     bool Completed(uintptr_t placementAt);
 
+    // For the log: what the save holds on a placement and what the loaded
+    // gimmick on it reads right now, as "save Wait,GimmickOn, live Clear".
+    void Describe(uintptr_t placementAt, char* out, size_t n);
+
+    // Whether a taken placement stands within the join distance of this
+    // point, three metres across and six up or down. For a pin that only
+    // knows where it is.
+    bool TakenNear(float x, float y, float z);
+
     // How many placements the save has as taken, for the log.
     int TakenCount();
 

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <mutex>
 
+#include "core/load.h"
 #include "core/log.h"
 #include "core/settings.h"
 #include "game/aim.h"
@@ -113,16 +114,38 @@ namespace
         return *reinterpret_cast<const uintptr_t*>(at);
     }
 
+    // Which memory is readable, one VirtualQuery per region rather than per
+    // read, remembered for half a second. The pool walk read about 13,500
+    // slots a pass in the 23 September load report and 360 of them faulted,
+    // and it asked VirtualQuery about 500 times on top: 77 ms a pass, twice a
+    // second. The slots are values that look like pointers, and nearly all of
+    // them land in a handful of heap regions or in the same few unmapped
+    // stretches, so the answer for a region is asked once and reused. Only
+    // for reads that sit inside a handler anyway: a region can be freed in
+    // the half second, and the handler is what keeps that from mattering.
+    // The cache itself is in rtti.cpp, where the table reader uses it too.
+    bool Mapped(uintptr_t p, size_t n)
+    {
+        return gs::rtti::ReadableCached(reinterpret_cast<const void*>(p), n);
+    }
+
+    // How much the pool walk reads and how often a read faults, for the
+    // line every thirty seconds. The walk cost 93 ms a pass in the 23
+    // September load report, and this says whether that is slots or faults.
+    volatile long g_slotsWalked = 0;
+    volatile long g_entityFaults = 0;
+
     // An entity: readable, with an id whose top byte says player or world
     // object. Master Looter's EntityLike.
     //
     // No VirtualQuery per entry: a thousand of those every pass made the game
-    // stutter in session twenty-one. The handler around the read is the guard.
+    // stutter in session twenty-one. The handler around the read is the guard,
+    // and Mapped keeps it from being needed.
     bool EntityLike(uintptr_t e)
     {
         __try
         {
-            if (!PtrLike(e)) return false;
+            if (!PtrLike(e) || !Mapped(e + kOff_Ent_Eid, 4)) return false;
             const uint32_t id = *reinterpret_cast<const uint32_t*>(e + kOff_Ent_Eid);
             if (!id) return false;
             const uint8_t tag = static_cast<uint8_t>(id >> 24);
@@ -130,6 +153,7 @@ namespace
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
+            InterlockedIncrement(&g_entityFaults);
             return false;
         }
     }
@@ -151,17 +175,15 @@ namespace
             // The wide range is a guess at how big the manager is, so it is
             // tried and then given up on rather than failing the whole read.
             uintptr_t poolsEnd = kOff_Mgr_PoolsEnd;
-            while (poolsEnd > kOff_Mgr_PoolsNarrow &&
-                   !gs::rtti::Readable(reinterpret_cast<const void*>(mgr), poolsEnd))
-                poolsEnd -= 0x100;
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(mgr), poolsEnd)) return 0;
+            while (poolsEnd > kOff_Mgr_PoolsNarrow && !Mapped(mgr, poolsEnd)) poolsEnd -= 0x100;
+            if (!Mapped(mgr, poolsEnd)) return 0;
             for (uintptr_t off = kOff_Mgr_ListsBegin; off + 16 <= kOff_Mgr_ListsEnd && n < cap; off += 8)
             {
                 const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + off);
                 const uint32_t lcap = *reinterpret_cast<const uint32_t*>(mgr + off + 4);
                 const uintptr_t arr = *reinterpret_cast<const uintptr_t*>(mgr + off + 8);
                 if (!count || !lcap || count > lcap || lcap > kListCapMax || !arr) continue;
-                if (!gs::rtti::Readable(reinterpret_cast<const void*>(arr), static_cast<size_t>(count) * 8)) continue;
+                if (!Mapped(arr, static_cast<size_t>(count) * 8)) continue;
                 const uintptr_t* ents = reinterpret_cast<const uintptr_t*>(arr);
                 for (uint32_t i = 0; i < count && i < 4000 && n < cap; ++i)
                     if (EntityLike(ents[i])) out[n++] = ents[i];
@@ -174,7 +196,10 @@ namespace
             {
                 const uintptr_t arr = *reinterpret_cast<const uintptr_t*>(mgr + off);
                 if (arr < 0x10000 || (arr & 7) != 0) continue;
-                if (!gs::rtti::Readable(reinterpret_cast<const void*>(arr), 8 * 4)) continue;
+                // One question per manager field that looks like a pointer
+                // was most of the 550 VirtualQuery calls a pass that were left
+                // once the slots stopped asking.
+                if (!Mapped(arr, 8 * 4)) continue;
                 const uintptr_t* ents = reinterpret_cast<const uintptr_t*>(arr);
                 bool ok = true;
                 for (int i = 0; i < 4 && ok; ++i) ok = EntityLike(ents[i]);
@@ -216,7 +241,7 @@ namespace
                     // 000005050C620000, and the fault ended the whole pass, so
                     // every pool after this one went unread until the next.
                     // One question per page is enough to stop at the edge.
-                    if ((at & 0xFFF) == 0 && !gs::rtti::Readable(reinterpret_cast<const void*>(at), 8)) break;
+                    if ((at & 0xFFF) == 0 && !Mapped(at, 8)) break;
                     scanned = i + 1;
                     const uintptr_t e = *reinterpret_cast<const uintptr_t*>(at);
                     if (!EntityLike(e)) { if (++misses >= 512) break; continue; }
@@ -224,6 +249,7 @@ namespace
                     out[n++] = e;
                 }
                 coveredTo = at;
+                InterlockedExchangeAdd(&g_slotsWalked, static_cast<long>(scanned));
                 if (worthReporting && n - before > 0)
                     GS_LOG("[actors]   pool %d at manager+0x%03llX -> 0x%p: %u slots walked, %d entities",
                            r, static_cast<unsigned long long>(runOff[r]),
@@ -821,7 +847,11 @@ namespace gs::actors
         const uintptr_t mgr = g_mgr.load();
         if (!mgr) return 0;
 
-        const int n = ReadPools(mgr, g_buf, kBufMax);
+        int n = 0;
+        {
+            gs::load::Timer t(gs::load::kRefreshPools);
+            n = ReadPools(mgr, g_buf, kBufMax);
+        }
 
         // The set is worked on as a copy and put back in one short step.
         //
@@ -1034,6 +1064,8 @@ namespace gs::actors
             g_lastSaidMs = nowMs;
             GS_LOG("[actors] pools offered %d this pass (%d listed twice, %d without a position); set holds %d entities, %d gimmicks, %d of them pickups, %d with the glint byte set, %d lit",
                    n, dupes, noPos, workN, gimmicks, pickups, glints, lits);
+            GS_LOG("[actors] since the last of these lines the pool walk read %ld slots and %ld of them faulted",
+                   InterlockedExchange(&g_slotsWalked, 0), InterlockedExchange(&g_entityFaults, 0));
             // The nearest pickups, which is what the player can actually see.
             int order[6];
             float dist[6];

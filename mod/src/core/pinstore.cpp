@@ -1,6 +1,7 @@
 #include "core/pinstore.h"
 
 #include <Windows.h>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -29,6 +30,8 @@ namespace
     {
         std::vector<Slot> slots;      // empty means it belongs to no save yet
         std::vector<gs::pinstore::Saved> pins;
+        struct Spot { float x, y, z; };
+        std::vector<Spot> taken;      // picked up, where the save never says so
         uint32_t touched = 0;         // for deciding which one to forget
     };
 
@@ -51,7 +54,59 @@ namespace
         return p + L".pins";
     }
 
+    // Pick ups since the save was last written or loaded. They go into the
+    // file only when the game writes the save, because until then a reload
+    // brings the thing back: on 23 September the sealed artifact went into the
+    // file the second it was picked up, and a reload of the unsaved game would
+    // have hidden it for good.
+    std::vector<Group::Spot> g_unsaved;
+
     // Everything below is called with the lock held.
+
+    bool SameSpot(const std::vector<Group::Spot>& list, float x, float y, float z)
+    {
+        for (const Group::Spot& t : list)
+        {
+            const float dx = t.x - x, dz = t.z - z;
+            if (dx * dx + dz * dz < 1.0f && std::fabs(t.y - y) < 2.0f) return true;
+        }
+        return false;
+    }
+
+    bool NearSpot(const std::vector<Group::Spot>& list, float x, float y, float z)
+    {
+        for (const Group::Spot& t : list)
+        {
+            const float dx = t.x - x, dz = t.z - z;
+            if (dx * dx + dz * dz <= 9.0f && std::fabs(t.y - y) <= 6.0f) return true;
+        }
+        return false;
+    }
+
+    Group& Cur();
+
+    // The game wrote the save being played, so what was picked up since is in
+    // it now.
+    bool KeepUnsaved()
+    {
+        if (g_unsaved.empty()) return false;
+        Group& g = Cur();
+        for (const Group::Spot& t : g_unsaved)
+            if (!SameSpot(g.taken, t.x, t.y, t.z)) g.taken.push_back(t);
+        GS_LOG_OK("[pins] the save now holds %u pick up(s) it does not mark itself; they are written down",
+                  static_cast<unsigned>(g_unsaved.size()));
+        g_unsaved.clear();
+        return true;
+    }
+
+    // A load puts back whatever was picked up since the last save.
+    void DropUnsaved()
+    {
+        if (g_unsaved.empty()) return;
+        GS_LOG("[pins] %u pick up(s) since the last save are forgotten, since the save being loaded does "
+               "not have them", static_cast<unsigned>(g_unsaved.size()));
+        g_unsaved.clear();
+    }
 
     Group& Cur()
     {
@@ -72,12 +127,14 @@ namespace
         for (size_t i = 0; i < g_groups.size(); ++i)
         {
             const Group& g = g_groups[i];
-            if (g.pins.empty() && g.slots.empty()) continue;
+            if (g.pins.empty() && g.slots.empty() && g.taken.empty()) continue;
             fprintf(f, "\n[%u]\n", static_cast<unsigned>(i + 1));
             for (const Slot& s : g.slots)
                 fprintf(f, "save %u/%d\n", s.account, s.slot);
             for (const gs::pinstore::Saved& p : g.pins)
                 fprintf(f, "%.3f %.3f %.3f %s\n", p.x, p.y, p.z, p.label);
+            for (const Group::Spot& t : g.taken)
+                fprintf(f, "taken %.3f %.3f %.3f\n", t.x, t.y, t.z);
         }
         fclose(f);
     }
@@ -176,6 +233,12 @@ namespace gs::pinstore
                 if (Owner(s) == static_cast<size_t>(-1)) g_groups[into].slots.push_back(s);
                 continue;
             }
+            Group::Spot t{};
+            if (sscanf_s(line, "taken %f %f %f", &t.x, &t.y, &t.z) == 3)
+            {
+                g_groups[into].taken.push_back(t);
+                continue;
+            }
             if (g_groups[into].pins.size() >= static_cast<size_t>(kMaxPins)) continue;
             Saved p{};
             char label[64]{};
@@ -217,6 +280,7 @@ namespace gs::pinstore
     void Loaded(uint32_t account, int32_t slot)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
+        DropUnsaved();
         const Slot s{account, slot};
         const size_t owner = Owner(s);
         if (owner != static_cast<size_t>(-1))
@@ -249,7 +313,12 @@ namespace gs::pinstore
         std::lock_guard<std::mutex> lock(g_mutex);
         const Slot s{account, slot};
         Cur();
-        if (Owner(s) == g_cur) return;
+        const bool kept = KeepUnsaved();
+        if (Owner(s) == g_cur)
+        {
+            if (kept) Write();
+            return;
+        }
         Bind(g_cur, s);
         g_groups[g_cur].touched = ++g_clock;
         Write();
@@ -260,6 +329,7 @@ namespace gs::pinstore
     void NewGame()
     {
         std::lock_guard<std::mutex> lock(g_mutex);
+        DropUnsaved();
         Group& cur = Cur();
         if (cur.slots.empty() && cur.pins.empty()) return;
         g_cur = Mint();
@@ -305,6 +375,19 @@ namespace gs::pinstore
         Write();
         GS_LOG("[pins] taken out of the file; %u left for this save",
                static_cast<unsigned>(g.pins.size()));
+    }
+
+    void AddTaken(float x, float y, float z)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (SameSpot(Cur().taken, x, y, z) || SameSpot(g_unsaved, x, y, z)) return;
+        g_unsaved.push_back({x, y, z});
+    }
+
+    bool TakenNear(float x, float y, float z)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        return NearSpot(Cur().taken, x, y, z) || NearSpot(g_unsaved, x, y, z);
     }
 
     int All(Saved* out, int n)

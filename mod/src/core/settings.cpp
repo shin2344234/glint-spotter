@@ -183,6 +183,19 @@ namespace
         fputs("; a group to clear one save's pins, or the file to clear all of them.\n", f);
         fputs("KeepPins=1\n", f);
         fputs("\n", f);
+        fputs("; 1 takes an automatic Glint pin off the map once the thing it marked has been\n", f);
+        fputs("; picked up or finished. 0 leaves it there until you remove it.\n", f);
+        fputs("ClearTaken=1\n", f);
+        fputs("\n", f);
+        fputs("; A pin you place with the key or the pad chord comes off once you walk within\n", f);
+        fputs("; this many metres of it. One you place close by stays until you have walked\n", f);
+        fputs("; away from it and come back. 0 leaves them there until you remove them.\n", f);
+        fputs("ClearNear=10\n", f);
+        fputs("\n", f);
+        fputs("; 1 lets the flash mark teleporters, the abyss ruins, whatever the Kinds line\n", f);
+        fputs("; says. One you have already switched on is left alone. 0 leaves them to Kinds.\n", f);
+        fputs("Teleporters=1\n", f);
+        fputs("\n", f);
         fputs("; Which of the map's marker pictures a pin uses, as two numbers. 1,4 is the\n", f);
         fputs("; one on the Change Marker list I use; 4,14 is the plain marker you get\n", f);
         fputs("; by default. The first is 0 to 13 and the second 0 to 14. To find another,\n", f);
@@ -383,6 +396,21 @@ namespace gs::Settings
             {
                 g_values.keepPins = atoi(val) != 0;
             }
+            else if (_stricmp(key, "Teleporters") == 0)
+            {
+                g_values.teleporters = atoi(val) != 0;
+            }
+            else if (_stricmp(key, "ClearTaken") == 0)
+            {
+                g_values.clearTaken = atoi(val) != 0;
+            }
+            else if (_stricmp(key, "ClearNear") == 0)
+            {
+                const float v = static_cast<float>(atof(val));
+                if (v >= 0.0f && v <= 1000.0f) g_values.clearNear = v;
+                else GS_LOG_ERR("settings: ClearNear=%s is out of range, keeping %.0f metres", val,
+                                g_values.clearNear);
+            }
             else if (_stricmp(key, "PinStyle") == 0)
             {
                 int a = -1, b = -1;
@@ -450,6 +478,8 @@ namespace gs::Settings
                "on the flash", g_values.rodMetres, g_values.pressReach, g_values.autoConeDeg);
         GS_LOG("settings: Kinds=%s", g_values.kinds);
         GS_LOG("settings: Mark=%s", g_values.mark);
+        GS_LOG("settings: ClearTaken=%d, ClearNear=%.0f metres%s, Teleporters=%d", g_values.clearTaken ? 1 : 0,
+               g_values.clearNear, g_values.clearNear > 0.0f ? "" : " (off)", g_values.teleporters ? 1 : 0);
         return g_values;
     }
 

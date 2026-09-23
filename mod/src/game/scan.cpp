@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <psapi.h>
 
+#include "core/load.h"
 #include "game/rtti.h"
 
 namespace
@@ -136,6 +137,7 @@ namespace gs::scan
                 break;
             }
             MEMORY_BASIC_INFORMATION mbi{};
+            gs::load::CountQuery();
             if (VirtualQuery(addr, &mbi, sizeof(mbi)) != sizeof(mbi)) break;
             rep.regionsSeen++;
 

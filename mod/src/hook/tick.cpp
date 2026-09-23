@@ -5,9 +5,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "core/load.h"
 #include "core/log.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
@@ -439,6 +441,12 @@ namespace
         }
     }
 
+    // A key or chord pin the player has been well away from, by its key. Only
+    // an armed pin comes off for being walked up to, so one dropped beside him
+    // stays until he has left and come back. Keys belong to the world that
+    // issued them, so a new world starts the map empty.
+    std::unordered_map<int64_t, bool> g_armed;
+
     void RestoreOnNewWorld()
     {
         static uintptr_t seen = 0;
@@ -448,6 +456,14 @@ namespace
         // A player who answers with a position is a player the mod can write
         // through. Without this the restore can put records into a component
         // the load has already thrown away.
+        // Every two seconds, not every pulse. The check below walks the
+        // marker list and cost 1.9 ms on every quarter second pulse in the 23
+        // September load report, and a restore two seconds after a load is
+        // as good as one a quarter second after.
+        static uint32_t lookedMs = 0;
+        const uint32_t nowLook = GetTickCount();
+        if (lookedMs && nowLook - lookedMs < 2000) return;
+        lookedMs = nowLook;
         if (!gs::player::Read().valid) return;
         const uintptr_t sub = gs::pinmodel::Submodule();
         if (!sub) return;
@@ -538,6 +554,7 @@ namespace
         if (oldN) GS_LOG("[pins] %d old pin(s) taken off first", oldN);
         // Entity ids belong to the world that issued them.
         ForgetMarked();
+        g_armed.clear();
         gs::mapicon::ForgetAll();
         g_pendingN = 0;
         if (!gs::Settings::Get().keepPins) return;
@@ -559,6 +576,7 @@ namespace
             GS_LOG("[mark] a pin already sits within %.0f units of (%.1f, %.1f); not placing another", dedupe, tx, tz);
             return false;
         }
+        gs::load::Timer timed(gs::load::kPlacePin);
         const float dx = tx - pp.x, dz = tz - pp.z;
         GS_LOG("[mark] target %.1f units away via %s; placing a %s pin at (%.1f, %.1f, %.1f)",
                std::sqrt(dx * dx + dz * dz), how, label, tx, ty, tz);
@@ -783,7 +801,7 @@ namespace
     int g_targetLogsLeft = 12;
     uint32_t g_targetLastMs = 0;
     int g_glintWinsLeft = 40;
-    int g_tableLogsLeft = 120;
+    int g_tableLogsLeft = 200;
     int g_doneLogsLeft = 60;
 
     // A placement the save has in its Clear state has been taken, so there is
@@ -792,7 +810,9 @@ namespace
     std::unordered_set<uintptr_t> g_doneSaid;
     bool SkipTaken(const gs::lgso::Place& p)
     {
-        if (!gs::savemap::Completed(p.at)) return false;
+        // The save's own word first, then what the pick up message wrote down
+        // for this save, which is how a sealed artifact is known to be gone.
+        if (!gs::savemap::Completed(p.at) && !gs::pinstore::TakenNear(p.x, p.y, p.z)) return false;
         if (g_doneLogsLeft > 0 && g_doneSaid.insert(p.at).second)
         {
             --g_doneLogsLeft;
@@ -801,7 +821,7 @@ namespace
         }
         return true;
     }
-    int g_quietLogsLeft = 20;
+    int g_quietLogsLeft = 60;
     // How close two automatic pins may be. Eight metres was arbitrary and
     // it is wide enough to swallow a neighbour: glints come in clusters and
     // pinning one should not refuse the next one along. Four.
@@ -816,13 +836,13 @@ namespace
     uint32_t g_dupLastMs = 0;
     uint32_t g_quietLastMs = 0;
     int g_lastGlintN = -1;
-    int g_heldWinsLeft = 40;   // how many times the log says the target took the pick
+    int g_heldWinsLeft = 60;   // how many times the log says the target took the pick
     int g_loadingLogsLeft = 4;
     uint32_t g_heldEid = 0;
     uint32_t g_heldSinceMs = 0;
     float g_heldX = 0, g_heldZ = 0;
     uint32_t g_cooldownUntil = 0;
-    int g_autoLogsLeft = 60;
+    int g_autoLogsLeft = 120;
     uint32_t g_autoLastLogMs = 0;
     uintptr_t g_huntEnts[4] = {0, 0, 0, 0};
     uint32_t g_huntEids[4] = {0, 0, 0, 0};
@@ -887,8 +907,11 @@ namespace
         // pointer fields the moment the flash fires. The mod is still guessing
         // which node is glinting from a bearing; one of these objects knows.
         // Half a second after the press, so the task has run, three presses a
-        // session, read only.
-        if (!g_probedThisPress && g_flashProbesLeft > 0 && now - g_flashOnMs > 500)
+        // session, read only. Verbose only: it is 260 lines and every pointer
+        // named through RTTI, 86 ms on the game's thread on 23 September, a
+        // hitch on each of the first three flashes of every session.
+        if (gs::Settings::Get().verbose && !g_probedThisPress && g_flashProbesLeft > 0 &&
+            now - g_flashOnMs > 500)
         {
             g_probedThisPress = true;
             --g_flashProbesLeft;
@@ -1005,16 +1028,24 @@ namespace
         int marked = 0;
         gs::aim::Held held;
         View v;
-        if (ViewRay(pp, &v))
+        bool rayOk = false;
+        {
+            gs::load::Timer t(gs::load::kAutoRay);
+            rayOk = ViewRay(pp, &v);
+        }
+        if (rayOk)
         {
             const float flen = std::sqrt(v.fx * v.fx + v.fz * v.fz);
             if (flen > 1e-3f)
             {
-                n = gs::actors::MarkedOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                                cap > 0.0f ? cap : 1.0e9f, 0.26f, 3.0f,
-                                                around, angles, 8, &marked);
-                glintN = gs::actors::GlintOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
-                                                    glints, glintAngles, 8);
+                {
+                    gs::load::Timer t(gs::load::kAutoSet);
+                    n = gs::actors::MarkedOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
+                                                    cap > 0.0f ? cap : 1.0e9f, 0.26f, 3.0f,
+                                                    around, angles, 8, &marked);
+                    glintN = gs::actors::GlintOnBearing(pp.x, pp.z, v.ox, v.oz, v.fx / flen, v.fz / flen,
+                                                        glints, glintAngles, 8);
+                }
                 // Eight metres off the line or three per cent of the range,
                 // whichever is more. Four flat was too tight: I tested from
                 // the air, where the crosshair sways, and a placement four
@@ -1041,11 +1072,14 @@ namespace
                 // is a glint nobody ever finds again.
                 const float autoFrac =
                     std::tan(gs::Settings::Get().autoConeDeg * 3.14159265f / 180.0f);
-                tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oy, v.oz,
-                                             v.fx / flen, v.fz / flen, v.fy / flen,
-                                             8.0f, autoFrac, 25.0f,
-                                             5.0f, reach > 0.0f ? reach : 1.0e9f,
-                                             table, tableAngles, 32, false, SkipTaken);
+                {
+                    gs::load::Timer t(gs::load::kAutoTable);
+                    tableN = gs::lgso::OnBearing(pp.x, pp.z, v.ox, v.oy, v.oz,
+                                                 v.fx / flen, v.fz / flen, v.fy / flen,
+                                                 8.0f, autoFrac, 25.0f,
+                                                 5.0f, reach > 0.0f ? reach : 1.0e9f,
+                                                 table, tableAngles, 32, false, SkipTaken);
+                }
                 // Every node the game has marked, with its distance, so the log
                 // says how close the player has to get before the game creates
                 // the thing I am looking at.
@@ -1086,7 +1120,16 @@ namespace
                 eye.ux = v.fx / flen; eye.uz = v.fz / flen;
                 const bool sayTargets = g_targetLogsLeft > 0 && now - g_targetLastMs > 1500;
                 if (sayTargets) { --g_targetLogsLeft; g_targetLastMs = now; }
-                held = gs::aim::DescribeTargets(eye, sayTargets);
+                // Verbose only. Its answer cannot take the pick (byTarget below
+                // is false for good), and asking cost 19 ms on every quarter
+                // second pulse the flash was up in the 23 September load
+                // report: 2.4 of the 2.8 seconds a minute the mod spent on the
+                // game's thread, and the hitches with it.
+                if (gs::Settings::Get().verbose)
+                {
+                    gs::load::Timer t(gs::load::kAutoAim);
+                    held = gs::aim::DescribeTargets(eye, sayTargets);
+                }
             }
         }
         // Something marked once is not a candidate again, so the next thing on
@@ -1143,11 +1186,13 @@ namespace
                 const float ddx = table[k].x - v.ox, ddz = table[k].z - v.oz;
                 const float perp = std::fabs(ddx * uz - ddz * ux);
                 const float deg = std::atan2(perp, tableAngles[k]) * 57.2958f;
+                char said[96];
+                gs::savemap::Describe(table[k].at, said, sizeof(said));
                 GS_LOG("[auto]   %srecord %u element %u \"%s\" at (%.1f, %.1f, %.1f), %.0f metres "
-                       "out, %.1f off the line, %.2f degrees, at 0x%p",
-                       k == tablePick ? "TAKEN " : "      ", table[k].record, table[k].element,
+                       "out, %.1f off the line, %.2f degrees, %s, at 0x%p",
+                       k == tablePick ? "CHOSEN" : "      ", table[k].record, table[k].element,
                        table[k].name[0] ? table[k].name : "unnamed",
-                       table[k].x, table[k].y, table[k].z, tableAngles[k], perp, deg,
+                       table[k].x, table[k].y, table[k].z, tableAngles[k], perp, deg, said,
                        reinterpret_cast<void*>(table[k].at));
             }
         }
@@ -1211,11 +1256,15 @@ namespace
                     const int nn = gs::lgso::NearLine(v.ox, v.oz, v.fx / qlen, v.fz / qlen,
                                                       2000.0f, near_, along, perp, 6);
                     for (int k = 0; k < nn; ++k)
+                    {
+                        char said[96];
+                        gs::savemap::Describe(near_[k].at, said, sizeof(said));
                         GS_LOG("[auto]   on the line: \"%s\" record %u element %u, %.0f m out, "
-                               "%.1f off the line, y %.0f%s",
+                               "%.1f off the line, y %.0f, %s%s",
                                near_[k].name[0] ? near_[k].name : "unnamed", near_[k].record,
-                               near_[k].element, along[k], perp[k], near_[k].y,
+                               near_[k].element, along[k], perp[k], near_[k].y, said,
                                gs::lgso::Worth(near_[k].name) ? "" : "  (the Kinds list refuses it)");
+                    }
                 }
             }
             pick = -1;
@@ -1371,7 +1420,8 @@ namespace
                        held.cls[0] == '.' ? held.cls + 4 : held.cls, held.dist, held.angle,
                        held.inPools ? "live in the pools" : "not in the pools",
                        byTarget ? ", and it takes the pick" : ", so the bearing keeps the pick");
-            else GS_LOG("[auto]   the game's detect system is holding nothing the mod can resolve");
+            else if (gs::Settings::Get().verbose)
+                GS_LOG("[auto]   the game's detect system is holding nothing the mod can resolve");
         }
 
         // One pin, on the place the crosshair held for a second. The hold
@@ -1546,6 +1596,77 @@ namespace
         }
     }
 
+    // The mod taking its own pin off, the same way the map's Remove Marker
+    // does: the record, the icon on both surfaces, the line in the file, and
+    // the place settled so the flash still running does not put it back.
+    void RemoveOwnPin(const gs::mapicon::LivePin& p, const char* why)
+    {
+        // Each step timed: taking a pin off cost 4.1 and 6.2 ms on the game's
+        // thread on 23 September, and this says which step it was.
+        LARGE_INTEGER f, t[5];
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&t[0]);
+        float gx = 0.0f, gz = 0.0f;
+        if (!gs::mapicon::Forget(p.id, &gx, &gz, false)) return;
+        if (p.id >= gs::realpin::IdBase()) gs::realpin::Retire(p.id);
+        QueryPerformanceCounter(&t[1]);
+        gs::mapicon::RemoveIcon(gs::mapicon::LastWorldRoot(), p.id);
+        QueryPerformanceCounter(&t[2]);
+        gs::pinstore::Drop(gx, gz);
+        QueryPerformanceCounter(&t[3]);
+        SettleAt(gx, gz);
+        g_armed.erase(p.id);
+        QueryPerformanceCounter(&t[4]);
+        auto ms = [&](int i) { return 1000.0 * static_cast<double>(t[i + 1].QuadPart - t[i].QuadPart) /
+                                      static_cast<double>(f.QuadPart); };
+        GS_LOG_OK("[clear] took the \"%s\" pin at (%.1f, %.1f, %.1f) off the map: %s. Forget %.2f ms, the icon %.2f, "
+                  "the pins file %.2f, settle %.2f", p.label, p.x, p.y, p.z, why, ms(0), ms(1), ms(2), ms(3));
+    }
+
+    // Once a second, the pins that have done their job come off. A Glint pin
+    // is the automatic marker's, and it goes when the save reader has the
+    // placement under it as taken, which covers a pickup the moment the loaded
+    // gimmick's state changes. Any other label is a pin from the key or the
+    // chord, and it goes when the player walks up to it.
+    constexpr float kArmMetres = 10.0f;
+    uint32_t g_clearLastMs = 0;
+
+    void AutoClear(uint32_t now)
+    {
+        const gs::Settings::Values& s = gs::Settings::Get();
+        if (!s.clearTaken && s.clearNear <= 0.0f) return;
+        if (now - g_clearLastMs < 1000) return;
+        g_clearLastMs = now;
+        const gs::player::Pos pp = gs::player::Read();
+        // Near the origin is the loading placeholder, not the player.
+        if (!pp.valid || pp.x * pp.x + pp.z * pp.z < 100.0f * 100.0f) return;
+        gs::mapicon::LivePin pins[256];
+        const int n = gs::mapicon::LivePins(pins, 256);
+        for (int i = 0; i < n; ++i)
+        {
+            const gs::mapicon::LivePin& p = pins[i];
+            if (strcmp(p.label, "Glint") == 0)
+            {
+                if (s.clearTaken &&
+                    (gs::savemap::TakenNear(p.x, p.y, p.z) || gs::pinstore::TakenNear(p.x, p.y, p.z)))
+                    RemoveOwnPin(p, "the save has what it marked as taken");
+                continue;
+            }
+            if (s.clearNear <= 0.0f) continue;
+            const float dx = p.x - pp.x, dz = p.z - pp.z;
+            const float d = std::sqrt(dx * dx + dz * dz);
+            bool& armed = g_armed[p.id];
+            if (d > s.clearNear + kArmMetres)
+                armed = true;
+            else if (armed && d <= s.clearNear)
+            {
+                char why[64];
+                _snprintf_s(why, sizeof(why), _TRUNCATE, "you are %.0f metres from it", d);
+                RemoveOwnPin(p, why);
+            }
+        }
+    }
+
     // Slot 35 on the world map root, the same per-frame update the minimap
     // carries. Plain C++ rather than the assembler thunk the minimap uses:
     // this one only reads a queue and forwards, and the signature is two
@@ -1557,11 +1678,14 @@ namespace
 
     void WorldMapUpdate(void* self, float dt)
     {
-        const uint64_t n = ++g_worldTicks;
-        if (n == 1)
-            GS_LOG_OK("[tick] first world map update on thread %lu, root 0x%p; this is the one "
-                      "that runs while the map is open", GetCurrentThreadId(), self);
-        if ((n % 8) == 0) DrainRetires();
+        {
+            gs::load::Timer timed(gs::load::kWorldMap);
+            const uint64_t n = ++g_worldTicks;
+            if (n == 1)
+                GS_LOG_OK("[tick] first world map update on thread %lu, root 0x%p; this is the one "
+                          "that runs while the map is open", GetCurrentThreadId(), self);
+            if ((n % 8) == 0) DrainRetires();
+        }
         if (g_worldOrig) g_worldOrig(self, dt);
     }
 }
@@ -1571,9 +1695,11 @@ namespace
 extern "C" void gs_OnMinimapTick(void* self)
 {
     const uint64_t n = ++g_count;
+    gs::load::Frame();
     if (n == 1)
     {
         g_thread.store(GetCurrentThreadId());
+        gs::load::NameThisThread("game");
         GS_LOG_OK("[tick] first minimap update on thread %lu, root 0x%p; forwarding to 0x%p",
                   GetCurrentThreadId(), self, gs_minimapOriginal);
     }
@@ -1584,13 +1710,47 @@ extern "C" void gs_OnMinimapTick(void* self)
     // that walk running here.
     if (n - g_lastRefreshTick >= 15)
     {
+        gs::load::Timer timed(gs::load::kTickPulse);
         g_lastRefreshTick = n;
-        PumpSaveEvents();
-        RestoreOnNewWorld();
-        FlushPending();
+        { gs::load::Timer t(gs::load::kPulseSave); PumpSaveEvents(); }
+        { gs::load::Timer t(gs::load::kPulseRestore); RestoreOnNewWorld(); }
+        { gs::load::Timer t(gs::load::kPulseFlush); FlushPending(); }
         // A map that has just been rebuilt has none of the mod's pins on it.
-        DrainRetires();
-        AutoMark(GetTickCount());
+        { gs::load::Timer t(gs::load::kPulseRetires); DrainRetires(); }
+        {
+            using namespace gs::load;
+            for (Site s : {kAutoRay, kAutoSet, kAutoTable, kAutoAim, kPlacePin}) ClearLast(s);
+            { Timer t(kPulseAuto); AutoMark(GetTickCount()); }
+            // A slow one says which part. The 23 September 12:48 report had
+            // one pass at 74.5 ms while its timed parts were all under 3.
+            static int slowAutoLeft = 20;
+            const double total = LastMs(kPulseAuto);
+            if (total > 15.0 && slowAutoLeft > 0)
+            {
+                --slowAutoLeft;
+                const double parts = LastMs(kAutoRay) + LastMs(kAutoSet) + LastMs(kAutoTable) + LastMs(kAutoAim) +
+                                     LastMs(kPlacePin);
+                GS_LOG_ERR("[load] the automatic marker took %.1f ms: view ray %.2f, entity set %.2f, glint table "
+                           "%.2f, detect system %.2f, placing a pin %.2f, and %.1f in the rest of it",
+                           total, LastMs(kAutoRay), LastMs(kAutoSet), LastMs(kAutoTable), LastMs(kAutoAim),
+                           LastMs(kPlacePin), total - parts);
+            }
+        }
+        {
+            gs::load::Timer t(gs::load::kPulseClear);
+            LARGE_INTEGER a, b, f;
+            QueryPerformanceCounter(&a);
+            AutoClear(GetTickCount());
+            QueryPerformanceCounter(&b);
+            QueryPerformanceFrequency(&f);
+            const double ms = 1000.0 * static_cast<double>(b.QuadPart - a.QuadPart) / static_cast<double>(f.QuadPart);
+            static int slowLeft = 20;
+            if (ms > 3.0 && slowLeft > 0)
+            {
+                --slowLeft;
+                GS_LOG_ERR("[clear] the pin check took %.1f ms on the game's thread", ms);
+            }
+        }
 
         // The camera object moves; the probe follows it.
         static uintptr_t watchedCam = 0;
@@ -1608,6 +1768,7 @@ extern "C" void gs_OnMinimapTick(void* self)
     // ground under it when the camera is looking down. Never at the player.
     if (g_markPending.exchange(false))
     {
+        gs::load::Timer timed(gs::load::kTickMark);
         // A press needs a position and a direction. It does not need the
         // detect component, which is only there to tell the automatic marker
         // when the flash is up, and it does not need the player's own
@@ -1783,7 +1944,7 @@ extern "C" void gs_OnMinimapTick(void* self)
                             const float deg = std::atan2(perp, sightDist[k]) * 57.2958f;
                             GS_LOG("[mark]   %srecord %u element %u \"%s\" at (%.1f, %.1f, %.1f), "
                                    "%.0f metres out, %.1f off the line, %.2f degrees",
-                                   k == 0 ? "TAKEN " : "      ", sight[k].record, sight[k].element,
+                                   k == 0 ? "CHOSEN" : "      ", sight[k].record, sight[k].element,
                                    sight[k].name[0] ? sight[k].name : "unnamed",
                                    sight[k].x, sight[k].y, sight[k].z, sightDist[k], perp, deg);
                         }

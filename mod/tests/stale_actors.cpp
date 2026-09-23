@@ -28,8 +28,8 @@ namespace gs::Log
     }
 }
 
-// actors.cpp reaches for three things outside itself. None of them is what is
-// under test, so they answer plainly.
+// actors.cpp and rtti.cpp reach for a few things outside themselves. None
+// of them is what is under test, so they answer plainly.
 namespace gs::player
 {
     struct Pos;
@@ -49,6 +49,7 @@ namespace gs::Settings
     bool Marked(const char*) { return false; }
 }
 
+#include "core/load.cpp"
 #include "game/rtti.cpp"
 #include "game/actors.cpp"
 

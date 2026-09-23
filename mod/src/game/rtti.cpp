@@ -3,6 +3,8 @@
 #include <Windows.h>
 #include <cstring>
 
+#include "core/load.h"
+
 namespace
 {
     // x64 RTTICompleteObjectLocator. Signature is 1 on x64 and every pointer
@@ -23,8 +25,72 @@ namespace
     constexpr size_t kTypeDescriptorNameOffset = 0x10;
 }
 
+namespace
+{
+    // ReadableCached's memory of which regions answered, per thread.
+    struct Region
+    {
+        uintptr_t lo, hi;
+        bool ok;
+    };
+    constexpr int kRegions = 64;
+    thread_local Region t_regions[kRegions];
+    thread_local int t_regionN = 0, t_regionNext = 0, t_regionHit = 0;
+    thread_local uint32_t t_regionMs = 0;
+
+}
+
 namespace gs::rtti
 {
+    // Readable, asked once per region and remembered for half a second on
+    // this thread. VirtualQuery measured 150 to 270 microseconds a call in
+    // this game in the 23 September load reports, so a loop that asks about
+    // the same few regions over and over pays for it hundreds of times a
+    // pass. Only for reads inside a handler: a region can be freed within the
+    // half second.
+    bool ReadableCached(const void* at, size_t n)
+    {
+        const uintptr_t p = reinterpret_cast<uintptr_t>(at);
+        const uint32_t now = GetTickCount();
+        if (now - t_regionMs > 500)
+        {
+            t_regionN = 0;
+            t_regionNext = 0;
+            t_regionMs = now;
+        }
+        const uintptr_t end = p + n;
+        if (t_regionHit < t_regionN)
+        {
+            const Region& r = t_regions[t_regionHit];
+            if (p >= r.lo && end <= r.hi) return r.ok;
+        }
+        for (int i = 0; i < t_regionN; ++i)
+        {
+            const Region& r = t_regions[i];
+            if (p >= r.lo && end <= r.hi)
+            {
+                t_regionHit = i;
+                return r.ok;
+            }
+        }
+        MEMORY_BASIC_INFORMATION mbi{};
+        gs::load::CountQuery();
+        if (VirtualQuery(reinterpret_cast<const void*>(p), &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
+        Region r;
+        r.lo = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        r.hi = r.lo + mbi.RegionSize;
+        const DWORD prot = mbi.Protect & 0xFF;
+        r.ok = mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+               (prot == PAGE_READONLY || prot == PAGE_READWRITE || prot == PAGE_WRITECOPY ||
+                prot == PAGE_EXECUTE_READ || prot == PAGE_EXECUTE_READWRITE || prot == PAGE_EXECUTE_WRITECOPY);
+        const int slot = t_regionN < kRegions ? t_regionN++ : (t_regionNext++ % kRegions);
+        t_regions[slot] = r;
+        t_regionHit = slot;
+        // A read across the region's end is rare; the plain check settles it.
+        if (end > r.hi) return r.ok && Readable(at, n);
+        return r.ok;
+    }
+
     bool Readable(const void* p, size_t bytes)
     {
         if (!p || bytes == 0) return false;
@@ -36,6 +102,7 @@ namespace gs::rtti
         while (cur < end)
         {
             MEMORY_BASIC_INFORMATION mbi{};
+            gs::load::CountQuery();
             if (VirtualQuery(cur, &mbi, sizeof(mbi)) != sizeof(mbi)) return false;
             if (mbi.State != MEM_COMMIT) return false;
 

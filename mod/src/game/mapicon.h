@@ -147,7 +147,13 @@ namespace gs::mapicon
     // again and a redraw does not bring it back.
     // `x` and `z` come back with where it stood, so the caller can take it out
     // of the file as well.
-    bool Forget(int64_t keyId, float* x, float* z);
+    // `byGame` false is the mod taking its own pin off, which logs itself.
+    bool Forget(int64_t keyId, float* x, float* z, bool byGame = true);
+
+    // The mod's pins still on the map, with where each stands and its label.
+    // Read on the game's UI thread, the one that places and forgets them.
+    struct LivePin { int64_t id; float x, y, z; char label[16]; };
+    int LivePins(LivePin* out, int n);
 
     // A world has been rebuilt, so nothing the mod drew is on the map any
     // more and none of its keys mean anything. Start again.

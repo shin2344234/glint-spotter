@@ -24,4 +24,5 @@ namespace gs::rtti
     // Whether an address is committed, readable and not a guard page. Used
     // before every read above, and by the scanner for its candidates.
     bool Readable(const void* p, size_t bytes);
+    bool ReadableCached(const void* p, size_t bytes);
 }

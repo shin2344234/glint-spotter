@@ -9,6 +9,7 @@
 #include <mutex>
 #include <vector>
 
+#include "core/load.h"
 #include "core/log.h"
 
 namespace
@@ -246,6 +247,7 @@ namespace gs::hidpad
         if (g_thread) return;
         g_stop.store(false);
         g_thread = CreateThread(nullptr, 0, Reader, nullptr, 0, nullptr);
+        gs::load::AddThread("pad reader", g_thread);
         if (!g_thread) GS_LOG_ERR("pad: could not start the direct reader, error %lu", GetLastError());
     }
 

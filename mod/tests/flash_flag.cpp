@@ -23,6 +23,11 @@ namespace gs::actors
     bool InSet(uintptr_t) { return false; }
 }
 
+namespace gs::load
+{
+    void CountQuery() {}
+}
+
 #include "game/rtti.cpp"
 #include "game/aim.cpp"
 

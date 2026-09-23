@@ -55,6 +55,18 @@ namespace gs::pinstore
     // file. Called when the map removes one.
     void Drop(float x, float z);
 
+    // A placement this save has picked up that the save itself never marks as
+    // taken, a sealed artifact being the one found so far. Held in memory
+    // until the game writes the save, then written as a "taken x y z" line in
+    // the save's group, which a build from before this skips as a line it
+    // cannot read. A load before that forgets it, since the save loaded does
+    // not have the pick up either.
+    void AddTaken(float x, float y, float z);
+
+    // Whether this save has one of those within three metres across and six
+    // up or down.
+    bool TakenNear(float x, float y, float z);
+
     // Copy out the pins for the save being played. Returns how many.
     int All(Saved* out, int n);
     int Count();

@@ -67,7 +67,64 @@ namespace
         return mgr;
     }
 
-    // With out null it counts what would be read and names nothing.
+    // The name. A pointer near the head of an element leads to string
+    // descriptors, each a character pointer, a length and a hash, repeating
+    // every 0x20 bytes. Session sixty-six read
+    // "Mission_PororinVillage_Bell_All_Calphade" and "Hernand_Bell" out of
+    // record 0 that way.
+    //
+    // Guarded by its own handler, not by VirtualQuery. Two queries for each of
+    // up to eight pointers per element came to a few hundred thousand for the
+    // table, 6 to 15 seconds of them on every launch, all while the game was
+    // streaming the world in, and every query takes the lock the game's own
+    // allocations take. actors.cpp made the same change in session twenty-one.
+    // A fault costs that one pointer, and the next is tried.
+    bool NameFrom(uintptr_t pv, char* name, size_t cap)
+    {
+        name[0] = 0;
+        __try
+        {
+            const uintptr_t cs = *reinterpret_cast<const uintptr_t*>(pv);
+            const uint32_t len = *reinterpret_cast<const uint32_t*>(pv + 8);
+            if (cs < 0x10000 || cs > 0x00007FFFFFFFFFFFull || len == 0 || len > 200) return false;
+            size_t w = 0;
+            for (; w < len && w + 1 < cap; ++w)
+            {
+                const char ch = *reinterpret_cast<const volatile char*>(cs + w);
+                if (ch == 0) break;
+                if (static_cast<unsigned char>(ch) < 0x20 || static_cast<unsigned char>(ch) > 0x7E)
+                {
+                    name[0] = 0;
+                    return false;
+                }
+                name[w] = ch;
+            }
+            name[w] = 0;
+            if (w < 2) name[0] = 0;
+            return name[0] != 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            name[0] = 0;
+            return false;
+        }
+    }
+
+    void NameAt(uintptr_t el, char* name, size_t cap)
+    {
+        name[0] = 0;
+        for (uintptr_t k = 0; k + 8 <= 0x40; k += 8)
+        {
+            const uintptr_t pv = *reinterpret_cast<const uintptr_t*>(el + k);
+            if (pv < 0x10000 || pv > 0x00007FFFFFFFFFFFull || (pv & 7) != 0) continue;
+            if (NameFrom(pv, name, cap)) return;
+        }
+    }
+
+    // With out null it counts what would be read and names nothing. Its
+    // checks are cached by region: the count runs twice a second until the
+    // table settles, and asking VirtualQuery afresh each time cost 45 ms a
+    // call and 5 seconds of CPU in the first minute of the 23 September run.
     int ReadInto(uintptr_t mgr, gs::lgso::Place* out, int cap)
     {
         int n = 0;
@@ -76,7 +133,7 @@ namespace
             const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
             const uintptr_t recs = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Records);
             if (!count || count > 100000 || recs < 0x10000) return 0;
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(recs), 8ull * count)) return 0;
+            if (!gs::rtti::ReadableCached(reinterpret_cast<const void*>(recs), 8ull * count)) return 0;
             const auto* arr = reinterpret_cast<const uintptr_t*>(recs);
             for (uint32_t i = 0; i < count && n < cap; ++i)
             {
@@ -88,7 +145,7 @@ namespace
                 // also keep a second copy of their list past +0x70, which is
                 // why only the first is taken; taking every one read the whole
                 // table twice.
-                if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x100)) continue;
+                if (rec < 0x10000 || !gs::rtti::ReadableCached(reinterpret_cast<const void*>(rec), 0x100)) continue;
                 bool took = false;
                 for (uintptr_t off = 0; off + 16 <= 0x100 && n < cap && !took; off += 8)
                 {
@@ -98,7 +155,7 @@ namespace
                     if (a2 < 0x10000 || (a2 & 7) != 0) continue;
                     if (c == 0 || c > cap2 || cap2 > 100000) continue;
                     const size_t span = static_cast<size_t>(c) * gs::sig::kOff_LgsoData_Stride;
-                    if (!gs::rtti::Readable(reinterpret_cast<const void*>(a2), span)) continue;
+                    if (!gs::rtti::ReadableCached(reinterpret_cast<const void*>(a2), span)) continue;
                     const int before = n;
                     for (uint32_t e = 0; e < c && n < cap; ++e)
                     {
@@ -119,35 +176,7 @@ namespace
                         pl.record = static_cast<uint16_t>(i);
                         pl.element = static_cast<uint16_t>(e);
                         pl.at = el;
-                        pl.name[0] = 0;
-                        // The name. A pointer near the head of an element
-                        // leads to string descriptors, each a character
-                        // pointer, a length and a hash, repeating every 0x20
-                        // bytes. Session sixty-six read
-                        // "Mission_PororinVillage_Bell_All_Calphade" and
-                        // "Hernand_Bell" out of record 0 that way.
-                        for (uintptr_t k = 0; k + 8 <= 0x40 && !pl.name[0]; k += 8)
-                        {
-                            const uintptr_t pv = *reinterpret_cast<const uintptr_t*>(el + k);
-                            if (pv < 0x10000 || (pv & 7) != 0) continue;
-                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(pv), 16)) continue;
-                            const uintptr_t cs = *reinterpret_cast<const uintptr_t*>(pv);
-                            const uint32_t len = *reinterpret_cast<const uint32_t*>(pv + 8);
-                            if (cs < 0x10000 || len == 0 || len > 200) continue;
-                            if (!gs::rtti::Readable(reinterpret_cast<const void*>(cs), len)) continue;
-                            size_t w = 0;
-                            bool ok = true;
-                            for (; w < len && w + 1 < sizeof(pl.name); ++w)
-                            {
-                                const char ch = *reinterpret_cast<const volatile char*>(cs + w);
-                                if (ch == 0) break;
-                                if (static_cast<unsigned char>(ch) < 0x20 ||
-                                    static_cast<unsigned char>(ch) > 0x7E) { ok = false; break; }
-                                pl.name[w] = ch;
-                            }
-                            pl.name[w] = 0;
-                            if (!ok || w < 2) pl.name[0] = 0;
-                        }
+                        NameAt(el, pl.name, sizeof(pl.name));
                     }
                     took = n > before;
                 }
@@ -383,6 +412,9 @@ namespace gs::lgso
     {
         if (!name || !name[0]) return false;
         if (_strnicmp(name, "sector_", 7) == 0) return false;
+        // Teleporters have their own switch, so an ini written before they
+        // were added does not need its Kinds line edited to get them.
+        if (gs::Settings::Get().teleporters && _strnicmp(name, "AbyssRuins_", 11) == 0) return true;
         const char* list = gs::Settings::Get().kinds;
         if (!list[0]) return true;
         char lower[64];

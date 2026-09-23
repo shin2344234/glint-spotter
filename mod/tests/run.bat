@@ -30,6 +30,9 @@ pushd "%OUT%"
 
 set FAILED=0
 for %%T in (parse_paths pinstore_flow flash_flag pad_reports stale_actors) do (
+  rem The last build's exe is deleted first. Left in place, a test that no
+  rem longer compiled ran its old self and the run printed all five pass.
+  if exist "%OUT%\%%T.exe" del "%OUT%\%%T.exe"
   cl /nologo /EHsc /std:c++17 /DNOMINMAX /DWIN32_LEAN_AND_MEAN /D_CRT_SECURE_NO_WARNINGS ^
      /I"%HERE%..\src" "%HERE%%%T.cpp" /Fe:%%T.exe
   if not exist "%OUT%\%%T.exe" (

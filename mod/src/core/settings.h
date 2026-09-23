@@ -312,6 +312,28 @@ namespace gs::Settings
         // memory, where a reload loses it.
         bool keepPins = true;
 
+        // Pins that have done their job come off by themselves.
+        //
+        // An automatic Glint pin marks something to pick up, and once it has
+        // been picked up the pin is only clutter. The save reader already
+        // knows when a placement is taken, both from the records and from a
+        // loaded gimmick's own state, so a Glint pin with a taken placement
+        // under it comes off.
+        bool clearTaken = true;
+
+        // A pin from the key or the pad chord marks a place to go, so it comes
+        // off once the player gets there: within this many metres, measured
+        // across. It has to have been more than ten metres farther than that
+        // first, or a pin dropped close by would go the moment it landed.
+        // Zero leaves them alone.
+        float clearNear = 10.0f;
+
+        // Teleporters, the abyss ruins, as a flash target. Their placements
+        // are named AbyssRuins_ and match nothing on the Kinds line, so the
+        // flash never took one. On, and one already switched on is left alone,
+        // the same way a looted glint is.
+        bool teleporters = true;
+
         // Which of the map's marker pictures a pin uses.
         //
         // The game's create carries two bytes and the map draws from them. A

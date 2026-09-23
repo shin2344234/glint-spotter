@@ -13,9 +13,12 @@
 #include <unordered_set>
 #include <vector>
 
+#include "core/load.h"
 #include "core/log.h"
+#include "core/pinstore.h"
 #include "game/actors.h"
 #include "game/lgso.h"
+#include "game/pickup.h"
 #include "game/player.h"
 #include "game/rtti.h"
 #include "game/typescan.h"
@@ -47,6 +50,16 @@ namespace
     // A collection gimmick goes to Clear when taken; a puzzle that is done
     // has nothing left to glint either.
     bool Taken(uint32_t h) { return h == kClear || h == kComplete || h == kCompleted; }
+
+    // A teleporter is done once it is switched on, and switched on is
+    // GimmickOn. Each ruin is two gimmicks on one AbyssRuins_ placement, the
+    // use-artifact one and its part, so the save holds two records on it. On
+    // 23 September the six Hernand ruins holding a GimmickOn record were
+    // exactly the six the map drew as MapIcon_Abyss_Ruins, at the same
+    // positions, and the 207 with no record had no icon. Only for those
+    // placements: GimmickOn on anything else means nothing about being done.
+    constexpr uint32_t kGimmickOn = 0x150B14D0;
+    bool Ruin(const char* placeName) { return strncmp(placeName, "AbyssRuins_", 11) == 0; }
     const char* NameOf(uint32_t h)
     {
         for (const StateName& s : kStates) if (s.hash == h) return s.name;
@@ -71,6 +84,14 @@ namespace
     // load, and a read that misses a field for a second, while the game is
     // changing its vector, must not hand the glint back for that second.
     std::unordered_set<uintptr_t> g_taken;
+    // Where each of them stands, so a pin can ask whether the thing under it
+    // has gone without knowing which placement it was.
+    struct Spot { float x, y, z; };
+    std::vector<Spot> g_takenAt;
+    // Placement address -> the saved states on it, and -> the live state of
+    // the loaded gimmick standing on it, both for the log. Under g_mutex.
+    std::unordered_map<uintptr_t, std::string> g_saveStates;
+    std::unordered_map<uintptr_t, uint32_t> g_liveByPlace;
     uintptr_t g_takenComp = 0;    // the component the set was read from
     uint32_t g_takenGen = 0;      // and the table generation
     uintptr_t g_lastComp = 0;     // the component Fields last reached
@@ -122,7 +143,7 @@ namespace
     std::vector<gs::lgso::Place> g_places;
     std::vector<uintptr_t> g_fields;          // FieldSaveData objects
     std::unordered_map<uintptr_t, uint32_t> g_lastState;   // record address -> state last seen
-    int g_linesLeft = 1500;
+    int g_linesLeft = 2000;
 
     bool Say()
     {
@@ -131,9 +152,13 @@ namespace
         return true;
     }
 
+    // The handler is the guard, with no VirtualQuery first. A query per
+    // record read every second was most of the 3,600 a second the 23
+    // September load report counted, and each one takes the lock the game's
+    // own allocations take. actors.cpp and the table reader read the same way.
     bool CopyOut(uintptr_t at, void* out, size_t n)
     {
-        if (at < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(at), n)) return false;
+        if (at < 0x10000 || at > 0x00007FFFFFFFFFFFull) return false;
         __try
         {
             memcpy(out, reinterpret_cast<const void*>(at), n);
@@ -267,18 +292,43 @@ namespace
         }
     }
 
-    void Publish(const std::vector<Rec>& recs, const std::vector<uintptr_t>& live)
+    void Take(int place)
     {
+        const gs::lgso::Place& q = g_places[place];
+        if (g_taken.insert(q.at).second) g_takenAt.push_back({q.x, q.y, q.z});
+    }
+
+    void Publish(const std::vector<Rec>& recs, const std::vector<int>& live)
+    {
+        // What the save holds on each placement, for the flash's candidate
+        // lines to quote. Built before the lock is taken: it is a string per
+        // record every second, and the flash's lookups on the game's thread
+        // wait on g_mutex.
+        std::unordered_map<uintptr_t, std::string> states;
+        states.reserve(recs.size());
+        for (const Rec& r : recs)
+        {
+            if (r.place < 0) continue;
+            std::string& s = states[g_places[r.place].at];
+            if (!s.empty()) s += ",";
+            const char* nm = NameOf(r.state);
+            char hex[12];
+            _snprintf_s(hex, sizeof(hex), _TRUNCATE, "%08X", r.state);
+            s += nm ? nm : hex;
+        }
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_takenComp != g_lastComp || g_takenGen != g_placesGen)
         {
             g_taken.clear();
+            g_takenAt.clear();
             g_takenComp = g_lastComp;
             g_takenGen = g_placesGen;
         }
         for (const Rec& r : recs)
-            if (Taken(r.state) && r.place >= 0) g_taken.insert(g_places[r.place].at);
-        for (uintptr_t at : live) g_taken.insert(at);
+            if (r.place >= 0 && (Taken(r.state) || (r.state == kGimmickOn && Ruin(g_places[r.place].name))))
+                Take(r.place);
+        for (int place : live) Take(place);
+        g_saveStates.swap(states);
     }
 
     // ---- logging ----
@@ -309,8 +359,54 @@ namespace
                    pp.valid ? std::sqrt(ex * ex + ez * ez) : -1.0f, state, before, where);
     }
 
+    // Every teleporter the table lists and what the save holds on it, once per
+    // save read. The teleporter is the ruin's use-artifact gimmick, standing
+    // exactly on an AbyssRuins_ placement in table record 6, and it declares
+    // only Wait, GimmickOn, Clear, Lock and Deactive. Which of those means the
+    // player has switched it on is the question; set against a map of the
+    // unlocked ones, this list answers it.
+    void SurveyTeleporters(const std::vector<Rec>& recs)
+    {
+        std::map<int, std::string> states;   // placement -> the states on it
+        for (const Rec& r : recs)
+        {
+            if (r.place < 0 || strncmp(g_places[r.place].name, "AbyssRuins_", 11) != 0) continue;
+            const char* nm = NameOf(r.state);
+            char hex[16];
+            _snprintf_s(hex, sizeof(hex), _TRUNCATE, "%08X", r.state);
+            std::string& s = states[r.place];
+            if (!s.empty()) s += ", ";
+            s += nm ? nm : hex;
+        }
+        // Only the ones the save holds something on are listed one by one. The
+        // first cut listed every ruin in table order and ran out at 120 before
+        // it reached Hernand, the one region the test save has records for.
+        std::map<std::string, int> bare;   // region -> ruins with no record
+        const gs::player::Pos pp = gs::player::Read();
+        for (int i = 0; i < static_cast<int>(g_places.size()); ++i)
+        {
+            const gs::lgso::Place& q = g_places[i];
+            if (strncmp(q.name, "AbyssRuins_", 11) != 0) continue;
+            auto it = states.find(i);
+            if (it == states.end())
+            {
+                std::string region(q.name + 11);
+                region = region.substr(0, region.find('_'));
+                ++bare[region];
+                continue;
+            }
+            if (!Say()) break;
+            const float ex = q.x - pp.x, ez = q.z - pp.z;
+            GS_LOG("[teleport] %s, record %u element %u at (%.1f, %.1f, %.1f), %.0f m away: %s", q.name, q.record,
+                   q.element, q.x, q.y, q.z, pp.valid ? std::sqrt(ex * ex + ez * ez) : -1.0f, it->second.c_str());
+        }
+        for (const auto& kv : bare)
+            if (Say()) GS_LOG("[teleport] %d %s ruin(s) with no save record", kv.second, kv.first.c_str());
+    }
+
     void Survey(const std::vector<Rec>& recs)
     {
+        SurveyTeleporters(recs);
         std::map<uint32_t, int> byState;
         std::map<std::string, int> takenByName, otherByName;
         for (const Rec& r : recs)
@@ -536,7 +632,7 @@ namespace
     std::unordered_set<uintptr_t> g_liveSaid;
     int g_liveLogsLeft = 40, g_liveMissLogsLeft = 20;
 
-    void LiveTaken(std::vector<uintptr_t>& out)
+    void LiveTaken(std::vector<int>& out)
     {
         out.clear();
         // On the heap: Entity's defaults are not all zero, so a static array of
@@ -550,12 +646,26 @@ namespace
             if (!e.gimmick || !e.gimmickComp) continue;
             if (Deref(e.gimmickComp) != e.gimmickVt) continue;   // freed since it was found
             uint32_t st = 0;
-            if (!CopyOut(e.gimmickComp + kOff_LiveState, &st, 4) || !Taken(st)) continue;
+            if (!CopyOut(e.gimmickComp + kOff_LiveState, &st, 4)) continue;
+            // What the player carries is a gimmick too, standing wherever he
+            // does. On 23 September his sword, always GimmickOn, stood 2.4
+            // metres from a locked teleporter and made it read switched on.
+            if (strncmp(e.name, "gimmick_equip_", 14) == 0) continue;
+            // GimmickOn is done only when the gimmick is the teleporter
+            // itself: its use-artifact gimmick went Wait to GimmickOn when
+            // Seth switched one on, and its part stayed Wait.
+            const bool ruinOn = st == kGimmickOn && strstr(e.name, "abyssruins_useartifact") != nullptr &&
+                                strstr(e.name, "_part") == nullptr;
+            if (!Taken(st) && !ruinOn) continue;
             const float p[3] = {e.x, e.y, e.z};
             float dist = 0;
             const int k = Nearest(p, &dist);
+            if (ruinOn && !Taken(st) && (k < 0 || !Ruin(g_places[k].name))) continue;
             const float ex = e.x - pp.x, ez = e.z - pp.z;
-            const float away = pp.valid ? std::sqrt(ex * ex + ez * ez) : -1.0f;
+            // Near the origin is the loading placeholder, not the player: it
+            // printed 10,302 m for a ruin 9 m away on 23 September.
+            const bool here = pp.valid && pp.x * pp.x + pp.z * pp.z >= 100.0f * 100.0f;
+            const float away = here ? std::sqrt(ex * ex + ez * ez) : -1.0f;
             if (k < 0)
             {
                 if (g_liveMissLogsLeft > 0 && g_liveSaid.insert(e.ptr).second && Say())
@@ -568,7 +678,7 @@ namespace
                 continue;
             }
             const gs::lgso::Place& q = g_places[k];
-            out.push_back(q.at);
+            out.push_back(k);
             if (g_liveLogsLeft > 0 && g_liveSaid.insert(q.at).second && Say())
             {
                 --g_liveLogsLeft;
@@ -577,6 +687,141 @@ namespace
                        q.element, q.name[0] ? q.name : "unnamed", dist);
             }
         }
+    }
+
+    // ---- the game's own pick up message ----
+    //
+    // Picking up a sealed artifact moves no state the records or the live
+    // gimmick carry, which a watch on both showed on 23 September: the item
+    // stayed in Wait while the rocks mined beside it went to Break. The pick up
+    // message is what does happen (game/pickup.cpp). Each id it names is looked
+    // up in the entity set, joined to the nearest placement the same way a
+    // record is, and that placement counts as taken from then on. The entity
+    // set keeps an object twelve seconds after the game stops listing it, so
+    // the item is still there to be found a second later.
+    //
+    // A placement whose name starts Challenge_ is handed to the pins file as
+    // well, which writes it under the save being played once the game saves,
+    // so the next load knows too. The
+    // sealed artifacts and standstones are in that family and do not come
+    // back. Veins, sockets and herbs do, so a pick up of one of those counts
+    // for this session only.
+    int g_pickLogsLeft = 60;
+
+    void DrainPickups()
+    {
+        uint32_t ids[32];
+        const int got = gs::pickup::Take(ids, 32);
+        if (got == 0) return;
+        static std::vector<gs::actors::Entity> ents(4096);
+        const int n = gs::actors::Snapshot(ents.data(), static_cast<int>(ents.size()));
+        for (int k = 0; k < got; ++k)
+        {
+            const gs::actors::Entity* e = nullptr;
+            for (int i = 0; i < n && !e; ++i)
+                if (ents[i].eid == ids[k]) e = &ents[i];
+            if (!e)
+            {
+                if (g_pickLogsLeft > 0 && Say())
+                {
+                    --g_pickLogsLeft;
+                    GS_LOG("[pickup] eid %08X is not in the entity set, so where it stood is not known", ids[k]);
+                }
+                continue;
+            }
+            const float p[3] = {e->x, e->y, e->z};
+            float dist = 0;
+            const int place = Nearest(p, &dist);
+            if (place < 0)
+            {
+                if (g_pickLogsLeft > 0 && Say())
+                {
+                    --g_pickLogsLeft;
+                    GS_LOG("[pickup] \"%s\" eid %08X at (%.1f, %.1f, %.1f) has no placement within three metres",
+                           e->name[0] ? e->name : "unnamed", ids[k], e->x, e->y, e->z);
+                }
+                continue;
+            }
+            const gs::lgso::Place& q = g_places[place];
+            const bool keep = strncmp(q.name, "Challenge_", 10) == 0;
+            {
+                std::lock_guard<std::mutex> lock(g_mutex);
+                Take(place);
+            }
+            if (keep) gs::pinstore::AddTaken(q.x, q.y, q.z);
+            if (g_pickLogsLeft > 0 && Say())
+            {
+                --g_pickLogsLeft;
+                GS_LOG_OK("[pickup] \"%s\" eid %08X was picked up, so record %u element %u \"%s\" %.1f m from it "
+                          "is taken%s", e->name[0] ? e->name : "unnamed", ids[k], q.record, q.element,
+                          q.name[0] ? q.name : "unnamed", dist,
+                          keep ? ", and kept for this save once the game saves" : " for this session");
+            }
+        }
+    }
+
+    // Live state changes around the player, for the teleporters. A saved
+    // record reads zero while its gimmick is loaded, so switching one on shows
+    // here first, if anywhere. Only gimmicks within 30 metres, and only a
+    // change, named or as a hash. The first cut of this, on 23 September, also
+    // tried to say when a gimmick stopped being listed and got it wrong; that
+    // half is gone.
+    std::unordered_map<uint32_t, uint32_t> g_liveLast;   // eid -> state last read
+    int g_liveChangeLogsLeft = 200;
+
+    void LiveChanges()
+    {
+        const gs::player::Pos pp = gs::player::Read();
+        if (!pp.valid || pp.x * pp.x + pp.z * pp.z < 100.0f * 100.0f) return;
+        static std::vector<gs::actors::Entity> ents(4096);
+        const int n = gs::actors::Snapshot(ents.data(), static_cast<int>(ents.size()));
+        std::vector<std::pair<uintptr_t, uint32_t>> byPlace;
+        for (int i = 0; i < n; ++i)
+        {
+            const gs::actors::Entity& e = ents[i];
+            if (!e.gimmick || !e.gimmickComp || !e.eid) continue;
+            const float ex = e.x - pp.x, ez = e.z - pp.z;
+            const float d = std::sqrt(ex * ex + ez * ez);
+            if (d > 150.0f) continue;
+            // An abyss gimmick is watched out to 150 metres, anything else to 30.
+            const bool abyss = strstr(e.name, "abyss") != nullptr;
+            if (!abyss && d > 30.0f) continue;
+            if (Deref(e.gimmickComp) != e.gimmickVt) continue;
+            uint32_t st = 0;
+            if (!CopyOut(e.gimmickComp + kOff_LiveState, &st, 4)) continue;
+            const float p[3] = {e.x, e.y, e.z};
+            float pd = 0;
+            const int place = Nearest(p, &pd);
+            if (place >= 0) byPlace.push_back({g_places[place].at, st});
+            const char* a = nullptr;
+            auto it = g_liveLast.find(e.eid);
+            if (it == g_liveLast.end())
+            {
+                g_liveLast.emplace(e.eid, st);
+                if (abyss && g_liveChangeLogsLeft > 0 && Say())
+                {
+                    --g_liveChangeLogsLeft;
+                    a = NameOf(st);
+                    GS_LOG("[live] first sight of \"%s\" eid %08X at (%.1f, %.1f, %.1f), %.0f m away, reading %s%08X%s%s",
+                           e.name, e.eid, e.x, e.y, e.z, d, a ? a : "", st, place >= 0 ? ", on placement " : "",
+                           place >= 0 ? g_places[place].name : "");
+                }
+                continue;
+            }
+            if (it->second != st && g_liveChangeLogsLeft > 0 && Say())
+            {
+                --g_liveChangeLogsLeft;
+                a = NameOf(it->second);
+                const char* b = NameOf(st);
+                GS_LOG("[live] \"%s\" eid %08X at (%.1f, %.1f, %.1f), %.0f m away, went from %s%08X to %s%08X%s%s",
+                       e.name[0] ? e.name : "unnamed", e.eid, e.x, e.y, e.z, d, a ? a : "", it->second, b ? b : "",
+                       st, place >= 0 ? ", on placement " : "", place >= 0 ? g_places[place].name : "");
+            }
+            it->second = st;
+        }
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_liveByPlace.clear();
+        for (const auto& kv : byPlace) g_liveByPlace[kv.first] = kv.second;
     }
 
     DWORD WINAPI Run(LPVOID)
@@ -593,7 +838,7 @@ namespace
         uint32_t missSince = 0, steadySince = 0;
         int lastCount = -1;
         std::vector<Rec> recs;
-        std::vector<uintptr_t> live;
+        std::vector<int> live;
         while (Pause(1000))
         {
             const uint32_t now = GetTickCount();
@@ -617,6 +862,7 @@ namespace
                     {
                         std::lock_guard<std::mutex> lock(g_mutex);
                         g_taken.clear();
+                        g_takenAt.clear();
                     }
                     if (Say())
                     {
@@ -632,9 +878,18 @@ namespace
                           (now - missSince) / 1000);
             missSince = 0;
             missSaid = false;
-            ReadAll(recs);
-            if (surveyed != g_lastComp) g_liveSaid.clear();   // a new save logs its own
-            LiveTaken(live);
+            { gs::load::Timer t(gs::load::kSaveRead); ReadAll(recs); }
+            if (surveyed != g_lastComp)
+            {
+                g_liveSaid.clear();   // a new save logs its own
+                g_liveLast.clear();
+            }
+            {
+                gs::load::Timer t(gs::load::kSaveLive);
+                LiveTaken(live);
+                DrainPickups();
+                LiveChanges();
+            }
 
             if (surveyed != g_lastComp)
             {
@@ -656,7 +911,7 @@ namespace
                               total, g_places.size());
                 Survey(recs);
                 for (const Rec& r : recs) g_lastState[r.at] = r.state;
-                Publish(recs, live);
+                { gs::load::Timer t(gs::load::kSavePublish); Publish(recs, live); }
                 continue;
             }
 
@@ -671,7 +926,7 @@ namespace
                     Line(isNew ? "new" : "changed", r, isNew ? 0 : it->second);
                 g_lastState[r.at] = r.state;
             }
-            Publish(recs, live);
+            { gs::load::Timer t(gs::load::kSavePublish); Publish(recs, live); }
         }
         return 0;
     }
@@ -686,6 +941,7 @@ namespace gs::savemap
         g_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         if (!g_stopEvent) return;
         g_thread = CreateThread(nullptr, 0, Run, nullptr, 0, nullptr);
+        gs::load::AddThread("save reader", g_thread);
     }
 
     void Stop(bool processTerminating)
@@ -702,6 +958,34 @@ namespace gs::savemap
         if (!placementAt) return false;
         std::lock_guard<std::mutex> lock(g_mutex);
         return g_taken.count(placementAt) != 0;
+    }
+
+    void Describe(uintptr_t placementAt, char* out, size_t n)
+    {
+        if (!out || !n) return;
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto it = g_saveStates.find(placementAt);
+        auto lv = g_liveByPlace.find(placementAt);
+        char live[32] = "";
+        if (lv != g_liveByPlace.end())
+        {
+            const char* nm = NameOf(lv->second);
+            if (nm) _snprintf_s(live, sizeof(live), _TRUNCATE, ", live %s", nm);
+            else _snprintf_s(live, sizeof(live), _TRUNCATE, ", live %08X", lv->second);
+        }
+        _snprintf_s(out, n, _TRUNCATE, "save %s%s%s", it == g_saveStates.end() ? "none" : it->second.c_str(), live,
+                    g_taken.count(placementAt) ? ", TAKEN" : "");
+    }
+
+    bool TakenNear(float x, float y, float z)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        for (const Spot& s : g_takenAt)
+        {
+            const float ex = s.x - x, ez = s.z - z;
+            if (std::fabs(s.y - y) <= kJoinHeight && ex * ex + ez * ez <= kJoinMetres * kJoinMetres) return true;
+        }
+        return false;
     }
 
     int TakenCount()

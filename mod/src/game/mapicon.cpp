@@ -6,7 +6,9 @@
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <unordered_set>
 
+#include "core/load.h"
 #include "core/log.h"
 #include "core/settings.h"
 #include "game/rtti.h"
@@ -244,6 +246,25 @@ namespace
         // before is what a flash session is for, so both are dumped in full no
         // matter how many icons came before them.
         if (fresh) GS_LOG("[spy %s] new icon name: \"%s\"", label, c.name8);
+        // The teleporters' own icons. The map draws MapIcon_Abyss_Ruins and
+        // MapIcon_Abyss_Ruins_Fog, and which one a ruin gets is the game's
+        // word on whether it has been switched on, which nothing in the save
+        // has been read as yet. Every one, once per key, with where it stands
+        // and every flag the call carries, so they can be matched to the
+        // AbyssRuins_ placements by position.
+        if (c.ok && surface == 0 && strstr(c.name8, "Abyss_Ruins"))
+        {
+            static std::unordered_set<int64_t> keys;
+            static int left = 60;
+            if (left > 0 && keys.insert(c.keyId).second)
+            {
+                --left;
+                GS_LOG("[ruinicon] \"%s\" key %lld/0x%02X at (%.1f, %.1f, %.1f) type 0x%04X dword4 %u float5 %.3f "
+                       "str7 %s byte9 %u byte11 %u", c.name8, static_cast<long long>(c.keyId), c.keyKind, c.pos[0],
+                       c.pos[1], c.pos[2], c.type, c.dword4, c.float5, c.str7Null ? "null" : c.str7, c.byte9,
+                       c.byte11);
+            }
+        }
         if (n <= kFullDumps || pin || fresh)
         {
             GS_LOG("[spy %s #%llu] this=0x%p type=0x%04X key=%lld/0x%02X dword4=%u name=\"%s\"%s",
@@ -412,7 +433,10 @@ namespace
                             void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
     {
         void* const a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
-        RecordRemove(0, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        {
+            gs::load::Timer timed(gs::load::kIconRemove);
+            RecordRemove(0, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        }
         return g_rmOrig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
     }
 
@@ -420,7 +444,10 @@ namespace
                            void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
     {
         void* const a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
-        RecordRemove(1, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        {
+            gs::load::Timer timed(gs::load::kIconRemove);
+            RecordRemove(1, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        }
         return g_rmOrig[1](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
     }
 
@@ -428,7 +455,10 @@ namespace
                       void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
     {
         void* a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
-        Record(0, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        {
+            gs::load::Timer timed(gs::load::kIconCreate);
+            Record(0, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        }
         void* r = g_orig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 
         // The game's call is done and we are on its thread with its controller
@@ -452,7 +482,10 @@ namespace
                      void* a8, void* a9, void* a10, void* a11, void* a12, void* a13, void* a14)
     {
         void* a[14] = {a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14};
-        Record(1, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        {
+            gs::load::Timer timed(gs::load::kIconCreate);
+            Record(1, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+        }
         return g_orig[1](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
     }
 }
@@ -622,6 +655,23 @@ namespace gs::mapicon
         return got;
     }
 
+    int LivePins(LivePin* out, int n)
+    {
+        const int total = g_placedN.load();
+        int got = 0;
+        for (int i = 0; i < total && i < kMaxPins && got < n; ++i)
+        {
+            const Placed& p = g_placed[i];
+            if (p.gone) continue;
+            LivePin& o = out[got++];
+            o.id = p.id;
+            o.x = p.x; o.y = p.y; o.z = p.z;
+            memcpy(o.label, p.label, sizeof(o.label));
+            o.label[sizeof(o.label) - 1] = 0;
+        }
+        return got;
+    }
+
     void Remember(float x, float y, float z, const char* label, bool drawn, int64_t keyId)
     {
         const int i = g_placedN.load();
@@ -733,7 +783,7 @@ namespace gs::mapicon
         return true;
     }
 
-    bool Forget(int64_t keyId, float* x, float* z)
+    bool Forget(int64_t keyId, float* x, float* z, bool byGame)
     {
         const int n = g_placedN.load();
         for (int i = 0; i < n && i < kMaxPins; ++i)
@@ -742,8 +792,9 @@ namespace gs::mapicon
             g_placed[i].gone = true;
             if (x) *x = g_placed[i].x;
             if (z) *z = g_placed[i].z;
-            GS_LOG_OK("[pin] the game removed the mod's \"%s\" pin, key %lld; that place is free "
-                      "to mark again", g_placed[i].label, static_cast<long long>(keyId));
+            if (byGame)
+                GS_LOG_OK("[pin] the game removed the mod's \"%s\" pin, key %lld; that place is free "
+                          "to mark again", g_placed[i].label, static_cast<long long>(keyId));
             return true;
         }
         return false;

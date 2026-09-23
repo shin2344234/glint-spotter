@@ -19,6 +19,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>") # static
 
 add_library(GlintSpotter SHARED
     src/dllmain.cpp
+    src/core/load.cpp
     src/core/log.cpp
     src/core/mod.cpp
     src/core/pinstore.cpp
@@ -30,6 +31,7 @@ add_library(GlintSpotter SHARED
     src/game/alert.cpp
     src/game/pinmodel.cpp
     src/game/realpin.cpp
+    src/game/pickup.cpp
     src/game/player.cpp
     src/game/aim.cpp
     src/game/actors.cpp
