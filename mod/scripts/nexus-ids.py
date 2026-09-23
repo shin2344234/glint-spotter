@@ -2,11 +2,13 @@
 
     py -3 nexus-ids.py
 
-The number in the mod page URL is not the id the v3 API wants for either call.
-This resolves the real ones and lists the files on the page with their
-versions, which is how publish-nexus.ps1 gets the two ids it needs.
+Synced from release-kit. Do not edit it here; the next sync overwrites it.
 
-Set PAGE_ID below to the number in the mod page URL once the page exists.
+The mod page URL carries a page number, which is not the id the v3 API wants
+for either call. This resolves the real ones from nexus.page in release.json
+and lists the files on the page with their versions, so the ids in
+release.json can be checked against reality. Paste what it reads back into
+nexus.modId, nexus.dmmFileId and nexus.manualFileId.
 
 Read only. It sends nothing and changes nothing.
 
@@ -19,11 +21,17 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from vtscan import read_key  # same environment-then-keyfile lookup
+import release_config as rc
+
+CFG = rc.load()
+read_key = rc.read_key
 
 API = "https://api.nexusmods.com/v3"
-GAME = "crimsondesert"
-PAGE_ID = "3472"          # the number in the mod page URL
+GAME = CFG.nexus.get("game", "crimsondesert")
+# The number in the mod page URL, from release.json. Never borrow another
+# mod's, which is how a Glint Spotter announcement reached the Flight Freedom
+# page on 14 September 2026.
+PAGE_ID = os.environ.get("NEXUS_PAGE_ID", "").strip() or str(CFG.nexus.get("page", "")).strip()
 
 
 def get(key, path):
@@ -40,6 +48,8 @@ def get(key, path):
 
 
 def main():
+    if not PAGE_ID:
+        raise SystemExit("nexus.page is empty in release.json. Create the page first, then set it.")
     key = read_key("NEXUS_API_KEY")
     if not key:
         raise SystemExit(
@@ -66,7 +76,9 @@ def main():
                      (v.get("uploaded_at") or "")[:19],
                      "   primary" if v.get("is_primary") else ""))
     print()
-    print("publish-nexus.ps1 uses the active file id and the v3 mod id above.")
+    print("release.json has: modId %s, dmmFileId %s, manualFileId %s"
+          % (CFG.nexus.get("modId"), CFG.nexus.get("dmmFileId"), CFG.nexus.get("manualFileId")))
+    print("publish-nexus.ps1 uses those. If they differ from the ids above, fix release.json.")
     print("A version already listed must not be published again: the changelog")
     print("endpoint appends, so a second run posts the text twice.")
 

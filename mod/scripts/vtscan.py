@@ -5,19 +5,21 @@
     py -3 vtscan.py --prose     also print the paragraphs the README and the
                                 Nexus description want, with the numbers filled in
 
-Run package.py first: this reads the archive and the plugin out of dist and
-takes the version from version.h, so the two files it reports are the two the
-release actually ships.
+Synced from release-kit. Do not edit it here; the next sync overwrites it.
+
+Run package.ps1 first: this reads the two archives and the plugin out of dist
+and takes the version from the header named in release.json, so the three
+files it reports are the three the release actually ships.
 
 Needs a key in VT_API_KEY. Get one by signing in at virustotal.com and opening
 the API key page from the account menu. The free key is enough: the limits are
 500 requests a day at four a minute, and a release costs six. The free key may
 not be used commercially, which this is not.
 
-Nexus submits an uploaded archive by itself, so that one usually has a report
-before this script asks. The loose plugin never does, and the plugin's number
-is the one worth quoting, because the scanners are objecting to the PE rather
-than to a zip container.
+Nexus submits the DMM archive by itself when a file is uploaded, so that one
+usually has a report before this script asks. The loose plugin never does, and
+the plugin's number is the one worth quoting, because the scanners are
+objecting to the PE rather than to a zip container.
 """
 import argparse
 import hashlib
@@ -30,49 +32,24 @@ import time
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import release_config as rc
+
 API = "https://www.virustotal.com/api/v3"
 GUI = "https://www.virustotal.com/gui/file/"
-HERE = os.path.dirname(os.path.abspath(__file__))
-MOD = os.path.dirname(HERE)
-DIST = os.path.join(MOD, "dist")
+CFG = rc.load()
+DIST = CFG.dist
+KEYFILE = rc.KEYFILE
+read_key = rc.read_key
+
 
 # The order the README and the description list them.
 def release_files(version):
     return [
-        ("GlintSpotter-%s.zip" % version, "the archive"),
-        ("GlintSpotter.asi", "the plugin"),
+        ("%s-%s-DMM.zip" % (CFG.file_base, version), "the DMM archive"),
+        ("%s-%s.zip" % (CFG.file_base, version), "the full archive"),
+        ("%s.asi" % CFG.file_base, "the plugin"),
     ]
-
-
-def version_from_header():
-    h = os.path.join(MOD, "src", "version.h")
-    text = io.open(h, encoding="utf-8").read()
-    m = re.search(r'#define\s+GS_VERSION_STRING\s+"([^"]+)"', text)
-    if not m:
-        raise SystemExit("no GS_VERSION_STRING in %s" % h)
-    return m.group(1)
-
-
-# Keys come from the environment first. keys.local.env beside this script is
-# the fallback, so both keys can live in one gitignored file instead of two
-# environment variables. Nothing here ever prints a key.
-KEYFILE = os.path.join(HERE, "keys.local.env")
-
-
-def read_key(name):
-    got = os.environ.get(name)
-    if got:
-        return got.strip()
-    if not os.path.exists(KEYFILE):
-        return None
-    for line in io.open(KEYFILE, encoding="utf-8"):
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        if k.strip() == name:
-            return v.strip().strip('"').strip("'")
-    return None
 
 
 def sha256(path):
@@ -185,7 +162,7 @@ def main():
             "  put VT_API_KEY=<key> in %s\n"
             "which is gitignored." % KEYFILE)
 
-    version = args.version or version_from_header()
+    version = args.version or CFG.version
     rows = []
     for name, label in release_files(version):
         path = os.path.join(DIST, name)
@@ -199,6 +176,13 @@ def main():
             continue
         hits, total = score(attrs)
         names = flagged(attrs)
+        if total == 0:
+            # A fresh upload reads 0/0 until the engines report, which took
+            # eight minutes on PSM 1.1.3. That is no result, not a clean one.
+            print("%-34s 0/0  no engine has reported yet; run again in a few minutes" % name)
+            print("%-34s %s%s" % ("", GUI, digest))
+            rows.append((name, label, digest, None, None))
+            continue
         print("%-34s %d/%d  %s" % (name, hits, total,
                                    ", ".join("%s %s" % kv for kv in sorted(names.items())) or "clean"))
         print("%-34s %s%s" % ("", GUI, digest))
@@ -207,8 +191,8 @@ def main():
     if not args.prose:
         return
 
-    plugin = next((r for r in rows if r[0] == "GlintSpotter.asi" and r[3]), None)
-    archive = next((r for r in rows if r[0].endswith(".zip") and r[3]), None)
+    plugin = next((r for r in rows if r[0] == "%s.asi" % CFG.file_base and r[3]), None)
+    dmm = next((r for r in rows if r[0].endswith("-DMM.zip") and r[3]), None)
     if not plugin:
         print("\nNo plugin report yet, so no prose.")
         return
@@ -216,13 +200,13 @@ def main():
     named = ", ".join("%s (%s)" % (e, r) for e, r in sorted(plugin[4].items()))
     print("\n--- for README.md and the description ---")
     print("plugin %d/%d: %s" % (hits, total, named or "nothing"))
-    if archive:
-        print("archive %d/%d" % archive[3])
+    if dmm:
+        print("DMM archive %d/%d" % dmm[3])
     print("plugin report:  %s%s" % (GUI, plugin[2]))
-    if archive:
-        print("archive report: %s%s" % (GUI, archive[2]))
-    print("\nThe Nexus page wants the archive's report link, since that is the file\n"
-          "people download. The plugin's number is the one that explains a flag.")
+    if dmm:
+        print("archive report: %s%s" % (GUI, dmm[2]))
+    print("\nQuote the trend across releases, not this one number. The line in\n"
+          "README.md and nexus-description.bbcode carries the whole sequence.")
 
 
 if __name__ == "__main__":

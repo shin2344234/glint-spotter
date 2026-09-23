@@ -1,0 +1,40 @@
+{
+  "name": "Glint Spotter",
+  "fileBase": "GlintSpotter",
+  "version": {
+    "header": "mod/src/version.h",
+    "macro": "GS_VERSION_STRING"
+  },
+  "scriptsDir": "mod/scripts",
+  "dist": "mod/dist",
+  "sources": [
+    "mod/src",
+    "mod/CMakeLists.txt"
+  ],
+  "manualZip": [
+    "README.md",
+    "LICENSE"
+  ],
+  "gates": [
+    {
+      "name": "the five tests pass",
+      "run": "mod\\tests\\run.bat"
+    }
+  ],
+  "evergreen": [
+    "private/nexus/nexus-description.bbcode",
+    "README.md"
+  ],
+  "github": "shin2344234/glint-spotter",
+  "nexus": {
+    "game": "crimsondesert",
+    "page": "3472",
+    "modId": "38521561681296",
+    "dmmFileId": "",
+    "manualFileId": "7953159"
+  },
+  "discord": {
+    "channel": "1547305058922668072"
+  },
+  "requires": []
+}
