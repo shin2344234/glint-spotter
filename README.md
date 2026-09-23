@@ -35,12 +35,14 @@ before you install it.
 ## Installing
 
 Ultimate ASI Loader (`winmm.dll`) has to be in the game's `bin64` folder. With
-the game closed, copy `GlintSpotter.asi` into `bin64` next to it. Copy
-`GlintSpotter.ini` there as well, or let the mod write one the first time it
-runs.
+the game closed, copy `GlintSpotter.asi` into `bin64` next to it. The mod
+writes `GlintSpotter.ini` there the first time it runs, and never overwrites one
+that's already there. From 1.1.28 the plugin is signed with a Microsoft-issued
+certificate.
 
-Start the game and load a save. The mod is ready about a second after the world
-appears, and the pad pulses twice to say so.
+Start the game and load a save. The pad pulses twice when the mod is ready, a
+few seconds after the world appears, once the game has finished listing its
+glints.
 
 ## Using it
 

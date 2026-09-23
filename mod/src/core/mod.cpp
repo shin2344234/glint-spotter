@@ -1018,24 +1018,30 @@ namespace
     // module global and thirty milliseconds of reading, waited behind it every
     // launch: on 18 September the world was there at 08:18:09 and the table
     // at 08:18:23, and a press at 08:18:15 found nothing to look in. It needs
-    // nothing but the global, so it is tried twice a second until it answers,
-    // and again whenever it has been dropped.
+    // nothing but the global, so it is read twice a second until it has
+    // settled, and Load answers from what it holds after that unless the
+    // manager has changed.
     DWORD WINAPI TableThread(LPVOID)
     {
+        bool wasSettled = false;
         while (!g_stop.load())
         {
-            if (gs::lgso::Count() == 0 && gs::lgso::Load() > 0 && gs::Settings::Get().verbose)
+            gs::lgso::Load(gs::player::Read().valid);
+            const bool settled = gs::lgso::Settled();
+            if (settled && !wasSettled && gs::Settings::Get().verbose)
             {
                 gs::lgso::LogKinds();
                 gs::lgso::LogCatalog(40, 64);
             }
+            wasSettled = settled;
             // Ready is both halves: the flash's component, which the worker
             // finds, and this table, which a press looks in. Either can come
             // first, and this thread sees both, so it says so. Two distinct
             // pulses, once a session, so it cannot be taken for a pin landing,
-            // which is one long one.
+            // which is one long one. The table counts once it has settled: the
+            // 23 September log that read 19 placements buzzed ready on them.
             static bool readySaid = false;
-            if (!readySaid && gs::player::SpecialComponent() != 0 && gs::lgso::Count() > 0)
+            if (!readySaid && gs::player::SpecialComponent() != 0 && settled)
             {
                 readySaid = true;
                 GS_LOG_OK("ready to mark in %llu ms: the flash's component and the table are both in hand",

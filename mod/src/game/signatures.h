@@ -10,7 +10,8 @@
 // check agrees: a vtable must name its class through RTTI, a function must
 // start with the bytes the analysis saw, or the value is found again at
 // runtime by RTTI or by byte pattern. Re-derive the constants with
-// docs/investigations/rebase.py, which prints this block for a new exe.
+// docs/investigations/rebase.py, which finds each one in a new exe and says
+// which changed.
 //
 // 2949, the 21 September patch, put sixteen bytes into the code somewhere
 // between 0x495700 and 0xD77700. Everything above that moved by exactly 0x10

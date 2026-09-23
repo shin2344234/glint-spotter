@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "core/log.h"
+#include "game/actors.h"
 #include "game/lgso.h"
 #include "game/player.h"
 #include "game/rtti.h"
@@ -266,7 +267,7 @@ namespace
         }
     }
 
-    void Publish(const std::vector<Rec>& recs)
+    void Publish(const std::vector<Rec>& recs, const std::vector<uintptr_t>& live)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_takenComp != g_lastComp || g_takenGen != g_placesGen)
@@ -277,6 +278,7 @@ namespace
         }
         for (const Rec& r : recs)
             if (Taken(r.state) && r.place >= 0) g_taken.insert(g_places[r.place].at);
+        for (uintptr_t at : live) g_taken.insert(at);
     }
 
     // ---- logging ----
@@ -515,6 +517,68 @@ namespace
         return false;
     }
 
+    // ---- what a loaded gimmick says about itself ----
+    //
+    // While a gimmick is loaded near the player, its saved record's state at
+    // +0x21C reads zero, and it comes back when he walks off: a record on
+    // AbyssRuins_Her_0027 went from Wait to zero at 1 metre and back to Wait
+    // at 41. So a done standstone the player loaded in beside read as not
+    // taken and got pinned. The live gimmick component holds the state at
+    // +0x270 while it is loaded. Found by scanning every loaded gimmick's
+    // component for the state hashes on 23 September: +0x270 held one on 162
+    // of 164, and the operator on the finished Challenge_Standstone_Adventure_0015
+    // read Complete there on four passes, 1 to 16 metres from the player.
+    // +0x27C held the same value on most of them and is not used.
+    constexpr uintptr_t kOff_LiveState = 0x270;
+
+    // Placements a loaded gimmick says are done, joined the same way records
+    // are. Only ever added to the taken set, never taken out of it.
+    std::unordered_set<uintptr_t> g_liveSaid;
+    int g_liveLogsLeft = 40, g_liveMissLogsLeft = 20;
+
+    void LiveTaken(std::vector<uintptr_t>& out)
+    {
+        out.clear();
+        // On the heap: Entity's defaults are not all zero, so a static array of
+        // them is stored in the plugin file, 575 KB of it.
+        static std::vector<gs::actors::Entity> ents(4096);
+        const int n = gs::actors::Snapshot(ents.data(), static_cast<int>(ents.size()));
+        const gs::player::Pos pp = gs::player::Read();
+        for (int i = 0; i < n; ++i)
+        {
+            const gs::actors::Entity& e = ents[i];
+            if (!e.gimmick || !e.gimmickComp) continue;
+            if (Deref(e.gimmickComp) != e.gimmickVt) continue;   // freed since it was found
+            uint32_t st = 0;
+            if (!CopyOut(e.gimmickComp + kOff_LiveState, &st, 4) || !Taken(st)) continue;
+            const float p[3] = {e.x, e.y, e.z};
+            float dist = 0;
+            const int k = Nearest(p, &dist);
+            const float ex = e.x - pp.x, ez = e.z - pp.z;
+            const float away = pp.valid ? std::sqrt(ex * ex + ez * ez) : -1.0f;
+            if (k < 0)
+            {
+                if (g_liveMissLogsLeft > 0 && g_liveSaid.insert(e.ptr).second && Say())
+                {
+                    --g_liveMissLogsLeft;
+                    GS_LOG("[savemap] loaded \"%s\" eid %08X at (%.1f, %.1f, %.1f), %.0f m away, reads %s, and no "
+                           "placement is within three metres of it", e.name[0] ? e.name : "unnamed", e.eid, e.x, e.y,
+                           e.z, away, NameOf(st));
+                }
+                continue;
+            }
+            const gs::lgso::Place& q = g_places[k];
+            out.push_back(q.at);
+            if (g_liveLogsLeft > 0 && g_liveSaid.insert(q.at).second && Say())
+            {
+                --g_liveLogsLeft;
+                GS_LOG("[savemap] loaded \"%s\" eid %08X, %.0f m away, reads %s, so record %u element %u \"%s\" "
+                       "%.1f m from it is taken", e.name[0] ? e.name : "unnamed", e.eid, away, NameOf(st), q.record,
+                       q.element, q.name[0] ? q.name : "unnamed", dist);
+            }
+        }
+    }
+
     DWORD WINAPI Run(LPVOID)
     {
         size_t size = 0;
@@ -529,6 +593,7 @@ namespace
         uint32_t missSince = 0, steadySince = 0;
         int lastCount = -1;
         std::vector<Rec> recs;
+        std::vector<uintptr_t> live;
         while (Pause(1000))
         {
             const uint32_t now = GetTickCount();
@@ -568,6 +633,8 @@ namespace
             missSince = 0;
             missSaid = false;
             ReadAll(recs);
+            if (surveyed != g_lastComp) g_liveSaid.clear();   // a new save logs its own
+            LiveTaken(live);
 
             if (surveyed != g_lastComp)
             {
@@ -589,7 +656,7 @@ namespace
                               total, g_places.size());
                 Survey(recs);
                 for (const Rec& r : recs) g_lastState[r.at] = r.state;
-                Publish(recs);
+                Publish(recs, live);
                 continue;
             }
 
@@ -604,7 +671,7 @@ namespace
                     Line(isNew ? "new" : "changed", r, isNew ? 0 : it->second);
                 g_lastState[r.at] = r.state;
             }
-            Publish(recs);
+            Publish(recs, live);
         }
         return 0;
     }

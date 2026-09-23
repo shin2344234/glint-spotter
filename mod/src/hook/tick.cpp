@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <unordered_set>
 #include <vector>
 
 #include "core/log.h"
@@ -788,10 +789,11 @@ namespace
     // A placement the save has in its Clear state has been taken, so there is
     // no glint there any more. Dropped inside the table query, before its
     // nearest 32 are kept, so the next placement on the line gets its turn.
+    std::unordered_set<uintptr_t> g_doneSaid;
     bool SkipTaken(const gs::lgso::Place& p)
     {
         if (!gs::savemap::Completed(p.at)) return false;
-        if (g_doneLogsLeft > 0)
+        if (g_doneLogsLeft > 0 && g_doneSaid.insert(p.at).second)
         {
             --g_doneLogsLeft;
             GS_LOG("[auto] skipping record %u element %u \"%s\" at (%.1f, %.1f, %.1f): the save has it taken",
@@ -1672,6 +1674,9 @@ extern "C" void gs_OnMinimapTick(void* self)
             if (gs::lgso::Count() == 0)
                 GS_LOG("[mark] the level gimmick table has not been read yet; wait for the line "
                        "saying how many placements it holds");
+            else if (!gs::lgso::Settled())
+                GS_LOG("[mark] the level gimmick table is still filling, %d placement(s) so far, so this press "
+                       "looks in part of it", gs::lgso::Count());
             if (gs::lgso::Count() > 0 && ViewRay(pp, &sv))
             {
                 const float flen = std::sqrt(sv.fx * sv.fx + sv.fz * sv.fz);

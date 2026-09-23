@@ -58,10 +58,16 @@ namespace gs::lgso
     // written against real names rather than guesses.
     void LogKinds();
 
-    // Read the table. Cheap to call again: it returns what it has unless the
-    // manager pointer has changed, which happens on a level transition.
-    // Returns how many placements are held.
-    int Load();
+    // Read the table. Until it has settled, every call reads it again, since
+    // the game fills it in stages and a read can land partway. Once settled it
+    // returns what it has unless the manager pointer has changed, which happens
+    // on a level transition. worldUp says whether the player can be read; the
+    // table does not settle before that. Returns how many placements are held.
+    int Load(bool worldUp = true);
+
+    // True once one count has held across reads for three seconds with the
+    // world up. A press before then looks in whatever part has arrived.
+    bool Settled();
 
     int Count();
 

@@ -23,6 +23,32 @@ namespace
     uintptr_t g_loadedFrom = 0;
     uint32_t g_generation = 0;
 
+    // The game fills the table in stages after a world loads, and a read can
+    // land partway. Stonedcolt's first run on 1.1.27 read it at 19 placements
+    // of 18,090 and kept those 19 for the whole session, because nothing read
+    // it again while it held anything at all: every press and every flash found
+    // one entry at the origin and placed nothing. So it is read again until one
+    // count has held for kSettleMs with the world up, and only then is it
+    // settled. The world is the second half because every log so far has the
+    // table full before the player can be read, and a load can stall a fill
+    // for longer than three seconds.
+    constexpr uint32_t kSettleMs = 3000;
+    bool g_settled = false;
+    uint32_t g_sameSince = 0;
+
+    // A full read names every placement, which is two VirtualQuery calls per
+    // name tried, a few hundred thousand for the whole table. Through the
+    // first build of the settle rule it ran every half second until the table
+    // settled, holding g_mutex, and the flash's lookup on the game's thread
+    // waits on g_mutex: the first flash of the 23 September 08:58 session hung
+    // the game for 12.8 seconds, with every thread's log silent, and came
+    // through the moment the table settled. So the waiting is done on a count
+    // that reads no names, the full read runs only when that count moves, and
+    // it is read into its own buffer with g_mutex held only for the copy.
+    std::mutex g_readMutex;              // one full read at a time; two threads call Load
+    gs::lgso::Place g_scratch[kMax];
+    int g_tally = -1;                    // the nameless count the table was last read at
+
     uintptr_t Deref(uintptr_t at)
     {
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 8)) return 0;
@@ -41,6 +67,7 @@ namespace
         return mgr;
     }
 
+    // With out null it counts what would be read and names nothing.
     int ReadInto(uintptr_t mgr, gs::lgso::Place* out, int cap)
     {
         int n = 0;
@@ -86,6 +113,7 @@ namespace
                         const float* p = q + 4;
                         if (!(p[0] == p[0]) || !(p[1] == p[1]) || !(p[2] == p[2])) continue;
                         if (std::fabs(p[0]) > 1.0e6f || std::fabs(p[2]) > 1.0e6f) continue;
+                        if (!out) { ++n; continue; }
                         gs::lgso::Place& pl = out[n++];
                         pl.x = p[0]; pl.y = p[1]; pl.z = p[2];
                         pl.record = static_cast<uint16_t>(i);
@@ -134,25 +162,62 @@ namespace
 
 namespace gs::lgso
 {
-    int Load()
+    int Load(bool worldUp)
     {
         const uintptr_t mgr = Manager();
-        std::lock_guard<std::mutex> lock(g_mutex);
-        if (!mgr)
+        std::lock_guard<std::mutex> reading(g_readMutex);
         {
-            if (g_loadedFrom) GS_LOG("[lgso] the manager is gone; the table is dropped");
-            if (g_loadedFrom || g_n) ++g_generation;
-            g_loadedFrom = 0;
-            g_n = 0;
-            return 0;
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (!mgr)
+            {
+                if (g_loadedFrom) GS_LOG("[lgso] the manager is gone; the table is dropped");
+                if (g_loadedFrom || g_n) ++g_generation;
+                g_loadedFrom = 0;
+                g_n = 0;
+                g_tally = -1;
+                g_settled = false;
+                return 0;
+            }
+            if (mgr == g_loadedFrom && g_settled) return g_n;
         }
-        if (mgr == g_loadedFrom && g_n > 0) return g_n;
-        g_n = ReadInto(mgr, g_places, kMax);
-        g_loadedFrom = mgr;
-        ++g_generation;
-        GS_LOG_OK("[lgso] %d placement(s) read from the level gimmick table at 0x%p", g_n,
-                  reinterpret_cast<void*>(mgr));
+        const bool fresh = mgr != g_loadedFrom;   // only Load writes it, and g_readMutex is held
+        const int tally = ReadInto(mgr, nullptr, kMax);
+        const uint32_t now = GetTickCount();
+        if (fresh || tally != g_tally)
+        {
+            const uint32_t t0 = GetTickCount();
+            const int n = ReadInto(mgr, g_scratch, kMax);
+            const uint32_t took = GetTickCount() - t0;
+            std::lock_guard<std::mutex> lock(g_mutex);
+            memcpy(g_places, g_scratch, sizeof(gs::lgso::Place) * static_cast<size_t>(n));
+            const bool changed = fresh || n != g_n;
+            g_n = n;
+            g_loadedFrom = mgr;
+            g_tally = tally;
+            g_sameSince = now;
+            g_settled = false;
+            if (changed)
+            {
+                // A new count is a new table as far as a copy is concerned.
+                ++g_generation;
+                GS_LOG_OK("[lgso] %d placement(s) read from the level gimmick table at 0x%p in %u ms", g_n,
+                          reinterpret_cast<void*>(mgr), took);
+            }
+            return g_n;
+        }
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_n > 0 && worldUp && now - g_sameSince >= kSettleMs)
+        {
+            g_settled = true;
+            GS_LOG_OK("[lgso] the table has held %d placement(s) for %u ms, so it is complete", g_n, now - g_sameSince);
+        }
         return g_n;
+    }
+
+    bool Settled()
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        return g_settled;
     }
 
     int Count()
