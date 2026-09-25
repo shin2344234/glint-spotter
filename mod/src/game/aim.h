@@ -37,6 +37,10 @@ namespace gs::aim
     // player's actor id, and zero otherwise. False when the component is
     // gone, or when it belongs to a body that is no longer the player's.
     bool FlashActive();
+    // The two special mode records the flag sits in: each is 0x18 bytes at
+    // +0x30 and +0x48 of the component and starts with a 16-bit mode id,
+    // 0xFFFF when empty. False when the component cannot be read.
+    bool ModeRecords(uint16_t* first, uint16_t* second, uint32_t* firstTail, uint32_t* secondTail);
 
     // Search both components for an actor pointer that is not the player and
     // read its position. Logs every candidate it considers on the first few

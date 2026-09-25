@@ -894,6 +894,17 @@ namespace
         {
             g_flashWas = true;
             g_flashOnMs = now;
+            // Which mode raised the flag, every time, so a conversation that
+            // raises it can be told from the flash by one line (GitHub #1).
+            uint16_t m1 = 0, m2 = 0;
+            uint32_t t1 = 0, t2 = 0;
+            static int modeLogsLeft = 60;
+            if (modeLogsLeft > 0 && gs::aim::ModeRecords(&m1, &m2, &t1, &t2))
+            {
+                --modeLogsLeft;
+                GS_LOG("[flash] the special mode flag is up: first record mode 0x%04X, tail %08X; second record "
+                       "mode 0x%04X, tail %08X", m1, t1, m2, t2);
+            }
             g_probedThisPress = false;
             // A new flash is a new ask. Whatever the last one marked stops
             // counting here, so a glint whose pin was deleted can be marked

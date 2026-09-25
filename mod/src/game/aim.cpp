@@ -279,6 +279,29 @@ namespace gs::aim
         return *reinterpret_cast<const uint32_t*>(at) != 0;
     }
 
+    // For the log, when the flag goes up. FlashActive reads only +0x40, the
+    // tail of the first record, and never asks which mode is in it. GitHub #1
+    // has myst0ne getting pins while talking to a questgiver on 1.1.22, after
+    // the stale-flash fix, and a conversation that runs as a special mode of
+    // its own would look exactly like the flash here. The mode id says which.
+    bool ModeRecords(uint16_t* first, uint16_t* second, uint32_t* firstTail, uint32_t* secondTail)
+    {
+        const uintptr_t sp = LiveSpecial();
+        if (!sp) return false;
+        __try
+        {
+            *first = *reinterpret_cast<const uint16_t*>(sp + 0x30);
+            *second = *reinterpret_cast<const uint16_t*>(sp + 0x48);
+            *firstTail = *reinterpret_cast<const uint32_t*>(sp + 0x40);
+            *secondTail = *reinterpret_cast<const uint32_t*>(sp + 0x58);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     namespace
     {
         // One actor pointer found on one of the detect objects, resolved and
