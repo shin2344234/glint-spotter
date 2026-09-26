@@ -102,7 +102,9 @@ int main()
     special.Mode(6);
     Expect("SwordFlash (row 6) reads as on", gs::aim::FlashActive());
     special.Mode(3);
-    Expect("Detect_Lantern (row 3, key 103) reads as on", gs::aim::FlashActive());
+    Expect("Detect_Lantern (row 3), which a conversation raised on 26 September, reads as off", !gs::aim::FlashActive());
+    special.Mode(4);
+    Expect("so does Detect_InteractionAim_NoLantern (row 4)", !gs::aim::FlashActive());
     special.Mode(0);
     Expect("plain Detect (row 0) reads as on", gs::aim::FlashActive());
     special.Mode(15);

@@ -33,12 +33,20 @@ namespace
     // FlashActive took any nonzero +0x40 as the flash. It is the tail of
     // whichever mode is running, and GitHub #1 is myst0ne getting pins while
     // talking to a questgiver after 1.1.21 fixed the freed component. So a
-    // mode with nothing to do with detection no longer counts. Only
-    // Detect_Lantern and SwordFlash define a DetectMode section with the sign
-    // effects that light glints, and the data does not say which of the two
-    // Blinding Flash is, so the whole Detect family stays accepted, and so does
-    // any row past the table. Refused are the sixteen others, Knowledge (row
-    // 8) among them, whose record draws _renderPassKnowledgeNPC over NPCs.
+    // mode with nothing to do with detection no longer counts, Knowledge (row
+    // 8) among sixteen, whose record draws _renderPassKnowledgeNPC over NPCs.
+    //
+    // And play settled which detect mode is the flash. On 26 September every
+    // Blinding Flash, five of them across two sessions, raised row 6,
+    // SwordFlash. Talking to a camp NPC at 09:16:41 raised row 3,
+    // Detect_Lantern, half a second after the game drew the NPC's
+    // MapIcon_DialogIcon, and Seth confirmed that was the conversation. That
+    // is #1 itself, and the first build of this check let it through, because
+    // Detect_Lantern shares the glint effects with SwordFlash
+    // (Condition_DetectMode names both). So row 3 is refused, and so is row 4,
+    // Detect_InteractionAim_NoLantern, the same interaction with no lantern
+    // out. The rest of the Detect family stays accepted, since nothing has
+    // shown what raises it, and so does any row past the table.
     struct Mode
     {
         const char* name;
@@ -48,8 +56,8 @@ namespace
         {"Detect", true},                           // row 0, key 1
         {"Detect_Damian", true},                    // row 1, key 11
         {"Detect_Oongka", true},                    // row 2, key 12
-        {"Detect_Lantern", true},                   // row 3, key 103
-        {"Detect_InteractionAim_NoLantern", true},  // row 4, key 110
+        {"Detect_Lantern", false},                  // row 3, key 103: a conversation
+        {"Detect_InteractionAim_NoLantern", false}, // row 4, key 110: the same, no lantern
         {"Detect_Ship", true},                      // row 5, key 104
         {"SwordFlash", true},                       // row 6, key 105
         {"Anamorphic", false},                      // row 7, key 2
@@ -359,8 +367,8 @@ namespace gs::aim
         // Said once each time the refused mode changes, so a conversation
         // shows up as one line and a wrong call here is plain in a report.
         if (g_lastRefused.exchange(id) != id && g_refusedLogsLeft.fetch_sub(1) > 0)
-            GS_LOG("[flash] the special mode flag is up for %s (row %u), which is not a detect mode, so the "
-                   "automatic marker does not treat it as Blinding Flash", m->name, static_cast<unsigned>(id));
+            GS_LOG("[flash] the special mode flag is up for %s (row %u), which is not the flash, so the "
+                   "automatic marker leaves it alone", m->name, static_cast<unsigned>(id));
         return false;
     }
 

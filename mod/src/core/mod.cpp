@@ -1046,11 +1046,12 @@ namespace
         said = true;
         gs::aim::SetModeTableRows(rows);
         if (rows == gs::sig::kSpecialModeRows)
-            GS_LOG_OK("[flash] the game's special mode table has its %u rows, so a mode other than a detect "
-                      "mode no longer counts as Blinding Flash", rows);
+            GS_LOG_OK("[flash] the game's special mode table has its %u rows, so a conversation or any other "
+                      "mode that is not the flash no longer counts as Blinding Flash", rows);
         else
             GS_LOG_ERR("[flash] the game's special mode table reads %u rows, not the %u this build knows, so "
-                       "every mode counts as Blinding Flash, as before 1.1.31", rows, gs::sig::kSpecialModeRows);
+                       "the mode check is off and every mode counts as Blinding Flash", rows,
+                       gs::sig::kSpecialModeRows);
     }
 
     DWORD WINAPI TableThread(LPVOID)
