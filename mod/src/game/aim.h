@@ -41,6 +41,12 @@ namespace gs::aim
     // +0x30 and +0x48 of the component and starts with a 16-bit mode id,
     // 0xFFFF when empty. False when the component cannot be read.
     bool ModeRecords(uint16_t* first, uint16_t* second, uint32_t* firstTail, uint32_t* secondTail);
+    // The name gamedata/specialmode.staticinfo gives a mode's row, or null.
+    const char* ModeName(uint16_t row);
+    // The row count the game's own special mode table reports. The mode check
+    // in FlashActive runs only while it matches the table aim.cpp was written
+    // from; zero, the default, leaves every mode counting as the flash.
+    void SetModeTableRows(uint32_t rows);
 
     // Search both components for an actor pointer that is not the player and
     // read its position. Logs every candidate it considers on the first few

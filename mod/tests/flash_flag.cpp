@@ -55,6 +55,7 @@ namespace
             memcpy(bytes + 0x08, &owner, sizeof(owner));
         }
         void Flag(uint32_t v) { memcpy(bytes + 0x40, &v, sizeof(v)); }
+        void Mode(uint16_t id) { memcpy(bytes + 0x30, &id, sizeof(id)); }
     };
 }
 
@@ -90,6 +91,37 @@ int main()
     special.Flag(kFlagOn);
     gs::aim::SetSpecialComponent(special.at());
     Expect("handed over again it reads as on", gs::aim::FlashActive());
+
+    printf("-- which mode raised the flag (GitHub #1); the component holds the mode's row --\n");
+    special.Mode(8);
+    Expect("before the game's table is read, Knowledge still counts, as it always did", gs::aim::FlashActive());
+    gs::aim::SetModeTableRows(26);
+    Expect("with the table read, Knowledge (row 8) with the flag up reads as off", !gs::aim::FlashActive());
+    special.Mode(7);
+    Expect("so does Anamorphic (row 7)", !gs::aim::FlashActive());
+    special.Mode(6);
+    Expect("SwordFlash (row 6) reads as on", gs::aim::FlashActive());
+    special.Mode(3);
+    Expect("Detect_Lantern (row 3, key 103) reads as on", gs::aim::FlashActive());
+    special.Mode(0);
+    Expect("plain Detect (row 0) reads as on", gs::aim::FlashActive());
+    special.Mode(15);
+    Expect("DetectTaeguk (row 15) reads as on", gs::aim::FlashActive());
+    special.Mode(0x1234);
+    Expect("a row past the table reads as on, so a new mode cannot switch the marker off", gs::aim::FlashActive());
+    special.Mode(0xFFFF);
+    Expect("an empty record reads as on", gs::aim::FlashActive());
+    special.Mode(8);
+    special.Flag(0);
+    Expect("Knowledge with the flag down reads as off", !gs::aim::FlashActive());
+    special.Flag(kFlagOn);
+    gs::aim::SetModeTableRows(27);
+    Expect("a table with a different row count turns the check off, so Knowledge counts again", gs::aim::FlashActive());
+    gs::aim::SetModeTableRows(26);
+    special.Mode(0);
+    Expect("names come from the game's table by row", gs::aim::ModeName(6) && strcmp(gs::aim::ModeName(6), "SwordFlash") == 0 &&
+                                                         gs::aim::ModeName(8) && strcmp(gs::aim::ModeName(8), "Knowledge") == 0 &&
+                                                         gs::aim::ModeName(26) == nullptr);
 
     printf("-- the load again, but the block is left intact --\n");
     gs::aim::SetPlayerActor(actorB);

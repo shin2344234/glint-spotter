@@ -902,8 +902,11 @@ namespace
             if (modeLogsLeft > 0 && gs::aim::ModeRecords(&m1, &m2, &t1, &t2))
             {
                 --modeLogsLeft;
-                GS_LOG("[flash] the special mode flag is up: first record mode 0x%04X, tail %08X; second record "
-                       "mode 0x%04X, tail %08X", m1, t1, m2, t2);
+                const char* n1 = gs::aim::ModeName(m1);
+                const char* n2 = gs::aim::ModeName(m2);
+                GS_LOG("[flash] the special mode flag is up: first record row %u (%s), tail %08X; second record "
+                       "row %u (%s), tail %08X", m1, n1 ? n1 : "past the game's table", t1, m2,
+                       n2 ? n2 : (m2 == 0xFFFF ? "empty" : "past the game's table"), t2);
             }
             g_probedThisPress = false;
             // A new flash is a new ask. Whatever the last one marked stops

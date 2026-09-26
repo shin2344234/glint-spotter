@@ -1024,6 +1024,34 @@ namespace
     // nothing but the global, so it is read twice a second until it has
     // settled, and Load answers from what it holds after that unless the
     // manager has changed.
+    // The special mode table's row count, read until the game has loaded it,
+    // then handed to the flash's mode check, which runs only on a table with
+    // the rows aim.cpp names. Said once either way.
+    void ReadModeTable()
+    {
+        static bool said = false;
+        if (said) return;
+        uintptr_t base = 0;
+        size_t size = 0;
+        if (!gs::typescan::ModuleRange(base, size)) return;
+        uintptr_t mgr = 0;
+        uint32_t rows = 0;
+        const auto* at = reinterpret_cast<const void*>(base + gs::sig::kSpecialModeManagerGlobal);
+        if (!gs::rtti::Readable(at, 8)) return;
+        mgr = *reinterpret_cast<const uintptr_t*>(at);
+        if (mgr < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(mgr + 8), 4)) return;
+        rows = *reinterpret_cast<const uint32_t*>(mgr + 8);
+        if (!rows) return;   // not loaded yet
+        said = true;
+        gs::aim::SetModeTableRows(rows);
+        if (rows == gs::sig::kSpecialModeRows)
+            GS_LOG_OK("[flash] the game's special mode table has its %u rows, so a mode other than a detect "
+                      "mode no longer counts as Blinding Flash", rows);
+        else
+            GS_LOG_ERR("[flash] the game's special mode table reads %u rows, not the %u this build knows, so "
+                       "every mode counts as Blinding Flash, as before 1.1.31", rows, gs::sig::kSpecialModeRows);
+    }
+
     DWORD WINAPI TableThread(LPVOID)
     {
         bool wasSettled = false;
@@ -1033,6 +1061,7 @@ namespace
                 gs::load::Timer t(gs::load::kTableLoad);
                 gs::lgso::Load(gs::player::Read().valid);
             }
+            ReadModeTable();
             const bool settled = gs::lgso::Settled();
             if (settled && !wasSettled && gs::Settings::Get().verbose)
             {

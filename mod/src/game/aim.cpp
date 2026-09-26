@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "game/actors.h"
 #include "game/rtti.h"
+#include "game/signatures.h"
 
 namespace
 {
@@ -17,6 +18,74 @@ namespace
     constexpr uintptr_t kOff_Tf_ParentEid    = 0xC8;
     constexpr uintptr_t kOff_Tf_ParentPos    = 0xEC;
     constexpr uintptr_t kOff_Special_Active  = 0x40;   // player id while the flash is on
+    constexpr uintptr_t kOff_Special_Mode    = 0x30;   // the mode id at the head of that record
+
+    // The game's special modes, in the order of
+    // gamedata/specialmode.staticinfoheader in package 0008, identical on 2949
+    // and 2976. The component keeps a mode's ROW here, not its key: the loader
+    // at 0x0184C980 puts its loop counter into the name hash at node +0x08
+    // (0x00390D87: movzx eax, word ptr [rax]; mov word ptr [rbx+8], ax),
+    // sizes the table to the header's count, and 0x004A2890 bounds the id
+    // against that count. The first build of this check matched keys, which
+    // would have refused Detect_Lantern (row 3, key 103) as Knowledge (key 3)
+    // and SwordFlash (row 6) as FindCollect, and turned the flash off.
+    //
+    // FlashActive took any nonzero +0x40 as the flash. It is the tail of
+    // whichever mode is running, and GitHub #1 is myst0ne getting pins while
+    // talking to a questgiver after 1.1.21 fixed the freed component. So a
+    // mode with nothing to do with detection no longer counts. Only
+    // Detect_Lantern and SwordFlash define a DetectMode section with the sign
+    // effects that light glints, and the data does not say which of the two
+    // Blinding Flash is, so the whole Detect family stays accepted, and so does
+    // any row past the table. Refused are the sixteen others, Knowledge (row
+    // 8) among them, whose record draws _renderPassKnowledgeNPC over NPCs.
+    struct Mode
+    {
+        const char* name;
+        bool detection;
+    };
+    constexpr Mode kModes[] = {
+        {"Detect", true},                           // row 0, key 1
+        {"Detect_Damian", true},                    // row 1, key 11
+        {"Detect_Oongka", true},                    // row 2, key 12
+        {"Detect_Lantern", true},                   // row 3, key 103
+        {"Detect_InteractionAim_NoLantern", true},  // row 4, key 110
+        {"Detect_Ship", true},                      // row 5, key 104
+        {"SwordFlash", true},                       // row 6, key 105
+        {"Anamorphic", false},                      // row 7, key 2
+        {"Knowledge", false},                       // row 8, key 3
+        {"Hacking", false},                         // row 9, key 4
+        {"AnimalTracking", false},                  // row 10, key 5
+        {"FindCollect", false},                     // row 11, key 6
+        {"FindMine", false},                        // row 12, key 10
+        {"ReadMemory", false},                      // row 13, key 102
+        {"ReadMemory_NotMoveLimit", false},         // row 14, key 109
+        {"DetectTaeguk", true},                     // row 15, key 101
+        {"DetectTaeguk_Damian", true},              // row 16, key 111
+        {"DetectTaeguk_Oongka", true},              // row 17, key 112
+        {"Jijeongta", false},                       // row 18, key 7
+        {"Housing", false},                         // row 19, key 9
+        {"Housing_Island", false},                  // row 20, key 24
+        {"Pond", false},                            // row 21, key 20
+        {"FactionManagement", false},               // row 22, key 21
+        {"FactionManagementWithoutHousing", false}, // row 23, key 23
+        {"MiniGameFake", false},                    // row 24, key 107
+        {"RemoteCatchControl", false},              // row 25, key 108
+    };
+    static_assert(sizeof(kModes) / sizeof(kModes[0]) == gs::sig::kSpecialModeRows, "one entry per row");
+
+    const Mode* FindMode(uint16_t row)
+    {
+        return row < sizeof(kModes) / sizeof(kModes[0]) ? &kModes[row] : nullptr;
+    }
+
+    // Zero until the worker has read the game's own table, and the check
+    // stays off unless it reads kSpecialModeRows: a patch that adds or moves a
+    // mode must cost the check, never the flash.
+    std::atomic<uint32_t> g_modeRows{0};
+
+    std::atomic<uint32_t> g_lastRefused{0xFFFFFFFF};
+    std::atomic<int> g_refusedLogsLeft{20};
 
     // How far into each object it is safe to look, from the disassembly of
     // their allocation sites and their own code:
@@ -275,9 +344,33 @@ namespace gs::aim
         const uintptr_t player = g_player.load();
         if (player && g_specialOwner.load() != player) return false;
         const uintptr_t at = sp + kOff_Special_Active;
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 4)) return false;
-        return *reinterpret_cast<const uint32_t*>(at) != 0;
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(sp + kOff_Special_Mode),
+                                kOff_Special_Active + 4 - kOff_Special_Mode))
+            return false;
+        if (*reinterpret_cast<const uint32_t*>(at) == 0) return false;
+        if (g_modeRows.load() != gs::sig::kSpecialModeRows) return true;
+        const uint16_t id = *reinterpret_cast<const uint16_t*>(sp + kOff_Special_Mode);
+        const Mode* m = FindMode(id);
+        if (!m || m->detection)
+        {
+            g_lastRefused.store(0xFFFFFFFF);   // so the next refusal is said again
+            return true;
+        }
+        // Said once each time the refused mode changes, so a conversation
+        // shows up as one line and a wrong call here is plain in a report.
+        if (g_lastRefused.exchange(id) != id && g_refusedLogsLeft.fetch_sub(1) > 0)
+            GS_LOG("[flash] the special mode flag is up for %s (row %u), which is not a detect mode, so the "
+                   "automatic marker does not treat it as Blinding Flash", m->name, static_cast<unsigned>(id));
+        return false;
     }
+
+    const char* ModeName(uint16_t row)
+    {
+        const Mode* m = FindMode(row);
+        return m ? m->name : nullptr;
+    }
+
+    void SetModeTableRows(uint32_t rows) { g_modeRows.store(rows); }
 
     // For the log, when the flag goes up. FlashActive reads only +0x40, the
     // tail of the first record, and never asks which mode is in it. GitHub #1

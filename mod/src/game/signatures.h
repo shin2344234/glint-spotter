@@ -288,6 +288,17 @@ namespace gs::sig
 // gigabytes of scanning.
 constexpr uintptr_t kLgsoManagerGlobal = 0x06D6E438;
 
+// The special mode table's manager, SpecialModeStaticInfo. Its setter is
+// RVA 0x0184C820, mov qword ptr [rip + 0x05521BC1], rcx ; ret, which writes
+// here. Its loader, 0x0184C980, stores the header's row count at +0x08 and
+// sizes the array at +0x58 to it, and the name hash it fills keeps each
+// mode's row position, not its key, at node +0x08. That row is what the
+// player's special mode component holds at +0x30 and what 0x004A2890 bounds
+// against +0x08. Read once so the flash's mode check can refuse to run on a
+// table that is not the one aim.cpp's row list was taken from.
+constexpr uintptr_t kSpecialModeManagerGlobal = 0x06D6E3E8;
+constexpr uint32_t kSpecialModeRows = 26;
+
 // Globals that hold the ClientActorManager. The startup scan for them reads the
 // whole image a pointer at a time, and while a world is loading that took 42 to
 // 72 seconds on 22 September and four and a half minutes in hawkeye69's 1.1.24
