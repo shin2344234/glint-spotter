@@ -24,6 +24,7 @@
 #include "game/dump.h"
 #include "game/lgso.h"
 #include "game/camera.h"
+#include "game/physics.h"
 #include "hook/pad.h"
 #include "hook/hidpad.h"
 #include "hook/tick.h"
@@ -1062,6 +1063,13 @@ namespace
                 gs::lgso::Load(gs::player::Read().valid);
             }
             ReadModeTable();
+            // Once, as soon as the world is up.
+            static bool warmed = false;
+            if (!warmed && gs::player::Read().valid)
+            {
+                warmed = true;
+                gs::physics::Warm();
+            }
             const bool settled = gs::lgso::Settled();
             if (settled && !wasSettled && gs::Settings::Get().verbose)
             {

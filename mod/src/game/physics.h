@@ -24,6 +24,9 @@ namespace gs::physics
     // True when the wrapper's code and the facade look as analysed and the
     // physics world exists. Cheap; call before every cast.
     bool Ready(const char** why);
+    // Finds the ray cast wrapper now, off the game's thread, so the first line
+    // of sight a pin asks for does not pay for the search.
+    void Warm();
 
     struct Hit
     {

@@ -1,6 +1,7 @@
 #include "game/physics.h"
 
 #include <Windows.h>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 
@@ -29,7 +30,12 @@ namespace
     uintptr_t g_wrapper = 0;
     uintptr_t g_facade = 0;
     uintptr_t g_frameOff = 0;
-    bool g_located = false;
+    // 0 not looked for, 1 being looked for, 2 done. The look reads the whole
+    // code section and took 70 ms on the game's thread the first time a pin
+    // wanted a line of sight on 26 September, so the table thread does it
+    // once the world is up, and a cast that arrives while it runs is told
+    // not ready rather than made to wait.
+    std::atomic<int> g_located{0};
     bool g_saidWhy = false;
 
     bool Base()
@@ -74,8 +80,9 @@ namespace
     // Find the wrapper in the module's code and decode its operands. Runs once.
     void Locate()
     {
-        if (g_located || !Base()) return;
-        g_located = true;
+        if (g_located.load() != 0 || !Base()) return;
+        int expected = 0;
+        if (!g_located.compare_exchange_strong(expected, 1)) return;
         uintptr_t at = g_base;
         __try
         {
@@ -140,6 +147,7 @@ namespace
             g_frameOff = g_base + gs::sig::kPhysicsFrameOff;
             GS_LOG_ERR("[physics] the ray cast wrapper's pattern was not found; using the recorded RVAs, which the prologue check may refuse");
         }
+        g_located.store(2);
     }
 
     bool CallGuarded(CastFn fn, void* facade, int layer, bool flag, const float* start, const float* dir,
@@ -159,10 +167,16 @@ namespace
 
 namespace gs::physics
 {
+    void Warm()
+    {
+        if (Base()) Locate();
+    }
+
     bool Ready(const char** why)
     {
         if (!Base()) { *why = "module range unknown"; return false; }
         Locate();
+        if (g_located.load() != 2) { *why = "the ray cast wrapper is still being looked for"; return false; }
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(g_wrapper), sizeof(kPrologue)) ||
             memcmp(reinterpret_cast<const void*>(g_wrapper), kPrologue, sizeof(kPrologue)) != 0)
         {
