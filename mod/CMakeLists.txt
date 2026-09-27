@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(GlintSpotter LANGUAGES CXX ASM_MASM)
+project(GlintSpotter LANGUAGES CXX ASM_MASM RC)
 
 # Glint Spotter: an ASI plugin for Crimson Desert. Builds GlintSpotter.asi, which
 # an ASI loader (winmm.dll from Ultimate ASI Loader) injects, the same loader
@@ -52,7 +52,13 @@ add_library(GlintSpotter SHARED
     src/hook/hidpad.cpp
     src/hook/hidpad_parse.cpp
     src/core/settings.cpp
+    src/resources.rc
 )
+
+# INI Master reads GS_INIMETA out of the built .asi without loading it (see
+# resources.rc, which names the file). Rebuild when the metadata changes.
+set_source_files_properties(src/resources.rc PROPERTIES OBJECT_DEPENDS
+    "${CMAKE_SOURCE_DIR}/data/GlintSpotter.inimeta")
 
 target_include_directories(GlintSpotter PRIVATE src)
 # QueryWorkingSetEx, for skipping pages that are not resident. version is for

@@ -9,6 +9,7 @@
   "dist": "mod/dist",
   "sources": [
     "mod/src",
+    "mod/data",
     "mod/CMakeLists.txt"
   ],
   "manualZip": [
@@ -19,6 +20,10 @@
     {
       "name": "the five tests pass",
       "run": "mod\\tests\\run.bat"
+    },
+    {
+      "name": "the inimeta matches settings.cpp",
+      "run": "py -3 scripts\\check_inimeta.py"
     }
   ],
   "evergreen": [
