@@ -49,19 +49,13 @@ namespace
     gs::lgso::Place g_scratch[kMax];
     int g_tally = -1;                    // the nameless count the table was last read at
 
-    uintptr_t Deref(uintptr_t at)
-    {
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 8)) return 0;
-        return *reinterpret_cast<const uintptr_t*>(at);
-    }
-
     // The manager, straight from the global its own vtable maintains.
     uintptr_t Manager()
     {
         uintptr_t base = 0;
         size_t size = 0;
         if (!gs::typescan::ModuleRange(base, size)) return 0;
-        const uintptr_t mgr = Deref(base + gs::sig::kLgsoManagerGlobal);
+        const uintptr_t mgr = gs::rtti::Deref(base + gs::sig::kLgsoManagerGlobal);
         if (mgr < 0x10000) return 0;
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(mgr), 0x80)) return 0;
         return mgr;

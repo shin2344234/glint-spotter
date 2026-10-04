@@ -32,43 +32,17 @@ import sys
 
 import numpy as np
 
-EXE = r"D:\SteamLibrary\steamapps\common\Crimson Desert\bin64\CrimsonDesert.exe"
-IMAGE_BASE = 0x140000000
+from off2rva import SECS, data, o2r, r2o
 
-data = open(EXE, "rb").read()
 buf = np.frombuffer(data, dtype=np.uint8)
 
 _pe = struct.unpack_from("<I", data, 0x3C)[0]
-_nsec = struct.unpack_from("<H", data, _pe + 6)[0]
-_optsz = struct.unpack_from("<H", data, _pe + 20)[0]
 _opt = _pe + 24
 _magic = struct.unpack_from("<H", data, _opt)[0]
 # Data directories start at 0x70 (PE32+) / 0x60 (PE32) into the optional header,
 # and directory 3 is the exception directory.
 _dd = _opt + (0x70 if _magic == 0x20B else 0x60)
 EXC_RVA, EXC_SIZE = struct.unpack_from("<II", data, _dd + 3 * 8)
-
-SECS = []
-_tbl = _opt + _optsz
-for _i in range(_nsec):
-    _e = _tbl + _i * 40
-    _name = data[_e:_e + 8].rstrip(b"\0").decode("ascii", "replace")
-    _vsize, _vaddr, _rsize, _raddr = struct.unpack_from("<IIII", data, _e + 8)
-    SECS.append((_name, _vaddr, _vsize, _raddr, _rsize))
-
-
-def r2o(rva):
-    for name, vaddr, vsize, raddr, rsize in SECS:
-        if vaddr <= rva < vaddr + rsize:
-            return raddr + (rva - vaddr)
-    return None
-
-
-def o2r(off):
-    for name, vaddr, vsize, raddr, rsize in SECS:
-        if raddr <= off < raddr + rsize:
-            return vaddr + (off - raddr), name
-    return None, None
 
 
 # Function bounds from .pdata, sorted once so lookups are a bisect.

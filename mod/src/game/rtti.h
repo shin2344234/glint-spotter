@@ -25,4 +25,18 @@ namespace gs::rtti
     // before every read above, and by the scanner for its candidates.
     bool Readable(const void* p, size_t bytes);
     bool ReadableCached(const void* p, size_t bytes);
+
+    // The pointer stored at `at`, or 0 when those eight bytes cannot be read.
+    inline uintptr_t Deref(uintptr_t at)
+    {
+        if (!Readable(reinterpret_cast<const void*>(at), sizeof(uintptr_t))) return 0;
+        return *reinterpret_cast<const uintptr_t*>(at);
+    }
+
+    // The decorated class of the object at `obj`, off its vtable, or nullptr.
+    inline const char* NameOf(uintptr_t obj)
+    {
+        const uintptr_t vt = Deref(obj);
+        return vt ? VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+    }
 }

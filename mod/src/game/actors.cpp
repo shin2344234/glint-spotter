@@ -105,11 +105,7 @@ namespace
     bool PtrLike(uintptr_t p);
     bool StillTheSame(uintptr_t comp, uintptr_t vt);
 
-    uintptr_t Deref(uintptr_t at)
-    {
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 8)) return 0;
-        return *reinterpret_cast<const uintptr_t*>(at);
-    }
+    using gs::rtti::Deref;
 
     // Which memory is readable, one VirtualQuery per region rather than per
     // read, remembered for half a second. The pool walk read about 13,500

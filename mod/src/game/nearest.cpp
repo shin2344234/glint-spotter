@@ -10,12 +10,6 @@
 
 namespace
 {
-    uintptr_t Deref(uintptr_t at)
-    {
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 8)) return 0;
-        return *reinterpret_cast<const uintptr_t*>(at);
-    }
-
     void Fill(gs::nearest::Candidate& cand, const gs::actors::Entity& e, float along, float off, float dy)
     {
         cand.entity = e.ptr;
@@ -32,7 +26,7 @@ namespace
         cand.locked = e.locked;
         cand.how = e.how;
         memcpy(cand.name, e.name, sizeof(cand.name));
-        const uintptr_t vt = Deref(e.ptr);
+        const uintptr_t vt = gs::rtti::Deref(e.ptr);
         const char* cn = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
         strncpy_s(cand.cls, sizeof(cand.cls), cn ? (cn[0] == '.' ? cn + 4 : cn) : "?", _TRUNCATE);
     }

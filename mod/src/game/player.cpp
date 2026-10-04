@@ -42,16 +42,11 @@ namespace
     uint32_t g_lostAtMs = 0;  // when the player last stopped answering
     int g_recoverTriesLeft = 8;  // a fault costs one; run out and it stops
 
-    uintptr_t Deref(uintptr_t at)
-    {
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), sizeof(uintptr_t))) return 0;
-        return *reinterpret_cast<const uintptr_t*>(at);
-    }
+    using gs::rtti::Deref;
 
     const char* NameOf(uintptr_t obj)
     {
-        const uintptr_t vt = Deref(obj);
-        const char* n = vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
+        const char* n = gs::rtti::NameOf(obj);
         return n ? n : "(no rtti)";
     }
 

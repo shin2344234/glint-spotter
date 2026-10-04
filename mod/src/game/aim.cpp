@@ -131,17 +131,8 @@ namespace
     std::atomic<uintptr_t> g_specialOwner{0};
     int g_staleLogsLeft = 4;
 
-    uintptr_t Deref(uintptr_t at)
-    {
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), sizeof(uintptr_t))) return 0;
-        return *reinterpret_cast<const uintptr_t*>(at);
-    }
-
-    const char* NameOf(uintptr_t obj)
-    {
-        const uintptr_t vt = Deref(obj);
-        return vt ? gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt)) : nullptr;
-    }
+    using gs::rtti::Deref;
+    using gs::rtti::NameOf;
 
     constexpr uintptr_t kOff_Comp_Owner = 0x08;   // component -> the actor it belongs to
 
