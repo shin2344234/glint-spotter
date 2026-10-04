@@ -89,18 +89,7 @@ namespace gs::actors
     // sub-object. For the live watch, which is handed raw arguments.
     bool Owner(uintptr_t p, Entity* out, const char** role);
     int Count();
-    int GimmickCount();
-    int GlintCount();
-    int LitCount();
     int PickupCount();
-
-    // The lit entities, wherever they are, nearest the given point first.
-    int LitNear(float px, float py, float pz, Entity* out, int n);
-
-    // The marked nodes within `radius` of a point, nearest first. Distance
-    // is measured flat: the heights disagree with the player's by several
-    // metres and nothing should turn on them.
-    int MarkedNear(float px, float pz, float radius, Entity* out, int n);
 
     // The marked nodes the crosshair is on, smallest bearing error first, so
     // out[0] is the pick. The whole set is measured, not a nearest handful:

@@ -76,17 +76,6 @@ namespace gs::mapicon
     uint64_t Seen(int surface);
     bool Last(int surface, Capture& out);
 
-    // The most recent MapIcon_Pin_Marker call and the most recent player marker
-    // (MapIcon_ActorFocus), kept separately from Last because the map creates
-    // hundreds of other icons in between.
-    bool LastPin(Capture& out);
-    bool LastPlayer(Capture& out);
-
-    // Ask for one replay. It happens inside the detour on the game's own thread
-    // the next time the game creates a world map icon, and is logged either way.
-    // Returns false, with a reason in the log, if there is nothing to replay yet.
-    bool RequestReplay();
-
     // Place a pin now. Must be called on the game's UI thread, which in practice
     // means from the tick. Uses the constants session ten proved: type 1, kind
     // 0x15, name MapIcon_Pin_Marker, and a key id of our own from 1001 up.
@@ -104,27 +93,9 @@ namespace gs::mapicon
     void* PlacePinNow(void* worldRoot, float x, float y, float z, const char* label,
                       int64_t keyId, bool haveKey);
 
-    // Put every pin this session back on the map.
-    //
-    // I felt the buzz and found no marker, over and over. The buzz fires
-    // the moment the create call returns, so the call is being made and is
-    // returning what it always returns. What happens afterwards is the map
-    // being opened, and opening it makes the game rebuild its icon list from
-    // its own marker data, which the mod's pins are not in. They are drawn
-    // onto the control directly, so a rebuild erases them.
-    //
-    // The mod keeps its own list of what it placed, so it can put them back.
-    // Called from the tick when the spy has just seen the game build its own
-    // icons again.
-    void Repin(void* worldRoot);
-
-    // True when the game has rebuilt its icons since the last Repin.
-    bool RepinWanted();
-
     // True if the mod has already placed a pin within `radius` of (x, z).
     // The spec: one marker per area, never a second one on top of it.
     bool PinNear(float x, float z, float radius);
-    int PinCount();
 
     // How many pins are still on the map carrying a key at or above `minId`,
     // which is how the mod counts the ones that have a record behind them.
@@ -136,15 +107,12 @@ namespace gs::mapicon
     // gets left behind on the map when the real one replaces it.
     int LivePinKeys(int64_t* out, int n);
 
-    // Record a place as taken. `drawn` says whether this pin is one of ours,
-    // drawn onto the map by the icon call, or a real marker the game owns and
-    // redraws itself. Only ours are put back when the map is rebuilt; putting
-    // the game's back would leave two icons on one spot.
-    void Remember(float x, float y, float z, const char* label, bool drawn, int64_t keyId);
+    // Record a place as taken.
+    void Remember(float x, float y, float z, const char* label, int64_t keyId);
 
     // The game took a marker off the map. If it was one of the mod's, the mod
     // stops counting it, so the one-per-area rule lets that place be marked
-    // again and a redraw does not bring it back.
+    // again.
     // `x` and `z` come back with where it stood, so the caller can take it out
     // of the file as well.
     // `byGame` false is the mod taking its own pin off, which logs itself.
@@ -167,10 +135,4 @@ namespace gs::mapicon
     // The world map root the spy last saw a call on, or null. The tick uses
     // this when the scan has not located the object yet.
     void* LastWorldRoot();
-
-    // The minimap root, same idea. A pin goes on both surfaces: the world map
-    // because that is where a marker belongs, and the minimap because that is
-    // the one already on screen, so a mark is visible the moment it lands
-    // instead of the next time the player opens the map.
-    void* LastMiniRoot();
 }

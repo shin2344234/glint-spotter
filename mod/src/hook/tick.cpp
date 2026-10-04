@@ -17,7 +17,6 @@
 #include "game/mapicon.h"
 #include "game/player.h"
 #include "game/aim.h"
-#include "game/snapshot.h"
 #include "game/nearest.h"
 #include "game/actors.h"
 #include "game/lgso.h"
@@ -70,9 +69,6 @@ namespace
 
     // A mark asked for from another thread, placed here on the game's.
     std::atomic<bool> g_markPending{false};
-    float g_markX = 0, g_markZ = 0;
-    char g_markLabel[48] = "GlintSpotter";
-    std::atomic<void*> g_worldRoot{nullptr};
 
     // Copy the object out inside a handler; the compare runs on our copy.
     bool Snapshot(const void* self, uint8_t* out, size_t bytes = kBytes)
@@ -730,52 +726,6 @@ namespace
         return true;
     }
 
-    int CastView(const View& v, float maxAlong, float radius, float spread, bool glintOnly,
-                 gs::nearest::Candidate* c, int n, gs::nearest::Candidate* miss, int missN,
-                 float nearAll = 0.0f)
-    {
-        if (v.camera)
-            return gs::nearest::Cast3D(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fy, v.fz,
-                                       maxAlong, radius, spread, glintOnly, c, n, miss, missN, nearAll);
-        return gs::nearest::Cast(gs::player::Actor(), v.ox, v.oy, v.oz, v.fx, v.fz,
-                                 maxAlong, radius, spread, glintOnly, c, n, miss, missN);
-    }
-
-    // The classes in an entity's component block, one line. Session
-    // twenty-four's aimed object was a ClientNormalInGameActor with no
-    // gimmick component; this says what it carries instead.
-    void DescribeComponents(const char* tag, uintptr_t entity)
-    {
-        char line[900];
-        int w = 0;
-        __try
-        {
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(entity + 0x68), 8)) return;
-            const uintptr_t comps = *reinterpret_cast<const uintptr_t*>(entity + 0x68);
-            if (comps < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(comps), 0x80)) return;
-            for (uintptr_t off = 0; off < 0x80 && w < 800; off += 8)
-            {
-                const uintptr_t c = *reinterpret_cast<const uintptr_t*>(comps + off);
-                if (c < 0x10000 || (c & 7) != 0 || !gs::rtti::Readable(reinterpret_cast<const void*>(c), 8)) continue;
-                const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(c);
-                const char* n = gs::rtti::VtableClassName(reinterpret_cast<const void*>(vt));
-                if (!n) continue;
-                if (n[0] == '.') n += 4;
-                const char* end = strstr(n, "@");
-                const int len = end ? static_cast<int>(end - n) : static_cast<int>(strlen(n));
-                const int k = _snprintf_s(line + w, sizeof(line) - w, _TRUNCATE, " +%02llX:%.*s", static_cast<unsigned long long>(off), len, n);
-                if (k < 0) break;
-                w += k;
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return;
-        }
-        line[w] = 0;
-        GS_LOG("[mark]     %s components:%s", tag, line);
-    }
-
     // Flash on: find out which node the flash is lighting. Pin nothing until
     // that is known.
     //
@@ -836,7 +786,6 @@ namespace
     uint32_t g_dupLastMs = 0;
     uint32_t g_quietLastMs = 0;
     int g_lastGlintN = -1;
-    int g_heldWinsLeft = 60;   // how many times the log says the target took the pick
     int g_loadingLogsLeft = 4;
     uint32_t g_heldEid = 0;
     uint32_t g_heldSinceMs = 0;
@@ -1134,8 +1083,8 @@ namespace
                 eye.ux = v.fx / flen; eye.uz = v.fz / flen;
                 const bool sayTargets = g_targetLogsLeft > 0 && now - g_targetLastMs > 1500;
                 if (sayTargets) { --g_targetLogsLeft; g_targetLastMs = now; }
-                // Verbose only. Its answer cannot take the pick (byTarget below
-                // is false for good), and asking cost 19 ms on every quarter
+                // Verbose only. Its answer never takes the pick (the reason is
+                // further down), and asking cost 19 ms on every quarter
                 // second pulse the flash was up in the 23 September load
                 // report: 2.4 of the 2.8 seconds a minute the mod spent on the
                 // game's thread, and the hitches with it.
@@ -1294,17 +1243,6 @@ namespace
                    std::sqrt(gx * gx + gz * gz), glintAngles[glintPick] * 57.2958f);
         }
 
-        // The game's own detect target, when it has one on the crosshair,
-        // beats anything the bearing found. Fifteen degrees is the same cone
-        // the nodes are held to, and a target has to be somewhere between five
-        // metres and half a kilometre to be a thing the player is looking at.
-        //
-        // Build 0.6.0 threw this route away for placing a pin "104 units off"
-        // in session nineteen. The arithmetic in aim.h says that pin was a
-        // hundred and four metres from the player because the target was, and
-        // session forty-seven measured a real glint at a hundred and eighteen.
-        // Being far away was the evidence against it, and being far away is
-        // the whole point.
         // The detect system does not get the pin. Session fifty-three ran the
         // control nobody had run: I aimed at one glint, teleported, and
         // aimed at another. The actor the detect component was holding moved
@@ -1320,7 +1258,6 @@ namespace
         //
         // It is still read, inside the real bounds now, and still logged, so a
         // build where something real turns up there would say so.
-        const bool byTarget = false;
 
         // Whichever of the two is nearer the crosshair, rather than the table
         // every time.
@@ -1382,17 +1319,6 @@ namespace
                       glints[glintPick].name[0] ? glints[glintPick].name : "?", _TRUNCATE);
             chosen.valid = true;
         }
-        else if (byTarget)
-        {
-            chosen.x = held.x; chosen.y = held.y; chosen.z = held.z;
-            chosen.angleDeg = held.angle;
-            chosen.eid = held.eid;
-            chosen.how = "the target the game's own detect system is holding";
-            _snprintf_s(chosen.name, sizeof(chosen.name), _TRUNCATE, "%s at %s+0x%llX",
-                        held.cls[0] == '.' ? held.cls + 4 : held.cls, held.where,
-                        static_cast<unsigned long long>(held.at));
-            chosen.valid = true;
-        }
         else if (pick >= 0)
         {
             chosen.x = around[pick].x; chosen.y = around[pick].y; chosen.z = around[pick].z;
@@ -1402,14 +1328,6 @@ namespace
             strncpy_s(chosen.name, sizeof(chosen.name),
                       around[pick].name[0] ? around[pick].name : "?", _TRUNCATE);
             chosen.valid = true;
-        }
-        if (byTarget && g_heldWinsLeft > 0)
-        {
-            --g_heldWinsLeft;
-            GS_LOG("[auto] the game says it is holding %s, %.1f metres away, %.1f degrees off the "
-                   "crosshair; that outranks %s",
-                   chosen.name, held.dist, held.angle,
-                   pick >= 0 ? "the node the bearing found" : "an empty bearing search");
         }
 
         if (g_autoLogsLeft > 0 && now - g_autoLastLogMs > 2000)
@@ -1430,10 +1348,10 @@ namespace
             }
             if (pick < 0) GS_LOG("[auto]   no node within fifteen degrees of the crosshair");
             if (held.valid)
-                GS_LOG("[auto]   the game's detect system holds %s at %.1f metres, %.1f degrees off, %s%s",
+                GS_LOG("[auto]   the game's detect system holds %s at %.1f metres, %.1f degrees off, %s, "
+                       "so the bearing keeps the pick",
                        held.cls[0] == '.' ? held.cls + 4 : held.cls, held.dist, held.angle,
-                       held.inPools ? "live in the pools" : "not in the pools",
-                       byTarget ? ", and it takes the pick" : ", so the bearing keeps the pick");
+                       held.inPools ? "live in the pools" : "not in the pools");
             else if (gs::Settings::Get().verbose)
                 GS_LOG("[auto]   the game's detect system is holding nothing the mod can resolve");
         }
@@ -1555,8 +1473,7 @@ namespace
                 PlaceAt(chosen.x, chosen.y, chosen.z,
                         byTable ? "automatic, the game's own level gimmick table"
                                 : byGlint ? "automatic, the node the game marked as a detect mode target"
-                                : (byTarget ? "automatic, what the game's detect system is holding"
-                                            : "automatic, the node under the crosshair"),
+                                : "automatic, the node under the crosshair",
                         "Glint", pp, kPinApart);
             if (landed)
                 RememberMarked(byTable ? MarkKind::Table : MarkKind::Node, chosen.eid,
@@ -2191,7 +2108,6 @@ extern "C" void gs_OnMinimapTick(void* self)
         // to make a pattern out of it: this runs on the thread that reads the
         // pad and does the whole search, and it is not a thread to park.
         if (!placed && gs::Settings::Get().rumble) gs::pad::Buzz(11000, 90);
-        (void)g_markX; (void)g_markZ; (void)g_markLabel;
     }
 }
 
@@ -2270,17 +2186,5 @@ namespace gs::tick
             if (e.object.load() == object) e.object.store(nullptr);
     }
 
-    void RequestMark(float x, float z, const char* label)
-    {
-        g_markX = x;
-        g_markZ = z;
-        strncpy_s(g_markLabel, sizeof(g_markLabel), label ? label : "GlintSpotter", _TRUNCATE);
-        g_markPending.store(true);
-    }
-
-    void SetWorldRoot(void* root)
-    {
-        // Kept for the log. No call is ever made on it; see PlaceAt.
-        g_worldRoot.store(root);
-    }
+    void RequestMark() { g_markPending.store(true); }
 }

@@ -48,9 +48,6 @@ namespace
     std::atomic<uintptr_t> g_vtable{0};
     std::atomic<uintptr_t> g_gimmickVt{0};
     std::atomic<uintptr_t> g_slot{0};      // the global that holds the manager pointer
-    int g_gimmicks = 0;
-    int g_glints = 0;
-    int g_lits = 0;
     int g_pickups = 0;
     std::atomic<uintptr_t> g_mgr{0};
     uint32_t g_checkedAt = 0;
@@ -1052,9 +1049,6 @@ namespace gs::actors
             if (gen != g_setGen) return static_cast<uint32_t>(n);
             for (int i = 0; i < workN; ++i) g_set[i] = s_work[i];
             g_setN = workN;
-            g_gimmicks = gimmicks;
-            g_glints = glints;
-            g_lits = lits;
             g_pickups = pickups;
         }
 
@@ -1100,52 +1094,10 @@ namespace gs::actors
         return static_cast<uint32_t>(n);
     }
 
-    int GimmickCount()
-    {
-        std::lock_guard<std::mutex> lock(g_setMutex);
-        return g_gimmicks;
-    }
-
-    int GlintCount()
-    {
-        std::lock_guard<std::mutex> lock(g_setMutex);
-        return g_glints;
-    }
-
-    int LitCount()
-    {
-        std::lock_guard<std::mutex> lock(g_setMutex);
-        return g_lits;
-    }
-
     int PickupCount()
     {
         std::lock_guard<std::mutex> lock(g_setMutex);
         return g_pickups;
-    }
-
-    int MarkedNear(float px, float pz, float radius, Entity* out, int n)
-    {
-        std::lock_guard<std::mutex> lock(g_setMutex);
-        int found = 0;
-        for (int i = 0; i < g_setN; ++i)
-        {
-            if (!g_set[i].pickup && !(g_set[i].gimmick && g_set[i].knowledge)) continue;
-            const float dx = g_set[i].x - px, dz = g_set[i].z - pz;
-            const float d = std::sqrt(dx * dx + dz * dz);
-            if (d > radius) continue;
-            int pos = found;
-            while (pos > 0)
-            {
-                const float ax = out[pos - 1].x - px, az = out[pos - 1].z - pz;
-                if (std::sqrt(ax * ax + az * az) <= d) break;
-                if (pos < n) out[pos] = out[pos - 1];
-                --pos;
-            }
-            if (pos < n) out[pos] = g_set[i];
-            if (found < n) ++found;
-        }
-        return found;
     }
 
     void LogEntities(float px, float pz, float ox, float oz, float ux, float uz)
@@ -1286,29 +1238,6 @@ namespace gs::actors
             if (found < n) ++found;
         }
         if (marked) *marked = inRadius;
-        return found;
-    }
-
-    int LitNear(float px, float py, float pz, Entity* out, int n)
-    {
-        std::lock_guard<std::mutex> lock(g_setMutex);
-        int found = 0;
-        for (int i = 0; i < g_setN; ++i)
-        {
-            if (!g_set[i].lit) continue;
-            const float dx = g_set[i].x - px, dy = g_set[i].y - py, dz = g_set[i].z - pz;
-            const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
-            int pos = found;
-            while (pos > 0)
-            {
-                const float ax = out[pos - 1].x - px, ay = out[pos - 1].y - py, az = out[pos - 1].z - pz;
-                if (std::sqrt(ax * ax + ay * ay + az * az) <= d) break;
-                if (pos < n) out[pos] = out[pos - 1];
-                --pos;
-            }
-            if (pos < n) out[pos] = g_set[i];
-            if (found < n) ++found;
-        }
         return found;
     }
 

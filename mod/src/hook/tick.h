@@ -48,7 +48,5 @@ namespace gs::tick
     void DropProbe(void* object);
 
     // Ask the tick to place a pin on its next run, on the game's thread.
-    // Position is the best one known; the caller says where it came from.
-    void RequestMark(float x, float z, const char* label);
-    void SetWorldRoot(void* root);
+    void RequestMark();
 }

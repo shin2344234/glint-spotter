@@ -786,9 +786,8 @@ namespace
 
             t.candidates = found;
             GS_LOG_OK("%s: %zu candidate(s)", ShortName(t.info.name), found);
-            // The two objects the tick wants: the world root to place pins on,
-            // and the player's special mode component to watch for the flash.
-            const bool isWorldRoot = strstr(t.info.name, "UIGamePlayControlRootWorldMap") != nullptr;
+            // The tick wants the player's special mode component, to watch for
+            // the flash.
             const bool isSpecial = strstr(t.info.name, "ClientSpecialModeActorComponent") != nullptr;
             const bool isCamera = strstr(t.info.name, "Camera") != nullptr &&
                                   ShortName(t.info.name)[0] != '?';
@@ -813,7 +812,6 @@ namespace
                        static_cast<unsigned long long>(h.regionSize));
                 t.object = h.object;
                 if (!Describe(t)) t.object = nullptr;
-                else if (isWorldRoot) gs::tick::SetWorldRoot(t.object);
                 else if (isSpecial)
                 {
                     gs::tick::AddProbe("special", t.object, 0x400);
@@ -874,13 +872,7 @@ namespace
         return false;
     }
 
-    // What the hotkey does in this build: nothing to the game. It reports what
-    // the spy has seen and what a replay would pass, so the key path and the
-    // captured data can both be checked before a call is ever made.
-    // The trigger. Position is the best one known at this stage: the last pin
-    // the player placed this session, offset 40 units, so the whole chain from
-    // trigger to tick to pin is proven while the probe is still finding the
-    // live position. Falls back to the player marker, which is stale but real.
+    // The key or the pad chord. The tick places the mark on the game's thread.
     void OnTrigger(const char* how)
     {
         GS_LOG("[trigger] %s. ticks so far %llu on thread %lu", how,
@@ -891,7 +883,7 @@ namespace
             GS_LOG("[trigger] the tick has never run, so there is no game thread to place from");
             return;
         }
-        gs::tick::RequestMark(0.0f, 0.0f, "GlintSpotter");
+        gs::tick::RequestMark();
     }
 
     // The CRT answers an invalid parameter by calling __fastfail, which kills the

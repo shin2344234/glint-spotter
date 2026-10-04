@@ -63,28 +63,10 @@ namespace gs::nearest
                Candidate* out, int n, Candidate* miss = nullptr, int missN = 0,
                float nearAll = 0.0f);
 
-    // The marked nodes whose bearing from the origin is within `maxAngle`
-    // radians of the direction, nearest the bearing first.
-    //
-    // Height is not in the test. Session forty had firewood one metre from
-    // the player reading six and a half metres below his feet, so every
-    // entity's height disagrees with the player's by about that much and a cone in
-    // three axes put everything a quarter turn below the crosshair. Where
-    // a thing lies on the ground is what the player points at anyway.
-    // `band` rejects anything absurdly far above or below.
-    int CastBearing(uintptr_t playerActor,
-                    float ox, float oy, float oz, float fx, float fz,
-                    float maxAlong, float maxAngle, float band, bool markedOnly,
-                    Candidate* out, int n);
-
     // How far the set reaches from a point: counts within 30, 60, 120, 300
     // units and beyond, and the farthest entity. Session twenty-seven's
     // glint was more than 90 units out and the casts stopped at 60.
     void Reach(float px, float py, float pz, int* bands, float* farthest);
-
-    // The n entities closest to a point, any direction, nearest first. `along`
-    // carries the straight-line distance and `off` is zero.
-    int Closest(uintptr_t playerActor, float px, float py, float pz, Candidate* out, int n);
 
     // Where a ray meets the ground, with the ground estimated from the
     // entities near its path: objects stand on the terrain, so the height of

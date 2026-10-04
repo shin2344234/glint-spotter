@@ -107,43 +107,6 @@ namespace gs::nearest
         return found;
     }
 
-    int CastBearing(uintptr_t playerActor,
-                    float ox, float oy, float oz, float fx, float fz,
-                    float maxAlong, float maxAngle, float band, bool markedOnly,
-                    Candidate* out, int n)
-    {
-        if (!out || n <= 0) return 0;
-        static gs::actors::Entity set[4096];
-        const int total = gs::actors::Snapshot(set, 4096);
-        const float flen = std::sqrt(fx * fx + fz * fz);
-        if (flen < 1e-3f) return 0;
-        const float ux = fx / flen, uz = fz / flen;
-        const auto byOff = [](const Candidate& c) { return c.off; };   // the bearing, in radians
-
-        int found = 0;
-        for (int i = 0; i < total; ++i)
-        {
-            const gs::actors::Entity& e = set[i];
-            if (!e.ptr || e.ptr == playerActor) continue;
-            if (markedOnly && !(e.pickup || (e.gimmick && e.knowledge))) continue;
-
-            const float dx = e.x - ox, dz = e.z - oz, dy = e.y - oy;
-            const float flat = std::sqrt(dx * dx + dz * dz);
-            if (flat < 0.5f || flat > maxAlong) continue;
-            if (std::fabs(dy) > band) continue;
-            // The angle between the two bearings, from their dot and cross.
-            const float dot = (dx * ux + dz * uz) / flat;
-            const float cross = (dx * uz - dz * ux) / flat;
-            const float angle = std::fabs(std::atan2(cross, dot));
-            if (angle > maxAngle) continue;
-
-            Candidate cand;
-            Fill(cand, e, flat, angle, dy);
-            found = Insert(out, found, n, cand, byOff);
-        }
-        return found;
-    }
-
     void Reach(float px, float py, float pz, int* bands, float* farthest)
     {
         static gs::actors::Entity set[4096];
@@ -157,27 +120,6 @@ namespace gs::nearest
             if (d > *farthest) *farthest = d;
             ++bands[d < 30 ? 0 : d < 60 ? 1 : d < 120 ? 2 : d < 300 ? 3 : 4];
         }
-    }
-
-    int Closest(uintptr_t playerActor, float px, float py, float pz, Candidate* out, int n)
-    {
-        if (!out || n <= 0) return 0;
-        static gs::actors::Entity set[4096];
-        const int total = gs::actors::Snapshot(set, 4096);
-        const auto byAlong = [](const Candidate& c) { return c.along; };
-        int found = 0;
-        for (int i = 0; i < total; ++i)
-        {
-            const gs::actors::Entity& e = set[i];
-            if (!e.ptr || e.ptr == playerActor) continue;
-            const float dx = e.x - px, dy = e.y - py, dz = e.z - pz;
-            const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
-            if (found == n && d >= out[n - 1].along) continue;
-            Candidate cand;
-            Fill(cand, e, d, 0.0f, dy);
-            found = Insert(out, found, n, cand, byAlong);
-        }
-        return found;
     }
 
     // The terrain height under a point, estimated from the entities around

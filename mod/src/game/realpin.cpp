@@ -199,26 +199,6 @@ namespace
         return gs::pinmodel::Read(kind);
     }
 
-    // The last record, which is the one the create just appended.
-    bool LastRecord(int64_t* id, float* x, float* z)
-    {
-        const gs::pinmodel::List l = ReadList(gs::sig::kPinListKind);
-        if (!l.ok || l.count == 0) return false;
-        __try
-        {
-            const auto* r = reinterpret_cast<const uint8_t*>(l.data) +
-                            static_cast<size_t>(l.count - 1) * gs::sig::kPinRecord;
-            memcpy(id, r, 8);
-            memcpy(x, r + 8, 4);
-            memcpy(z, r + 16, 4);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return false;
-        }
-    }
-
     // Put the same record into the client copy, which is what the map's UI
     // reads. The server list decides whether a removal can succeed; this one
     // decides whether the UI will ask for one at all.
@@ -272,16 +252,6 @@ namespace
         GS_LOG_OK("[real] the client copy took id %lld, status %d, and now holds %u",
                   static_cast<long long>(id), err, l.ok ? l.count : 0u);
         return true;
-    }
-
-    // The record we asked for, rather than any record. Two marks in a row at
-    // the same place would otherwise report the first one's id forever.
-    bool Landed(float wantX, float wantZ, int64_t* id)
-    {
-        float gotX = 0.0f, gotZ = 0.0f;
-        if (!LastRecord(id, &gotX, &gotZ)) return false;
-        const float dx = gotX - wantX, dz = gotZ - wantZ;
-        return dx * dx + dz * dz < 1.0f;
     }
 }
 

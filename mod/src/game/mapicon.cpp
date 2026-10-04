@@ -32,17 +32,13 @@ namespace
     std::mutex g_lastMutex;
     gs::mapicon::Capture g_last[2];
     void CopyString(char* dst, size_t cap, const char* src);
-    gs::mapicon::Capture g_lastPin;
-    gs::mapicon::Capture g_lastPlayer;
-    std::atomic<bool> g_replayPending{false};
     std::atomic<uint64_t> g_replayCount{0};
 
     // Every pin this mod placed this session, for the one-per-area rule.
     constexpr int kMaxPins = 256;
-    struct Placed { float x, y, z; char label[16]; bool drawn; bool gone; int64_t id; };
+    struct Placed { float x, y, z; char label[16]; bool gone; int64_t id; };
     Placed g_placed[kMaxPins];
     std::atomic<int> g_placedN{0};
-    std::atomic<bool> g_repinWanted{false};
 
 
     // Only a control the running game still says is a world map root gets
@@ -157,13 +153,10 @@ namespace
         Snapshot(a, &c);
 
         const bool pin = c.ok && IsName(c, "MapIcon_Pin_Marker");
-        const bool player = c.ok && IsName(c, "MapIcon_ActorFocus");
         bool fresh = false;
         {
             std::lock_guard<std::mutex> lock(g_lastMutex);
             g_last[surface] = c;
-            if (pin && surface == 0) g_lastPin = c;
-            if (player && surface == 0) g_lastPlayer = c;
             if (c.ok) fresh = NewName(c.name8);
         }
         // The one thing worth knowing that a captured argument cannot say:
@@ -233,18 +226,14 @@ namespace
                        surface, static_cast<long long>(c.keyId));
             }
         }
-        // The player's own marker is created when the map opens, and the
-        // game rebuilds every icon around it. Anything the mod drew is gone
-        // at that moment, so this is the cue to draw it again.
-        if (surface == 0 && IsName(c, "MapIcon_ActorFocus")) g_repinWanted.store(true);
         if (surface == 0) g_lastWorldRoot.store(c.self);
         else g_lastMiniRoot.store(c.self);
         if (n == 1) GS_LOG("[spy %s] calls arrive on thread %lu", surface == 0 ? "world" : "mini", GetCurrentThreadId());
 
         const char* label = surface == 0 ? "world" : "mini";
-        // A pin marker is the call the replay copies, and a name never seen
-        // before is what a flash session is for, so both are dumped in full no
-        // matter how many icons came before them.
+        // A pin marker is the call the mod's own pins copy, and a name never
+        // seen before is what a flash session is for, so both are dumped in
+        // full no matter how many icons came before them.
         if (fresh) GS_LOG("[spy %s] new icon name: \"%s\"", label, c.name8);
         // The teleporters' own icons. The map draws MapIcon_Abyss_Ruins and
         // MapIcon_Abyss_Ruins_Fog, and which one a ruin gets is the game's
@@ -302,64 +291,6 @@ namespace
             GS_LOG("[spy %s] %llu calls so far, last type=0x%04X name=\"%s\"",
                    label, static_cast<unsigned long long>(n), c.type, c.name8);
         }
-    }
-
-    // One call of our own, made on the thread the game just used for its own.
-    // Every pointer argument points at our copies, because the game's were on
-    // its stack and are gone. The struct at argument 10 is passed zeroed: the
-    // captured one may carry a pointer into memory the game has since freed,
-    // a zero count makes the dispatcher skip it, and the constructor swaps it
-    // in as the object's own resting state.
-    void Replay(void* self)
-    {
-        gs::mapicon::Capture pin, player;
-        {
-            std::lock_guard<std::mutex> lock(g_lastMutex);
-            pin = g_lastPin;
-            player = g_lastPlayer;
-        }
-        if (pin.sequence == 0)
-        {
-            GS_LOG_ERR("[replay] no MapIcon_Pin_Marker captured yet. Place a custom marker on the map first.");
-            return;
-        }
-
-        const uint64_t n = ++g_replayCount;
-
-        uint16_t type = pin.type;
-        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{1000 + static_cast<int64_t>(n), pin.keyKind, {}};
-        uint32_t dword4 = pin.dword4;
-        float float5 = pin.float5;
-        // Offset from the pin the player just placed. The player marker looked
-        // like the better anchor and is not: it is created once at first map
-        // open and never refreshed, so session nine had it ten minutes stale.
-        // Pins carry no elevation, and 30 units is far enough apart to see.
-        (void)player;
-        float pos[3] = {pin.pos[0] + 30.0f, 0.0f, pin.pos[2] + 30.0f};
-        char str7[48];
-        memcpy(str7, pin.str7, sizeof(str7));
-        char name8[64];
-        memcpy(name8, pin.name8, sizeof(name8));
-        uint8_t struct10[36]{};
-
-        GS_LOG("[replay #%llu] calling slot 170 on 0x%p: type=0x%04X key=%lld/0x%02X dword4=%u name=\"%s\"",
-               static_cast<unsigned long long>(n), self, type, static_cast<long long>(key.id), key.kind,
-               dword4, name8);
-        GS_LOG("[replay #%llu]   pos=(%.3f, %.3f, %.3f) float5=%.4f str7=%s byte9=%u byte11=%u struct10=zeroed (captured count was %u)",
-               static_cast<unsigned long long>(n), pos[0], pos[1], pos[2], float5,
-               pin.str7Null ? "null" : str7, pin.byte9, pin.byte11,
-               *reinterpret_cast<const uint32_t*>(pin.struct10 + 4));
-
-        void* result = g_orig[0](self, &type, &key, &dword4, &float5, pos,
-                                 pin.str7Null ? nullptr : static_cast<void*>(str7),
-                                 name8,
-                                 reinterpret_cast<void*>(static_cast<uintptr_t>(pin.byte9)),
-                                 struct10,
-                                 reinterpret_cast<void*>(static_cast<uintptr_t>(pin.byte11)),
-                                 nullptr, nullptr, nullptr);
-
-        GS_LOG_OK("[replay #%llu] returned 0x%p. A second pin 30 units from the one you placed is ours.",
-                  static_cast<unsigned long long>(n), result);
     }
 
     // Slot 171, watched and forwarded unchanged.
@@ -459,23 +390,7 @@ namespace
             gs::load::Timer timed(gs::load::kIconCreate);
             Record(0, a, reinterpret_cast<uintptr_t>(_ReturnAddress()));
         }
-        void* r = g_orig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
-
-        // The game's call is done and we are on its thread with its controller
-        // in hand. Session nine showed the map creates its icons once and then
-        // only when a pin is placed, so a pin placement is the moment, and it is
-        // also the call the replay copies, captured a few lines up.
-        if (g_replayPending.load())
-        {
-            gs::mapicon::Capture last;
-            {
-                std::lock_guard<std::mutex> lock(g_lastMutex);
-                last = g_last[0];
-            }
-            if (last.ok && IsName(last, "MapIcon_Pin_Marker") && g_replayPending.exchange(false))
-                Replay(a1);
-        }
-        return r;
+        return g_orig[0](a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
     }
 
     void* DetourMini(void* a1, void* a2, void* a3, void* a4, void* a5, void* a6, void* a7,
@@ -535,22 +450,6 @@ namespace gs::mapicon
         std::lock_guard<std::mutex> lock(g_lastMutex);
         if (g_last[surface].sequence == 0) return false;
         out = g_last[surface];
-        return true;
-    }
-
-    bool LastPin(Capture& out)
-    {
-        std::lock_guard<std::mutex> lock(g_lastMutex);
-        if (g_lastPin.sequence == 0) return false;
-        out = g_lastPin;
-        return true;
-    }
-
-    bool LastPlayer(Capture& out)
-    {
-        std::lock_guard<std::mutex> lock(g_lastMutex);
-        if (g_lastPlayer.sequence == 0) return false;
-        out = g_lastPlayer;
         return true;
     }
 
@@ -642,7 +541,7 @@ namespace gs::mapicon
             GS_LOG("[pin #%llu] minimap copy key=%lld returned 0x%p",
                    static_cast<unsigned long long>(n), static_cast<long long>(miniKey.id), rm);
         }
-        Remember(x, y, z, label, true, key.id);
+        Remember(x, y, z, label, key.id);
         return r;
     }
 
@@ -672,12 +571,11 @@ namespace gs::mapicon
         return got;
     }
 
-    void Remember(float x, float y, float z, const char* label, bool drawn, int64_t keyId)
+    void Remember(float x, float y, float z, const char* label, int64_t keyId)
     {
         const int i = g_placedN.load();
         if (i >= kMaxPins) return;
         g_placed[i].x = x; g_placed[i].y = y; g_placed[i].z = z;
-        g_placed[i].drawn = drawn;
         g_placed[i].gone = false;
         g_placed[i].id = keyId;
         CopyString(g_placed[i].label, sizeof(g_placed[i].label), label ? label : "Marker");
@@ -695,8 +593,6 @@ namespace gs::mapicon
         }
         return false;
     }
-
-    int PinCount() { return g_placedN.load(); }
 
     int LivePinsAtOrAbove(int64_t minId)
     {
@@ -729,43 +625,6 @@ namespace gs::mapicon
                          "the log says exactly what the game asked for.",
                          gs::sig::kSlotRemoveIcon, n);
         return n;
-    }
-
-    bool RepinWanted() { return g_repinWanted.load(); }
-
-    void Repin(void* worldRoot)
-    {
-        g_repinWanted.store(false);
-        const int n = g_placedN.load();
-        if (n <= 0) return;
-        if (!worldRoot || !g_orig[0] || !RootLooksRight(worldRoot))
-        {
-            GS_LOG("[pin] the map was rebuilt but there is no usable root, so %d pin(s) wait", n);
-            g_repinWanted.store(true);
-            return;
-        }
-        GS_LOG("[pin] the game rebuilt its icons; drawing this session's %d pin(s) again", n);
-        for (int i = 0; i < n && i < kMaxPins; ++i)
-        {
-            // A real marker is in the game's own list and comes back with
-            // everything else it rebuilt, and one the player deleted stays
-            // deleted.
-            if (!g_placed[i].drawn || g_placed[i].gone) continue;
-            uint16_t type = 0x0001;
-            struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{
-                g_placed[i].id != 0 ? g_placed[i].id : 2000 + static_cast<int64_t>(i), 0x15, {}};
-            uint32_t dword4 = 0;
-            float float5 = 0.0f;
-            float pos[3] = {g_placed[i].x, 0.0f, g_placed[i].z};
-            char label[48];
-            CopyString(label, sizeof(label), g_placed[i].label);
-            char name[64] = "MapIcon_Pin_Marker";
-            uint8_t struct10[36]{};
-            g_orig[0](worldRoot, &type, &key, &dword4, &float5, pos, label, name,
-                      reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
-                      reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
-                      nullptr, nullptr, nullptr);
-        }
     }
 
     bool RemoveIcon(void* worldRoot, int64_t keyId)
@@ -803,23 +662,7 @@ namespace gs::mapicon
     void ForgetAll()
     {
         g_placedN.store(0);
-        g_repinWanted.store(false);
     }
 
     void* LastWorldRoot() { return g_lastWorldRoot.load(); }
-    void* LastMiniRoot() { return g_lastMiniRoot.load(); }
-
-    bool RequestReplay()
-    {
-        if (!g_swap[0].installed || !g_orig[0])
-        {
-            GS_LOG_ERR("[key] the world map spy is not installed, no replay");
-            return false;
-        }
-        const bool already = g_replayPending.exchange(true);
-        GS_LOG(already
-               ? "[key] still armed. Place a custom marker on the world map and a second one follows it."
-               : "[key] armed. Place a custom marker on the world map; right after the game places it, a copy goes 30 units away.");
-        return true;
-    }
 }
