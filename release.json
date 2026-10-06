@@ -16,6 +16,9 @@
     "README.md",
     "LICENSE"
   ],
+  "dmmZip": [
+    "LICENSE"
+  ],
   "gates": [
     {
       "name": "the five tests pass",
