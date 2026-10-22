@@ -1089,13 +1089,37 @@ namespace
         return 0;
     }
 
+    // True while Ctrl or Alt is held and the bound key is not that modifier
+    // itself. Key=11 (hex for VK_CONTROL) still works, since Alt is what gets
+    // checked then. Either side's key counts: the generic codes answer for
+    // left and right. Shift is left out because the game sprints on it, and a
+    // pin dropped mid-sprint should still land.
+    bool OtherModifierHeld(uint32_t boundKey)
+    {
+        static const int kModifiers[][3] = {
+            {VK_CONTROL, VK_LCONTROL, VK_RCONTROL},
+            {VK_MENU, VK_LMENU, VK_RMENU},
+        };
+        for (const auto& group : kModifiers)
+        {
+            const int bound = static_cast<int>(boundKey);
+            if (bound == group[0] || bound == group[1] || bound == group[2]) continue;
+            if (GetAsyncKeyState(group[0]) & 0x8000) return true;
+        }
+        return false;
+    }
+
     DWORD WINAPI KeyThread(LPVOID)
     {
         bool wasDown = false;
         while (!g_stop.load())
         {
+            // A press with Ctrl or Alt held belongs to another binding.
+            // Private Storage Master opens Abyss Gear Storage on Ctrl+F9, and
+            // that press also dropped a pin. wasDown follows the raw key, so
+            // letting go of the modifier first does not fire it late.
             const bool down = (GetAsyncKeyState(static_cast<int>(g_key)) & 0x8000) != 0;
-            if (down && !wasDown) OnTrigger("key");
+            if (down && !wasDown && !OtherModifierHeld(g_key)) OnTrigger("key");
             wasDown = down;
             {
                 gs::load::Timer t(gs::load::kPadPump);

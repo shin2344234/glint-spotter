@@ -74,8 +74,11 @@ keep them.
 Both binds are yours to change. `Chord` takes controller button names, so
 `Chord=LB+RB+X` or `Chord=RS` work as written. `Key` takes a key name: `F9` by
 default because the game binds nothing to it, and `Insert`, `Home`, `Numpad5`,
-a bare letter and the rest are all accepted. The log prints both back in words
-on startup, so you can see what it read.
+a bare letter and the rest are all accepted. The key is ignored while Ctrl or
+Alt is held, so another mod's Ctrl+F9 does not drop a pin. Crimson
+Route's auto-move also defaults to F9, so if you run both, change `Key` here or
+rebind it there, or one press does both. The log prints both binds back in
+words on startup, so you can see what it read.
 
 A DualSense or DualShock 4 works with Steam Input off, which keeps the game's
 PlayStation button pictures. The mod reads the pad directly and the names map by

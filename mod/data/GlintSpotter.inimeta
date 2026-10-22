@@ -49,7 +49,8 @@
           "default": "F9",
           "help": [
             "The key that marks whatever the crosshair is on.",
-            "A name: F1 to F24, a letter, a digit, Insert, Delete, Home, End, PageUp, PageDown, Pause, ScrollLock, Numpad0 to Numpad9. F9 because the game binds nothing to it."
+            "A name: F1 to F24, a letter, a digit, Insert, Delete, Home, End, PageUp, PageDown, Pause, ScrollLock, Numpad0 to Numpad9. F9 because the game binds nothing to it, though Crimson Route's auto-move also defaults to F9.",
+            "The key is ignored while Ctrl or Alt is held, so another mod's Ctrl+F9 does not drop a pin."
           ],
           "order": 3
         },

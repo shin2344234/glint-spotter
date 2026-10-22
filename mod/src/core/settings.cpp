@@ -158,7 +158,9 @@ namespace
         fputs("\n", f);
         fputs("; The key that marks whatever the crosshair is on. A name: F1 to F24, a\n", f);
         fputs("; letter, a digit, Insert, Delete, Home, End, PageUp, PageDown, Pause,\n", f);
-        fputs("; ScrollLock, Numpad0 to Numpad9. F9 because the game binds nothing to it.\n", f);
+        fputs("; ScrollLock, Numpad0 to Numpad9. F9 because the game binds nothing to it,\n", f);
+        fputs("; though Crimson Route's auto-move also defaults to F9. The key is ignored\n", f);
+        fputs("; while Ctrl or Alt is held.\n", f);
         fputs("Key=F9\n", f);
         fputs("\n", f);
         fputs("; 1 buzzes the controller when a pin lands. The map is rarely open at that\n", f);
