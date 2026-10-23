@@ -262,6 +262,65 @@ namespace
         fputs("Radius=0\n", f);
         fclose(f);
     }
+
+    // The switches and the plain numbers, a row each. A switch is on for any
+    // number but 0. A number outside lo to hi is refused and the old value
+    // kept, except that zero is always taken where zero means off. `kept` is
+    // how the refusal prints the value it kept. scripts/check_inimeta.py
+    // reads these rows, so keep each one on a line of its own.
+    using gs::Settings::Values;
+    struct Switch { const char* key; bool Values::* member; };
+    const Switch kSwitches[] = {
+        {"Spy", &Values::spy},
+        {"Guess", &Values::guess},
+        {"Survey", &Values::survey},
+        {"Verbose", &Values::verbose},
+        {"Scan", &Values::scan},
+        {"Sweep", &Values::sweep},
+        {"RayFallback", &Values::rayFallback},
+        {"Rumble", &Values::rumble},
+        {"DirectPad", &Values::directPad},
+        {"RealMarkers", &Values::realMarkers},
+        {"KeepPins", &Values::keepPins},
+        {"Teleporters", &Values::teleporters},
+        {"ClearTaken", &Values::clearTaken},
+        {"MiniPin", &Values::miniPin},
+    };
+    struct Number { const char* key; float Values::* member; float lo, hi; bool zeroIsOff; const char* kept; };
+    const Number kNumbers[] = {
+        {"Rod", &Values::rodMetres, 0.05f, 60.0f, false, "%.2f metres"},
+        {"PressReach", &Values::pressReach, 50.0f, 20000.0f, true, "%.0f"},
+        {"AutoCone", &Values::autoConeDeg, 0.05f, 45.0f, false, "%.2f degrees"},
+        {"ClearNear", &Values::clearNear, 0.0f, 1000.0f, false, "%.0f metres"},
+        {"Reach", &Values::reach, 50.0f, 20000.0f, true, "%.0f"},
+        {"Radius", &Values::radius, 5.0f, 2000.0f, true, "%.0f"},
+    };
+
+    // A key from either table, read into g_values. False for any other key.
+    bool ReadRow(const char* key, const char* val)
+    {
+        for (const Switch& s : kSwitches)
+        {
+            if (_stricmp(key, s.key) != 0) continue;
+            g_values.*s.member = atoi(val) != 0;
+            return true;
+        }
+        for (const Number& n : kNumbers)
+        {
+            if (_stricmp(key, n.key) != 0) continue;
+            const float r = static_cast<float>(atof(val));
+            if ((n.zeroIsOff && r == 0.0f) || (r >= n.lo && r <= n.hi))
+            {
+                g_values.*n.member = r;
+                return true;
+            }
+            char kept[32];
+            _snprintf_s(kept, sizeof(kept), _TRUNCATE, n.kept, g_values.*n.member);
+            GS_LOG_ERR("settings: %s=%s is out of range, keeping %s", n.key, val, kept);
+            return true;
+        }
+        return false;
+    }
 }
 
 namespace gs::Settings
@@ -294,6 +353,7 @@ namespace gs::Settings
             Trim(key);
             Trim(val);
 
+            if (ReadRow(key, val)) continue;
             if (_stricmp(key, "Key") == 0)
             {
                 // A name first, since that is what the ini asks for. A bare
@@ -310,10 +370,6 @@ namespace gs::Settings
                                 "letter, or a two digit hex code. Keeping %s.", val,
                                 KeyName(g_values.key));
             }
-            else if (_stricmp(key, "Spy") == 0)
-            {
-                g_values.spy = atoi(val) != 0;
-            }
             else if (_stricmp(key, "Mark") == 0)
             {
                 strncpy_s(g_values.mark, sizeof(g_values.mark), val, _TRUNCATE);
@@ -322,96 +378,20 @@ namespace gs::Settings
             {
                 strncpy_s(g_values.kinds, sizeof(g_values.kinds), val, _TRUNCATE);
             }
-            else if (_stricmp(key, "Guess") == 0)
-            {
-                g_values.guess = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "Survey") == 0)
-            {
-                g_values.survey = atoi(val) != 0;
-            }
             else if (_stricmp(key, "Chord") == 0)
             {
                 const uint16_t bits = ChordBits(val);
                 if (bits) g_values.chord = bits;
                 else GS_LOG_ERR("settings: Chord=%s named no button I know, keeping the default", val);
             }
-            else if (_stricmp(key, "Rod") == 0)
-            {
-                const float r = static_cast<float>(atof(val));
-                if (r >= 0.05f && r <= 60.0f) g_values.rodMetres = r;
-                else GS_LOG_ERR("settings: Rod=%s is out of range, keeping %.2f metres",
-                                val, g_values.rodMetres);
-            }
-            else if (_stricmp(key, "PressReach") == 0)
-            {
-                const float r = static_cast<float>(atof(val));
-                if (r == 0.0f || (r >= 50.0f && r <= 20000.0f)) g_values.pressReach = r;
-                else GS_LOG_ERR("settings: PressReach=%s is out of range, keeping %.0f",
-                                val, g_values.pressReach);
-            }
-            else if (_stricmp(key, "Verbose") == 0)
-            {
-                g_values.verbose = atoi(val) != 0;
-            }
             else if (_stricmp(key, "Watch") == 0)
             {
                 g_values.watch = atoi(val);
-            }
-            else if (_stricmp(key, "Scan") == 0)
-            {
-                g_values.scan = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "Sweep") == 0)
-            {
-                g_values.sweep = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "RayFallback") == 0)
-            {
-                g_values.rayFallback = atoi(val) != 0;
             }
             else if (_stricmp(key, "Cone") == 0)
             {
                 GS_LOG("settings: Cone is gone. A press uses Rod, in metres, the same at every "
                        "distance; AutoCone still governs the flash.");
-            }
-            else if (_stricmp(key, "AutoCone") == 0)
-            {
-                const float c = static_cast<float>(atof(val));
-                if (c >= 0.05f && c <= 45.0f) g_values.autoConeDeg = c;
-                else GS_LOG_ERR("settings: AutoCone=%s is out of range, keeping %.2f degrees",
-                                val, g_values.autoConeDeg);
-            }
-            else if (_stricmp(key, "Rumble") == 0)
-            {
-                g_values.rumble = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "DirectPad") == 0)
-            {
-                g_values.directPad = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "RealMarkers") == 0)
-            {
-                g_values.realMarkers = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "KeepPins") == 0)
-            {
-                g_values.keepPins = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "Teleporters") == 0)
-            {
-                g_values.teleporters = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "ClearTaken") == 0)
-            {
-                g_values.clearTaken = atoi(val) != 0;
-            }
-            else if (_stricmp(key, "ClearNear") == 0)
-            {
-                const float v = static_cast<float>(atof(val));
-                if (v >= 0.0f && v <= 1000.0f) g_values.clearNear = v;
-                else GS_LOG_ERR("settings: ClearNear=%s is out of range, keeping %.0f metres", val,
-                                g_values.clearNear);
             }
             else if (_stricmp(key, "PinStyle") == 0)
             {
@@ -430,28 +410,12 @@ namespace gs::Settings
                                static_cast<unsigned>(g_values.pinStyle2));
                 }
             }
-            else if (_stricmp(key, "MiniPin") == 0)
-            {
-                g_values.miniPin = atoi(val) != 0;
-            }
             else if (_stricmp(key, "Hold") == 0)
             {
                 const long h = atol(val);
                 if (h >= 0 && h <= 5000) g_values.holdMs = static_cast<uint32_t>(h);
                 else GS_LOG_ERR("settings: Hold=%s is out of range, keeping %lu", val,
                                 static_cast<unsigned long>(g_values.holdMs));
-            }
-            else if (_stricmp(key, "Reach") == 0)
-            {
-                const float r = static_cast<float>(atof(val));
-                if (r == 0.0f || (r >= 50.0f && r <= 20000.0f)) g_values.reach = r;
-                else GS_LOG_ERR("settings: Reach=%s is out of range, keeping %.0f", val, g_values.reach);
-            }
-            else if (_stricmp(key, "Radius") == 0)
-            {
-                const float r = static_cast<float>(atof(val));
-                if (r == 0.0f || (r >= 5.0f && r <= 2000.0f)) g_values.radius = r;
-                else GS_LOG_ERR("settings: Radius=%s is out of range, keeping %.0f", val, g_values.radius);
             }
             else
             {

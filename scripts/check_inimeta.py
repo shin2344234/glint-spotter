@@ -7,20 +7,21 @@ from the code, so a new key, a changed default or a new clamp has to be
 copied across by hand, and a copy that is wrong does not fail anywhere. This
 is the check that it was copied.
 
-gs::Settings::Load in mod/src/core/settings.cpp is the authority. It is one
-long if / else _stricmp(key, "...") chain; each branch either sets a member of
-gs::Settings::Values or logs and keeps the old value. For every key with a
-branch that sets a member:
+mod/src/core/settings.cpp is the authority. The switches and plain numbers
+are rows of its kSwitches and kNumbers tables, a bool or a float with its lo,
+hi and whether zero means off. Every other key is a branch of the
+if / else _stricmp(key, "...") chain in gs::Settings::Load, which either sets
+a member of gs::Settings::Values or logs and keeps the old value. For every
+key that sets a member:
 
-  - it must be described in the metadata, with the type the branch's
-    conversion implies: atoi/_stricmp-as-bool is bool, atof is float, atol or
-    strtoul is int, sscanf_s of two numbers is string (there is no dedicated
-    pair type), KeyFromName is key, and a strncpy_s of the raw value is
-    string (or enum, which the reader cannot tell apart from string).
-  - a float or int branch's clamp, read out of the `if (r >= lo && r <= hi)`
-    guard (allowing an `r == 0.0f ||` alternative before it, which the
-    metadata still expresses as min 0), must match the metadata's min and
-    max.
+  - it must be described in the metadata, with the type its reader implies:
+    a kSwitches row is bool, a kNumbers row is float, atoi, atol or strtoul
+    is int, sscanf_s of two numbers is string (there is no dedicated pair
+    type), KeyFromName is key, and a strncpy_s of the raw value is string (or
+    enum, which the reader cannot tell apart from string).
+  - a kNumbers row's lo and hi, or an int branch's clamp read out of its
+    `if (h >= lo && h <= hi)` guard, must match the metadata's min and max. A
+    row where zero means off still has min 0 in the metadata.
   - the default is the member's initialiser in settings.h, formatted the way
     the ini would print it: 1/0 for bool, the plain number for int/float, the
     literal text for string. Key=F9 is checked by name.
@@ -103,19 +104,6 @@ def parse_branches(cpp):
             raise ValueError("no assignment found for key %s" % key)
         member, expr = mm.group(1), mm.group(2)
 
-        def guard_numbers(pattern):
-            """Numbers in the `if (...)` guard directly in front of this
-            assignment. Dot (not [^)]) so a nested paren, as in the
-            `r == 0.0f || (r >= lo && r <= hi)` shape, does not truncate the
-            match early: the search only stops at the ')' immediately
-            followed by this member's assignment."""
-            g = re.search(
-                r"if\s*\((.*?)\)\s*g_values\." + member + r"\s*=",
-                rest, re.S,
-            )
-            cond = g.group(1) if g else ""
-            return cond, [float(x) for x in re.findall(pattern, cond)]
-
         lo = hi = None
         if key == "PinStyle":
             kind = "string"
@@ -123,30 +111,38 @@ def parse_branches(cpp):
             kind = "key"
         elif "ChordBits" in rest:
             kind = "string"
-        elif "atof(val)" in rest:
-            kind = "float"
-            cond, nums = guard_numbers(r"-?\d+\.?\d*")
-            # A guard of the shape `r == 0.0f || (r >= LO && r <= HI)` still
-            # accepts 0, so the metadata's min is 0 either way.
-            if "==" in cond and "0.0f" in cond:
-                lo = 0.0
-                hi = nums[-1] if nums else None
-            elif nums:
-                lo, hi = nums[0], nums[-1]
         elif expr == "atoi(val) != 0":
             kind = "bool"
         elif "atoi(val)" in rest:
             kind = "int"
         elif "atol(val)" in rest:
             kind = "int"
-            _, nums = guard_numbers(r"-?\d+")
+            # The numbers in the `if (...)` guard in front of the assignment.
+            g = re.search(r"if\s*\((.*?)\)\s*g_values\." + member + r"\s*=", rest, re.S)
+            nums = [int(x) for x in re.findall(r"-?\d+", g.group(1))] if g else []
             if len(nums) >= 2:
-                lo, hi = int(nums[0]), int(nums[1])
+                lo, hi = nums[0], nums[1]
         elif "strncpy_s" in rest:
             kind = "string"
         else:
-            raise ValueError("unrecognised reader for %s: %s" % (key, expr))
+            raise ValueError("unrecognised reader for %s: %s (a float belongs in kNumbers)"
+                             % (key, expr))
         out[key] = (member, kind, lo, hi)
+    return out
+
+
+def parse_tables(cpp):
+    """key -> (member, kind, lo, hi) for the rows of kSwitches and kNumbers.
+    A row where zero means off accepts 0, so its min is 0."""
+    out = {}
+    for m in re.finditer(r'\{"(\w+)",\s*&Values::(\w+)\}', body(cpp, "const Switch kSwitches[]")):
+        out[m.group(1)] = (m.group(2), "bool", None, None)
+    for m in re.finditer(
+        r'\{"(\w+)",\s*&Values::(\w+),\s*(-?[\d.]+)f,\s*(-?[\d.]+)f,\s*(true|false),',
+        body(cpp, "const Number kNumbers[]"),
+    ):
+        key, member, lo, hi, zero_is_off = m.groups()
+        out[key] = (member, "float", 0.0 if zero_is_off == "true" else float(lo), float(hi))
     return out
 
 
@@ -183,7 +179,7 @@ def load_meta():
 
 def main():
     cpp, h = read(SETTINGS_CPP), read(SETTINGS_H)
-    reader = parse_branches(cpp)
+    reader = {**parse_branches(cpp), **parse_tables(cpp)}
     defaults = parse_defaults(h)
     meta = load_meta()
     keys = meta["sections"]["GlintSpotter"]["keys"]

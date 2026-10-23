@@ -533,8 +533,8 @@ namespace
     //
     // So the name decides. The rejects win, because a trigger box sitting a
     // metre from the standing stone would otherwise take the pin.
-    // The reject list again, against a node's stored leaf name rather than
-    // its full path, so a candidate can be judged after the fact.
+    // The reject list. It takes a full path or a node's stored leaf name, so
+    // a candidate can also be judged after the fact.
     bool Machinery(const char* name)
     {
         static const char* const reject[] = {
@@ -548,14 +548,8 @@ namespace
 
     bool WorthMarking(const char* path)
     {
-        static const char* const reject[] = {
-            "func_", "operator_", "trigger", "pointcontrol", "camera", "fit_height",
-            "volume", "sector", "spawn", "collision", "phase00", "_once"};
-        for (const char* r : reject)
-            if (strstr(path, r)) return false;
-
         // The rest is the player's list, from the ini.
-        return gs::Settings::Marked(path);
+        return !Machinery(path) && gs::Settings::Marked(path);
     }
 
     // What this gimmick is, and whether the player can take something from
