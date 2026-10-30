@@ -479,7 +479,13 @@ namespace
     constexpr uintptr_t kServerManagerGlobal = 0x071ED058;
     constexpr int kUsersMax = 64;   // list entries asked for the component
     constexpr uintptr_t kOff_Mgr_User = 0xB8, kOff_Actor_Comps = 0x68, kOff_Comps_ContentsMisc = 0x368;
-    constexpr uintptr_t kOff_FieldMap = 0x2C0, kOff_Map_Count = 0x04, kOff_Map_Entries = 0x18;
+    // The DLC build moved the map to +0x330 (the insert is 0x02B4D250 on 3424,
+    // reached with lea rcx, [r15+0x330]) and left the map and its nodes as they
+    // were. Every 3392 run read +0x2C0, found no FieldSaveData there and said
+    // so, and taken glints went unfiltered until 30 October. rebase.py checked
+    // only that "+ 0x2c0]" appeared in the routine, which a stack slot kept
+    // true; it now finds the map through the insert's 0xB8-byte allocation.
+    constexpr uintptr_t kOff_FieldMap = 0x330, kOff_Map_Count = 0x04, kOff_Map_Entries = 0x18;
     constexpr uintptr_t kOff_Node_Field = 0x08;
 
     const char* g_why = "";

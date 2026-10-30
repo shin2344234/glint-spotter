@@ -416,6 +416,32 @@ def gimmick_offsets(vt):
     return sub, det
 
 
+def field_map(load):
+    """Where the load routine keeps its map of FieldSaveData copies: the
+    offset in the lea rcx, [this + X] that sets up the call to the map's
+    insert, which allocates its nodes with mov ecx, 0xB8.
+
+    Through 3392 this only looked for "+ 0x2c0]" anywhere in the routine, and
+    a stack slot at rbp+0x2C0 kept it passing after the DLC moved the map to
+    +0x330. The save reader read an empty map on every 3392 run."""
+    ins = dis(load)
+    found = []
+    for i, x in enumerate(ins):
+        if x.mnemonic != "lea" or not x.op_str.startswith("rcx, [r"):
+            continue
+        m = x.operands[1].mem
+        if m.base in (capstone.x86.X86_REG_RBP, capstone.x86.X86_REG_RSP) or m.index or m.disp <= 0:
+            continue
+        for y in ins[i + 1:i + 7]:
+            if y.mnemonic != "call" or y.operands[0].type != capstone.x86.X86_OP_IMM:
+                continue
+            body = dis(y.operands[0].imm - IB, 0x180)
+            if any(z.mnemonic == "mov" and z.op_str == "ecx, 0xb8" for z in body):
+                found.append(m.disp)
+            break
+    return sorted(set(found))
+
+
 def reflected_offset(field, near=None):
     """Where the reflection registration of a field name puts it: a lea of
     the name followed within 250 instructions by mov dword ptr [rip+X], imm.
@@ -600,9 +626,11 @@ def main():
     if cm:
         load = slot(cm, 10)
         fmap = rec("kOff_FieldMap", SAVEMAP)
-        text = " ".join(i.op_str for i in dis(load))
         print("  info     ServerContentsMiscActorComponent slot 10, the save's load routine, is 0x%08X" % load)
-        check("it builds the field map at +0x%X" % fmap, ("+ 0x%x]" % fmap) in text)
+        found = field_map(load)
+        report("kOff_FieldMap", found[0] if len(found) == 1 else None, fmap,
+               "the lea rcx before the call that inserts 0xB8-byte nodes (%s)"
+               % (", ".join("+0x%X" % f for f in found) or "none"), 3)
         strides = {}
         for i in dis(load):
             m = re.match(r"\w+, (0x[0-9a-f]+)$", i.op_str)
