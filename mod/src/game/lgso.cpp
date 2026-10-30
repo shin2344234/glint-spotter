@@ -13,9 +13,8 @@
 
 namespace
 {
-    // 17,728 on the map I test in, so there is room to spare without
-    // making the read allocate.
-    constexpr int kMax = 40000;
+    // Room to spare without making the read allocate; see kMaxPlaces.
+    constexpr int kMax = gs::lgso::kMaxPlaces;
 
     std::mutex g_mutex;
     gs::lgso::Place g_places[kMax];
@@ -225,6 +224,8 @@ namespace gs::lgso
                 ++g_generation;
                 GS_LOG_OK("[lgso] %d placement(s) read from the level gimmick table at 0x%p in %u ms", g_n,
                           reinterpret_cast<void*>(mgr), took);
+                if (g_n >= kMax)
+                    GS_LOG_ERR("[lgso] that is the most this build holds, so the rest of the table is not read");
             }
             return g_n;
         }

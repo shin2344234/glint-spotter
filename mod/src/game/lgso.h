@@ -48,6 +48,12 @@ namespace gs::lgso
         uintptr_t at = 0;  // the element itself, good until the manager changes
     };
 
+    // The most placements held. 17,728 on 2850 and about 18,000 on 2976. The
+    // DLC build's table, 3392, read 39,623 placements in the startup count,
+    // which stops at +0x70 of each record, and hit the old cap of 40,000 in
+    // the full read, which looks out to +0x100. So 40,000 cut the table off.
+    constexpr int kMaxPlaces = 100000;
+
     // A copy of every placement held, for a caller that walks them all.
     // Returns how many were copied; `generation`, when given, receives the
     // Generation() the copy belongs to.

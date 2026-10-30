@@ -369,7 +369,10 @@ constexpr uint32_t kSpecialModeRows = 33;
 // 2976's is from Seth's 23 September playtest: three globals held the manager
 // and the pick was +0x6DDA940, 0x40 past 2949's second value. On 2976
 // 0x06D69A38, the other 2949 value, is JobInfoManager's singleton.
-constexpr uintptr_t kActorManagerGlobals[] = {0x06DDA940};
+//
+// 3392's is from Seth's 29 October playtest: three loads in two launches all
+// found the manager via global +0x71AD468.
+constexpr uintptr_t kActorManagerGlobals[] = {0x071AD468};
 constexpr uintptr_t kOff_Lgso_Count    = 0x08;
 constexpr uintptr_t kOff_Lgso_Records  = 0x58;
 

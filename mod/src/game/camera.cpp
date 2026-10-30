@@ -28,9 +28,10 @@ namespace
     // reads either copy, so each place the insertion could fall is tried:
     // before both, between them, or after both. A pair is only believed when
     // its two copies agree to a metre, so a wrong pair reads as no world
-    // position rather than a wrong one.
+    // position rather than a wrong one. Seth's 29 October playtest on 3392
+    // agreed at +0xA0 and +0xC0 on every load, so that pair goes first.
     struct WorldPair { uint16_t a, b; };
-    constexpr WorldPair kWorldPairs[] = {{0x94, 0xB4}, {0x94, 0xC0}, {0xA0, 0xC0}};
+    constexpr WorldPair kWorldPairs[] = {{0xA0, 0xC0}, {0x94, 0xB4}, {0x94, 0xC0}};
     constexpr int kWorldPairCount = sizeof(kWorldPairs) / sizeof(kWorldPairs[0]);
     std::atomic<int> g_worldPairSaid{-1};
 

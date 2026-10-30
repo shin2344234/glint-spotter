@@ -198,8 +198,8 @@ namespace
 
     void LoadPlaces()
     {
-        g_places.resize(40000);
-        g_places.resize(static_cast<size_t>(gs::lgso::CopyAll(g_places.data(), 40000, &g_placesGen)));
+        g_places.resize(gs::lgso::kMaxPlaces);
+        g_places.resize(static_cast<size_t>(gs::lgso::CopyAll(g_places.data(), gs::lgso::kMaxPlaces, &g_placesGen)));
         g_grid.clear();
         for (int i = 0; i < static_cast<int>(g_places.size()); ++i)
             g_grid[Cell(g_places[i].x, g_places[i].z)].push_back(i);
@@ -472,9 +472,10 @@ namespace
     // vtables can. When it does not hold the manager, the image is searched for
     // the global that does, and the log names it so the record can be brought
     // up to date. 0x06DA6798 on 2949; 0x06DA67D8 on 2976, from the search in
-    // Seth's 23 September playtest. Still the 2976 value: 3392's comes from the
-    // first playtest log, and until then the search finds it.
-    constexpr uintptr_t kServerManagerGlobal = 0x06DA67D8;
+    // Seth's 23 September playtest. 0x071EB1E8 on 3392, from his 29 October
+    // playtest, where the search for it took 5 to 14 seconds on each of three
+    // loads.
+    constexpr uintptr_t kServerManagerGlobal = 0x071EB1E8;
     constexpr int kUsersMax = 64;   // list entries asked for the component
     constexpr uintptr_t kOff_Mgr_User = 0xB8, kOff_Actor_Comps = 0x68, kOff_Comps_ContentsMisc = 0x368;
     constexpr uintptr_t kOff_FieldMap = 0x2C0, kOff_Map_Count = 0x04, kOff_Map_Entries = 0x18;
