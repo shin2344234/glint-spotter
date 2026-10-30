@@ -13,7 +13,7 @@
 
 namespace
 {
-    constexpr uintptr_t kPickUpVtableRva = 0x05EECA28;   // 3392; 0x05B34BB8 on 2976
+    constexpr uintptr_t kPickUpVtableRva = 0x05EEEB48;   // 3424; 0x05EECA28 on 3392
     constexpr const char* kPickUpClass = ".?AVTrocTrProcessPickUpItemOnceTimer@pa@@";
     constexpr int kHandlerSlot = 2;
     constexpr uintptr_t kOff_Context_Payload = 0x18;

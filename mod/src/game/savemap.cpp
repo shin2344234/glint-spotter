@@ -110,11 +110,11 @@ namespace
     // has moved it, which every patch so far has.
     struct Cls { uintptr_t rva; const char* name; uintptr_t va; };
     Cls g_cls[] = {
-        {0x05C4B758, ".?AVFieldGimmickSaveData@pa@@", 0},
-        {0x05C4BC98, ".?AVFieldSaveData@pa@@", 0},
-        {0x05EDDDE8, ".?AVServerActorManager@pa@@", 0},
-        {0x05EDD7F8, ".?AVServerUserActor@pa@@", 0},
-        {0x05ED4DE8, ".?AVServerContentsMiscActorComponent@pa@@", 0},
+        {0x05C4C710, ".?AVFieldGimmickSaveData@pa@@", 0},
+        {0x05C4BC90, ".?AVFieldSaveData@pa@@", 0},
+        {0x05EDF9E8, ".?AVServerActorManager@pa@@", 0},
+        {0x05EDF808, ".?AVServerUserActor@pa@@", 0},
+        {0x05ED6DF8, ".?AVServerContentsMiscActorComponent@pa@@", 0},
     };
     enum { kRecord, kField, kServerManager, kServerUser, kContentsMisc, kClassCount };
     uintptr_t Vt(int i) { return g_cls[i].va; }
@@ -474,8 +474,9 @@ namespace
     // up to date. 0x06DA6798 on 2949; 0x06DA67D8 on 2976, from the search in
     // Seth's 23 September playtest. 0x071EB1E8 on 3392, from his 29 October
     // playtest, where the search for it took 5 to 14 seconds on each of three
-    // loads.
-    constexpr uintptr_t kServerManagerGlobal = 0x071EB1E8;
+    // loads. 0x071ED058 on 3424, not yet seen in play: the code that takes
+    // the 3392 address at 0x050606E3 and 0x0549C4F7 takes this one in 3424.
+    constexpr uintptr_t kServerManagerGlobal = 0x071ED058;
     constexpr int kUsersMax = 64;   // list entries asked for the component
     constexpr uintptr_t kOff_Mgr_User = 0xB8, kOff_Actor_Comps = 0x68, kOff_Comps_ContentsMisc = 0x368;
     constexpr uintptr_t kOff_FieldMap = 0x2C0, kOff_Map_Count = 0x04, kOff_Map_Entries = 0x18;
