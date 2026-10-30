@@ -1170,9 +1170,10 @@ namespace
         }
     }
 
-    // The tick's two slot 35 swaps, each made when its map root is free to take.
+    // The tick's two update swaps (slot 35 through 2976, 36 on 3392), each made
+    // when its map root is free to take.
     //
-    // Crimson Route hooks slot 35 on both map roots as well, and it only hooks
+    // Crimson Route hooks the update slot on both map roots as well, and it only hooks
     // a slot that still holds the game's own function. It gets there about
     // sixteen seconds after launch and this plugin about five, so on 23
     // September it found neither slot on any launch, logged

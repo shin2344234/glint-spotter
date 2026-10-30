@@ -25,9 +25,16 @@
 
 namespace
 {
-    constexpr size_t kRecordBytes = 0x3D8;            // the stride of the records in their vector
+    // 3392 shrank the record from 0x3D8 to 0x3C0 and moved every field the
+    // mod reads. The load routine (ServerContentsMisc slot 10, 0x02B0AC50)
+    // steps by 0x3C0 in 21 places and by 0x3D8 in none, and the reflection
+    // registrations put _transform at +0x320 (was +0x1CC),
+    // _originSpawnTransform at +0x348 (+0x1F4) and _initStateNameHash at
+    // +0x38C (+0x21C). Each position is +0x1C into its transform, as it was
+    // on 2976; that inner offset is carried over, not seen on 3392.
+    constexpr size_t kRecordBytes = 0x3C0;            // the stride of the records in their vector
     constexpr uintptr_t kOff_FieldRecords = 0x30;     // FieldSaveData's first vector, as its copy builds it
-    constexpr size_t kOff_Pos = 0x1E8, kOff_OriginPos = 0x210, kOff_State = 0x21C;
+    constexpr size_t kOff_Pos = 0x33C, kOff_OriginPos = 0x364, kOff_State = 0x38C;
     // A record joins a placement within three metres across and six up or
     // down. The height is looser because the thing that glints can sit on
     // the placement: on 22 September the Complete record for an artifact
@@ -98,16 +105,16 @@ namespace
 
     uintptr_t g_base = 0;
 
-    // The classes the route passes through, as recorded on 2976. Each is held
+    // The classes the route passes through, as recorded on 3392. Each is held
     // up against the running game's RTTI and found again by name when a patch
     // has moved it, which every patch so far has.
     struct Cls { uintptr_t rva; const char* name; uintptr_t va; };
     Cls g_cls[] = {
-        {0x058B0B20, ".?AVFieldGimmickSaveData@pa@@", 0},
-        {0x058AF0E0, ".?AVFieldSaveData@pa@@", 0},
-        {0x05B25988, ".?AVServerActorManager@pa@@", 0},
-        {0x05B257A8, ".?AVServerUserActor@pa@@", 0},
-        {0x05B1D318, ".?AVServerContentsMiscActorComponent@pa@@", 0},
+        {0x05C4B758, ".?AVFieldGimmickSaveData@pa@@", 0},
+        {0x05C4BC98, ".?AVFieldSaveData@pa@@", 0},
+        {0x05EDDDE8, ".?AVServerActorManager@pa@@", 0},
+        {0x05EDD7F8, ".?AVServerUserActor@pa@@", 0},
+        {0x05ED4DE8, ".?AVServerContentsMiscActorComponent@pa@@", 0},
     };
     enum { kRecord, kField, kServerManager, kServerUser, kContentsMisc, kClassCount };
     uintptr_t Vt(int i) { return g_cls[i].va; }
@@ -257,7 +264,8 @@ namespace
 
     // A FieldSaveData's record vector: a pointer at +0x30 and a u32 count at
     // +0x38, which is how the load routine walks it (ServerContentsMisc slot
-    // 10 on 2949, 0x028B8CCF: rsi = [r12+0x30], end = rsi + [r12+0x38] * 0x3D8).
+    // 10 on 2949, 0x028B8CCF: rsi = [r12+0x30], end = rsi + [r12+0x38] * 0x3D8;
+    // on 3392 slot 10 is 0x02B0AC50, still [r14+0x30] and [r14+0x38]).
     // Checked by the vtable of the first and last record, so a wrong reading
     // of the layout gives nothing rather than rubbish.
     bool FieldRecords(uintptr_t field, uintptr_t* begin, size_t* count)
@@ -444,7 +452,7 @@ namespace
     // ---- where they are, with no search ----
     //
     // The load routine is slot 10 of the player's server
-    // ServerContentsMiscActorComponent (0x028B7360 on 2976). For each
+    // ServerContentsMiscActorComponent (0x028B7360 on 2976, 0x02B0AC50 on 3392). For each
     // FieldSaveData in the save it builds a copy and inserts it with 0x028EECC0
     // into a map at this+0x2C0, keyed by the field. From the insert:
     //
@@ -464,7 +472,8 @@ namespace
     // vtables can. When it does not hold the manager, the image is searched for
     // the global that does, and the log names it so the record can be brought
     // up to date. 0x06DA6798 on 2949; 0x06DA67D8 on 2976, from the search in
-    // Seth's 23 September playtest.
+    // Seth's 23 September playtest. Still the 2976 value: 3392's comes from the
+    // first playtest log, and until then the search finds it.
     constexpr uintptr_t kServerManagerGlobal = 0x06DA67D8;
     constexpr int kUsersMax = 64;   // list entries asked for the component
     constexpr uintptr_t kOff_Mgr_User = 0xB8, kOff_Actor_Comps = 0x68, kOff_Comps_ContentsMisc = 0x368;
@@ -616,7 +625,7 @@ namespace
     // ---- what a loaded gimmick says about itself ----
     //
     // While a gimmick is loaded near the player, its saved record's state at
-    // +0x21C reads zero, and it comes back when he walks off: a record on
+    // +0x21C (+0x38C on 3392) reads zero, and it comes back when he walks off: a record on
     // AbyssRuins_Her_0027 went from Wait to zero at 1 metre and back to Wait
     // at 41. So a done standstone the player loaded in beside read as not
     // taken and got pinned. The live gimmick component holds the state at

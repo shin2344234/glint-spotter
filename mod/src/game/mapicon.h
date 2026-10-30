@@ -1,7 +1,8 @@
 #pragma once
 #include <cstdint>
 
-// The map icon create call, slot 170 on the world map and minimap root controls.
+// The map icon create call, slot 174 on the world map and minimap root controls
+// (170 through 2976).
 //
 // This build spies. It replaces slot 170 in both vtables with a function that
 // records every argument the game passes and then forwards all fourteen of them

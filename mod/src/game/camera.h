@@ -20,7 +20,8 @@
 // three angles at +0xC8, +0xCC, +0xD0 that the helper hands to 0x113D3E0,
 // the accumulators at +0x364 and +0x368 they are built from, and the unit
 // vector at +0x14C. One session with presses at three known pitches names
-// the field.
+// the field. Those are 2976's offsets; on 3392 they are read at +0xD4,
+// +0x37C, +0x380 and +0x158.
 
 namespace gs::camera
 {
@@ -46,13 +47,14 @@ namespace gs::camera
         float pitch = 0;       // radians, positive looking up
         float yaw = 0;         // radians, atan2(fwd.x, fwd.z)
         // The other candidates, raw.
-        float ang[3]{};        // +0xC8, +0xCC, +0xD0
-        float acc[2]{};        // +0x364, +0x368
-        float vec[3]{};        // +0x14C
+        float ang[3]{};        // +0xD4, +0xD8, +0xDC (+0xC8 on 2976)
+        float acc[2]{};        // +0x37C, +0x380 (+0x364, +0x368)
+        float vec[3]{};        // +0x158 (+0x14C)
         float dist80 = 0;      // +0x80
         // The player in world coordinates, which the camera keeps beside the
-        // pivot's local ones. Two copies, at +0x94 and +0xB4, and the reader
-        // only believes them when they agree.
+        // pivot's local ones. Two copies, at +0x94 and +0xB4 on 2976, and the
+        // reader only believes them when they agree. On 3392 camera.cpp tries
+        // each place they could have moved to.
         //
         // This is what lets a press work before the actor manager has said
         // anything. The pivot at +0x30 is local to the sub-level and the world

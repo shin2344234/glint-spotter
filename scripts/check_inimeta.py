@@ -55,7 +55,7 @@ NO_OP_KEYS = {"Cone"}
 KEY_NAME_DEFAULTS = {
     "Key": "F9",       # g_values.key = 0x78, which is VK_F9
     "Chord": "RB+LB+A",  # g_values.chord = 0x1300 (RB | LB | A)
-    "PinStyle": "1,4",   # g_values.pinStyle1 = 1, g_values.pinStyle2 = 4
+    "PinStyle": "0,11",  # g_values.pinStyle1 = 0, g_values.pinStyle2 = 11
 }
 
 

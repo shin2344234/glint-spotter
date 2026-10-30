@@ -53,7 +53,7 @@ gs_MinimapTickThunk PROC
     jmp     qword ptr [gs_minimapOriginal]
 gs_MinimapTickThunk ENDP
 
-; The alert system's slot 144. Same idea as the minimap thunk and the same
+; The alert system's slot 146 (144 through 2976). Same idea as the minimap thunk and the same
 ; reason: the signature is not known, so nothing is assumed about it. Every
 ; register the ABI lets the game pass is saved, the notifier is called with the
 ; four in registers plus a pointer to the caller's fifth argument, everything is

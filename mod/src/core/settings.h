@@ -5,7 +5,7 @@
 //
 //   [GlintSpotter]
 //   Key=91        ; virtual-key code in hex for the trigger. 91 is Scroll Lock.
-//   Spy=1         ; log every map icon the game creates, through slot 170
+//   Spy=1         ; log every map icon the game creates, through slot 174
 //   Mark=clue,artifact,...   ; node names worth a pin, matched anywhere in
 //                            ; the prefab path
 //   Kinds=        ; comma list of name fragments a level gimmick must match
@@ -345,8 +345,14 @@ namespace gs::Settings
         // second, so those are the ranges. What each value looks like is not
         // written down anywhere the mod can read, so the way to find another
         // is to place one by hand and read the pair out of the log.
-        uint8_t pinStyle1 = 1;
-        uint8_t pinStyle2 = 4;
+        //
+        // 3392, the DLC build, renumbered the pictures and kept the ranges.
+        // 1,4 now draws a white diamond on a red square, and the red diamond
+        // it used to be came through as 0 and 11 when I placed it by hand on
+        // 29 October. So 0,11 is the default, and an ini that still says 1,4,
+        // which is every ini the old default wrote, is read as 0,11.
+        uint8_t pinStyle1 = 0;
+        uint8_t pinStyle2 = 11;
 
         // A copy of each pin on the minimap. Off, and this time for a reason
         // that is not a theory.

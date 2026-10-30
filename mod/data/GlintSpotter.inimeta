@@ -148,10 +148,10 @@
           "label": "Pin marker picture",
           "type": "string",
           "group": "Marking",
-          "default": "1,4",
+          "default": "0,11",
           "help": [
             "Which of the map's marker pictures a pin uses, as two numbers separated by a comma.",
-            "1,4 is the one on the Change Marker list; 4,14 is the plain marker you get by default.",
+            "0,11 is the red diamond on the Change Marker list. The DLC update renumbered them, and 1,4, the old default, is read as 0,11.",
             "The first is 0 to 13 and the second 0 to 14. To find another, place one by hand with Change Marker and read the style pair out of the log."
           ],
           "order": 11

@@ -320,8 +320,9 @@ namespace
             // Session a hundred and one spent the whole budget on the map's
             // housekeeping: opening and closing it removes icons of kind 0x0C
             // and 0x0E by the dozen, and the actual deletion happened after
-            // the twenty-fourth of them and was never printed. Kind 0x15 is
-            // the one that matters and it is rare, so the budget lasts.
+            // the twenty-fourth of them and was never printed. The marker
+            // kind (0x15 then, 0x16 on 3392) is the one that matters and it is
+            // rare, so the budget lasts.
             if (!keyOk || kind != gs::sig::kPinKind) return;
 
             // The mod's own removals come through here too, since it takes an
@@ -458,7 +459,7 @@ namespace gs::mapicon
     {
         if (!worldRoot || !g_orig[0])
         {
-            GS_LOG_ERR("[pin] no world root or no original slot 170, nothing placed");
+            GS_LOG_ERR("[pin] no world root or no original slot %d, nothing placed", gs::sig::kSlotCreateIcon);
             return nullptr;
         }
         if (!RootLooksRight(worldRoot))
@@ -473,7 +474,7 @@ namespace gs::mapicon
         // Session ten, byte for byte, except the position and the key id.
         uint16_t type = 0x0001;
         struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{
-            haveKey ? keyId : 1000 + static_cast<int64_t>(n), 0x15, {}};
+            haveKey ? keyId : 1000 + static_cast<int64_t>(n), static_cast<uint8_t>(gs::sig::kPinKind), {}};
         uint32_t dword4 = 0;
         float float5 = 0.0f;
         // Height zero, because that is what the game passes for this icon.
@@ -492,8 +493,9 @@ namespace gs::mapicon
         char name[64] = "MapIcon_Pin_Marker";
         uint8_t struct10[36]{};
 
-        GS_LOG("[pin #%llu] slot 170 on 0x%p: key=%lld/0x15 pos=(%.3f, %.3f, %.3f) label=\"%s\" thread %lu",
-               static_cast<unsigned long long>(n), worldRoot, static_cast<long long>(key.id), x, y, z, label,
+        GS_LOG("[pin #%llu] slot %d on 0x%p: key=%lld/0x%02X pos=(%.3f, %.3f, %.3f) label=\"%s\" thread %lu",
+               static_cast<unsigned long long>(n), gs::sig::kSlotCreateIcon, worldRoot, static_cast<long long>(key.id),
+               static_cast<unsigned>(key.kind), x, y, z, label,
                GetCurrentThreadId());
         void* r = g_orig[0](worldRoot, &type, &key, &dword4, &float5, pos, label, name,
                             reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
@@ -501,6 +503,11 @@ namespace gs::mapicon
                             nullptr, nullptr, nullptr);
         GS_LOG_OK("[pin #%llu] returned 0x%p", static_cast<unsigned long long>(n), r);
 
+        // Only ever tested for null. On 3392 the dispatcher returns its type
+        // row lookup on success where 2976 returned the last call it made, and
+        // zero when the creator made nothing in both, so null still means no
+        // icon and anything else is not a pointer to read.
+        //
         // Nothing else happens when the game made no icon. Not the buzz, which
         // would report a pin that is not there; not the minimap copy, which
         // would be left behind when the caller retries; and not the record
@@ -533,7 +540,7 @@ namespace gs::mapicon
         if (gs::Settings::Get().miniPin && mini && g_orig[1])
         {
             struct { int64_t id; uint8_t kind; uint8_t pad[7]; } miniKey{
-                100000 + static_cast<int64_t>(n), 0x15, {}};
+                100000 + static_cast<int64_t>(n), static_cast<uint8_t>(gs::sig::kPinKind), {}};
             void* rm = g_orig[1](mini, &type, &miniKey, &dword4, &float5, pos, label, name,
                                  reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
                                  reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
@@ -630,7 +637,7 @@ namespace gs::mapicon
     bool RemoveIcon(void* worldRoot, int64_t keyId)
     {
         if (!worldRoot || !g_rmOrig[0] || !RootLooksRight(worldRoot)) return false;
-        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{keyId, 0x15, {}};
+        struct { int64_t id; uint8_t kind; uint8_t pad[7]; } key{keyId, static_cast<uint8_t>(gs::sig::kPinKind), {}};
         g_rmOrig[0](worldRoot, reinterpret_cast<void*>(static_cast<uintptr_t>(0x0001)), &key,
                     reinterpret_cast<void*>(static_cast<uintptr_t>(0)), nullptr, nullptr, nullptr,
                     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);

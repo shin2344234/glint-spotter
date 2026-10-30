@@ -42,6 +42,14 @@ namespace
     // Detect_InteractionAim_NoLantern, the same interaction with no lantern
     // out. The rest of the Detect family stays accepted, since nothing has
     // shown what raises it, and so does any row past the table.
+    //
+    // 3392 has 33 rows, read out of package 0008 with Master Looter's
+    // cdtables. Seven are new and they are not all at the end:
+    // Detect_UnderWaterSonar went in at row 6, so SwordFlash, the flash
+    // itself, is row 7 now, and every row after it moved down by one or more.
+    // The new sonar mode is a Detect mode and stays accepted like the rest of
+    // that family until a log shows what raises it. The new housing and
+    // faction rows and InsectStorage are refused.
     struct Mode
     {
         const char* name;
@@ -54,26 +62,33 @@ namespace
         {"Detect_Lantern", false},                  // row 3, key 103: a conversation
         {"Detect_InteractionAim_NoLantern", false}, // row 4, key 110: the same, no lantern
         {"Detect_Ship", true},                      // row 5, key 104
-        {"SwordFlash", true},                       // row 6, key 105
-        {"Anamorphic", false},                      // row 7, key 2
-        {"Knowledge", false},                       // row 8, key 3
-        {"Hacking", false},                         // row 9, key 4
-        {"AnimalTracking", false},                  // row 10, key 5
-        {"FindCollect", false},                     // row 11, key 6
-        {"FindMine", false},                        // row 12, key 10
-        {"ReadMemory", false},                      // row 13, key 102
-        {"ReadMemory_NotMoveLimit", false},         // row 14, key 109
-        {"DetectTaeguk", true},                     // row 15, key 101
-        {"DetectTaeguk_Damian", true},              // row 16, key 111
-        {"DetectTaeguk_Oongka", true},              // row 17, key 112
-        {"Jijeongta", false},                       // row 18, key 7
-        {"Housing", false},                         // row 19, key 9
-        {"Housing_Island", false},                  // row 20, key 24
-        {"Pond", false},                            // row 21, key 20
-        {"FactionManagement", false},               // row 22, key 21
-        {"FactionManagementWithoutHousing", false}, // row 23, key 23
-        {"MiniGameFake", false},                    // row 24, key 107
-        {"RemoteCatchControl", false},              // row 25, key 108
+        {"Detect_UnderWaterSonar", true},           // row 6, key 120, new in 3392
+        {"SwordFlash", true},                       // row 7, key 105
+        {"Anamorphic", false},                      // row 8, key 2
+        {"Knowledge", false},                       // row 9, key 3
+        {"Hacking", false},                         // row 10, key 4
+        {"AnimalTracking", false},                  // row 11, key 5
+        {"FindCollect", false},                     // row 12, key 6
+        {"FindMine", false},                        // row 13, key 10
+        {"ReadMemory", false},                      // row 14, key 102
+        {"ReadMemory_NotMoveLimit", false},         // row 15, key 109
+        {"DetectTaeguk", true},                     // row 16, key 101
+        {"DetectTaeguk_Damian", true},              // row 17, key 111
+        {"DetectTaeguk_Oongka", true},              // row 18, key 112
+        {"Jijeongta", false},                       // row 19, key 7
+        {"Housing", false},                         // row 20, key 9
+        {"Housing_Island", false},                  // row 21, key 24
+        {"Housing_Castle", false},                  // row 22, key 25, new
+        {"Pond", false},                            // row 23, key 20
+        {"FactionManagement", false},               // row 24, key 21
+        {"FactionManagement_Sawmill", false},       // row 25, key 26, new
+        {"FactionManagement_Pub", false},           // row 26, key 27, new
+        {"FactionManagement_Forge", false},         // row 27, key 28, new
+        {"FactionManagement_Clothier", false},      // row 28, key 29, new
+        {"FactionManagementWithoutHousing", false}, // row 29, key 23
+        {"InsectStorage", false},                   // row 30, key 22, new
+        {"MiniGameFake", false},                    // row 31, key 107
+        {"RemoteCatchControl", false},              // row 32, key 108
     };
     static_assert(sizeof(kModes) / sizeof(kModes[0]) == gs::sig::kSpecialModeRows, "one entry per row");
 

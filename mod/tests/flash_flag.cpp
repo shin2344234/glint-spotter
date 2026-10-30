@@ -93,37 +93,42 @@ int main()
     Expect("handed over again it reads as on", gs::aim::FlashActive());
 
     printf("-- which mode raised the flag (GitHub #1); the component holds the mode's row --\n");
-    special.Mode(8);
+    special.Mode(9);
     Expect("before the game's table is read, Knowledge still counts, as it always did", gs::aim::FlashActive());
-    gs::aim::SetModeTableRows(26);
-    Expect("with the table read, Knowledge (row 8) with the flag up reads as off", !gs::aim::FlashActive());
+    gs::aim::SetModeTableRows(33);
+    Expect("with the table read, Knowledge (row 9 on 3392) with the flag up reads as off", !gs::aim::FlashActive());
+    special.Mode(8);
+    Expect("so does Anamorphic (row 8)", !gs::aim::FlashActive());
     special.Mode(7);
-    Expect("so does Anamorphic (row 7)", !gs::aim::FlashActive());
+    Expect("SwordFlash (row 7 on 3392, row 6 before it) reads as on", gs::aim::FlashActive());
     special.Mode(6);
-    Expect("SwordFlash (row 6) reads as on", gs::aim::FlashActive());
+    Expect("Detect_UnderWaterSonar (row 6, new in 3392) reads as on with the rest of the Detect family",
+           gs::aim::FlashActive());
     special.Mode(3);
     Expect("Detect_Lantern (row 3), which a conversation raised on 26 September, reads as off", !gs::aim::FlashActive());
     special.Mode(4);
     Expect("so does Detect_InteractionAim_NoLantern (row 4)", !gs::aim::FlashActive());
     special.Mode(0);
     Expect("plain Detect (row 0) reads as on", gs::aim::FlashActive());
-    special.Mode(15);
-    Expect("DetectTaeguk (row 15) reads as on", gs::aim::FlashActive());
+    special.Mode(16);
+    Expect("DetectTaeguk (row 16) reads as on", gs::aim::FlashActive());
+    special.Mode(30);
+    Expect("InsectStorage (row 30, new in 3392) reads as off", !gs::aim::FlashActive());
     special.Mode(0x1234);
     Expect("a row past the table reads as on, so a new mode cannot switch the marker off", gs::aim::FlashActive());
     special.Mode(0xFFFF);
     Expect("an empty record reads as on", gs::aim::FlashActive());
-    special.Mode(8);
+    special.Mode(9);
     special.Flag(0);
     Expect("Knowledge with the flag down reads as off", !gs::aim::FlashActive());
     special.Flag(kFlagOn);
-    gs::aim::SetModeTableRows(27);
-    Expect("a table with a different row count turns the check off, so Knowledge counts again", gs::aim::FlashActive());
     gs::aim::SetModeTableRows(26);
+    Expect("2976's 26-row table turns the check off, so Knowledge counts again", gs::aim::FlashActive());
+    gs::aim::SetModeTableRows(33);
     special.Mode(0);
-    Expect("names come from the game's table by row", gs::aim::ModeName(6) && strcmp(gs::aim::ModeName(6), "SwordFlash") == 0 &&
-                                                         gs::aim::ModeName(8) && strcmp(gs::aim::ModeName(8), "Knowledge") == 0 &&
-                                                         gs::aim::ModeName(26) == nullptr);
+    Expect("names come from the game's table by row", gs::aim::ModeName(7) && strcmp(gs::aim::ModeName(7), "SwordFlash") == 0 &&
+                                                         gs::aim::ModeName(9) && strcmp(gs::aim::ModeName(9), "Knowledge") == 0 &&
+                                                         gs::aim::ModeName(33) == nullptr);
 
     printf("-- the load again, but the block is left intact --\n");
     gs::aim::SetPlayerActor(actorB);

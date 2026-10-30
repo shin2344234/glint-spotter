@@ -1,6 +1,7 @@
 #include "game/camera.h"
 
 #include <Windows.h>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,18 @@ namespace
 {
     gs::vtable::Swap g_swap;
 
+    // The two world copies of the player's position, as pairs of offsets to
+    // try in order. 2976 kept them at +0x94 and +0xB4. 3392 put twelve bytes
+    // into the object somewhere between +0x88 and +0xC0 and nothing found
+    // reads either copy, so each place the insertion could fall is tried:
+    // before both, between them, or after both. A pair is only believed when
+    // its two copies agree to a metre, so a wrong pair reads as no world
+    // position rather than a wrong one.
+    struct WorldPair { uint16_t a, b; };
+    constexpr WorldPair kWorldPairs[] = {{0x94, 0xB4}, {0x94, 0xC0}, {0xA0, 0xC0}};
+    constexpr int kWorldPairCount = sizeof(kWorldPairs) / sizeof(kWorldPairs[0]);
+    std::atomic<int> g_worldPairSaid{-1};
+
     struct Raw
     {
         float pivot[3];
@@ -30,26 +43,33 @@ namespace
         float acc[2];
         float vec[3];
         float dist80;
-        float world1[3];
-        float world2[3];
+        float world[kWorldPairCount][2][3];
     };
 
     bool ReadRaw(uintptr_t obj, Raw* r)
     {
         __try
         {
-            if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x380)) return false;
+            // 3392's update reads as far as +0x388.
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(obj), 0x390)) return false;
             const auto* b = reinterpret_cast<const uint8_t*>(obj);
             memcpy(r->pivot, b + gs::sig::kOff_Cam_Pivot, 12);
             memcpy(r->q, b + gs::sig::kOff_Cam_Quat, 16);
             memcpy(&r->dist, b + gs::sig::kOff_Cam_Distance, 4);
-            memcpy(r->ang, b + 0xC8, 12);
-            memcpy(&r->acc[0], b + 0x364, 4);
-            memcpy(&r->acc[1], b + 0x368, 4);
-            memcpy(r->vec, b + 0x14C, 12);
+            // Log-only candidates, moved with 3392's insertions: +0xC8 to
+            // +0xD4 (seen in 0x0139B450), +0x364 and +0x368 by the 0x18 that
+            // +0x340 and +0x368 moved, and +0x14C by the 0xC that +0x104 moved,
+            // which is a guess.
+            memcpy(r->ang, b + 0xD4, 12);
+            memcpy(&r->acc[0], b + 0x37C, 4);
+            memcpy(&r->acc[1], b + 0x380, 4);
+            memcpy(r->vec, b + 0x158, 12);
             memcpy(&r->dist80, b + 0x80, 4);
-            memcpy(r->world1, b + 0x94, 12);
-            memcpy(r->world2, b + 0xB4, 12);
+            for (int i = 0; i < kWorldPairCount; ++i)
+            {
+                memcpy(r->world[i][0], b + kWorldPairs[i].a, 12);
+                memcpy(r->world[i][1], b + kWorldPairs[i].b, 12);
+            }
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -135,17 +155,25 @@ namespace gs::camera
         p.dist = r.dist;
         p.dist80 = r.dist80;
         // The world position, believed only when its two copies agree.
-        float w1[3], w2[3];
-        memcpy(w1, r.world1, 12);
-        memcpy(w2, r.world2, 12);
-        if (std::isfinite(w1[0]) && std::isfinite(w1[1]) && std::isfinite(w1[2]) &&
-            std::fabs(w1[0] - w2[0]) < 1.0f && std::fabs(w1[1] - w2[1]) < 1.0f &&
-            std::fabs(w1[2] - w2[2]) < 1.0f &&
-            std::fabs(w1[0]) < 60000.0f && std::fabs(w1[2]) < 60000.0f &&
-            std::fabs(w1[0]) + std::fabs(w1[2]) > 1.0f)
+        for (int i = 0; i < kWorldPairCount && !p.worldValid; ++i)
         {
-            p.world[0] = w1[0]; p.world[1] = w1[1]; p.world[2] = w1[2];
-            p.worldValid = true;
+            const float* w1 = r.world[i][0];
+            const float* w2 = r.world[i][1];
+            if (std::isfinite(w1[0]) && std::isfinite(w1[1]) && std::isfinite(w1[2]) &&
+                std::fabs(w1[0] - w2[0]) < 1.0f && std::fabs(w1[1] - w2[1]) < 1.0f &&
+                std::fabs(w1[2] - w2[2]) < 1.0f &&
+                std::fabs(w1[0]) < 60000.0f && std::fabs(w1[2]) < 60000.0f &&
+                std::fabs(w1[0]) + std::fabs(w1[2]) > 1.0f)
+            {
+                p.world[0] = w1[0]; p.world[1] = w1[1]; p.world[2] = w1[2];
+                p.worldValid = true;
+                // Said when the pair that agrees changes, which on a sound
+                // layout is once a session. It is what settles where 3392
+                // keeps them.
+                if (g_worldPairSaid.exchange(i) != i)
+                    GS_LOG("[camera] world position from +0x%X and +0x%X: (%.1f, %.1f, %.1f)",
+                           kWorldPairs[i].a, kWorldPairs[i].b, w1[0], w1[1], w1[2]);
+            }
         }
 
         p.valid = true;
@@ -173,7 +201,7 @@ namespace gs::camera
         if (!p.valid) return;
         // Every candidate on one line, so a press at a known pitch can be
         // matched against each of them.
-        GS_LOG("[cam %llu] quat pitch %.1f yaw %.1f | angles +C8 %.3f +CC %.3f +D0 %.3f | acc +364 %.3f +368 %.3f | vec +14C (%.3f, %.3f, %.3f) | dist +50 %.2f +80 %.2f",
+        GS_LOG("[cam %llu] quat pitch %.1f yaw %.1f | angles +D4 %.3f +D8 %.3f +DC %.3f | acc +37C %.3f +380 %.3f | vec +158 (%.3f, %.3f, %.3f) | dist +50 %.2f +80 %.2f",
                static_cast<unsigned long long>(sample),
                p.fwdValid ? p.pitch * 57.2958f : 0.0f, p.fwdValid ? p.yaw * 57.2958f : 0.0f,
                p.ang[0], p.ang[1], p.ang[2], p.acc[0], p.acc[1], p.vec[0], p.vec[1], p.vec[2], p.dist, p.dist80);
@@ -202,11 +230,11 @@ namespace gs::camera
                p.fwd[0], p.fwd[1], p.fwd[2], p.pitch * 57.2958f, p.yaw * 57.2958f, facingYaw * 57.2958f, dyaw * 57.2958f);
         // What the other two candidates would say the view is, if they are
         // angles in radians or a direction the camera sits along.
-        GS_LOG("[camera] if +C8/+CC are yaw/pitch in radians: yaw %.1f pitch %.1f deg; in degrees: yaw %.1f pitch %.1f",
+        GS_LOG("[camera] if +D4/+D8 are yaw/pitch in radians: yaw %.1f pitch %.1f deg; in degrees: yaw %.1f pitch %.1f",
                p.ang[0] * 57.2958f, p.ang[1] * 57.2958f, p.ang[0], p.ang[1]);
         const float vl = std::sqrt(p.vec[0] * p.vec[0] + p.vec[1] * p.vec[1] + p.vec[2] * p.vec[2]);
         if (vl > 0.5f)
-            GS_LOG("[camera] if +14C points from the pivot to the camera: the view back along it has pitch %.1f yaw %.1f deg",
+            GS_LOG("[camera] if +158 points from the pivot to the camera: the view back along it has pitch %.1f yaw %.1f deg",
                    -std::asin(p.vec[1] / vl) * 57.2958f, std::atan2(-p.vec[0], -p.vec[2]) * 57.2958f);
         DumpAtPress();
     }

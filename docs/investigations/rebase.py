@@ -10,6 +10,9 @@ with what signatures.h and savemap.cpp hold, and checks the struct offsets that
 have an anchor in the game's own code.
 
   vtables        by RTTI class name (TypeDescriptor -> locator -> vtable)
+  slot numbers   by what the function in the slot does, never by the index
+                 signatures.h records, because a class that gains slots moves
+                 them and leaves a ret 0 stub where they were
   functions      by the vtable slot or the call that reaches them, then held
                  up against the prologue signatures.h records
   the pin calls  from slot 2 of the four TrocTr*PinMarker* message classes:
@@ -29,6 +32,12 @@ patch they come from the first playtest log, and the script says which lines.
 
 Written on 23 September 2026 for exe 1.0.0.2976 out of the script that did that
 rebase by hand. Needs capstone and numpy.
+
+On 29 October 2026, for exe 1.0.0.3392, the DLC build, it learned to find the
+slot numbers and the struct offsets that 3392 moved. Through 2976 it read the
+remover out of slot 171 and checked the gimmick at slots 124, 7 and 123; on
+3392 slot 171 is the ret 0 stub and it reported the stub as the remover. Every
+rule here picks exactly one candidate on both 2976 and 3392.
 """
 import os
 import re
@@ -203,6 +212,46 @@ def call_sites(target):
     return out
 
 
+CODE_RANGES = [(va, va + vs) for va, vs, ra, rs, ch in CODE]
+
+
+def slot_count(vt_rva):
+    """Slots up to the first entry that does not point into code."""
+    n = 0
+    while n < 1000:
+        x = q(vt_rva + 8 * n)
+        if not x or not any(lo <= x - IB < hi for lo, hi in CODE_RANGES):
+            break
+        n += 1
+    return n
+
+
+def is_stub(rva):
+    """The ret 0 the compiler fills unused slots with."""
+    return raw(rva, 3) == b"\xc2\x00\x00"
+
+
+def vcalls(rva):
+    """The slot numbers of the virtual calls a function makes, in order."""
+    out = []
+    for ins in dis(rva):
+        if ins.mnemonic not in ("call", "jmp") or not ins.operands:
+            continue
+        op = ins.operands[0]
+        if op.type != capstone.x86.X86_OP_MEM:
+            continue
+        m = op.mem
+        if m.base in (0, capstone.x86.X86_REG_RIP, capstone.x86.X86_REG_RSP) or m.index or m.disp % 8:
+            continue
+        out.append(m.disp // 8)
+    return out
+
+
+def string_at(rva, n=64):
+    b = raw(rva, n)
+    return b.split(b"\0")[0] if b else b""
+
+
 def offsets_in(rva, pattern):
     """Every displacement in the function that an operand matching pattern uses."""
     out = set()
@@ -217,6 +266,7 @@ def offsets_in(rva, pattern):
 
 SIG = open(os.path.join(SRC, "signatures.h"), encoding="utf-8").read()
 SAVEMAP = open(os.path.join(SRC, "savemap.cpp"), encoding="utf-8").read()
+PICKUP = open(os.path.join(SRC, "pickup.cpp"), encoding="utf-8").read()
 
 
 def rec(name, text=None):
@@ -236,21 +286,191 @@ results = {"same": 0, "changed": 0, "failed": 0}
 
 
 def report(name, new, old, how, width=8):
+    """width 0 prints the values in decimal, for slot numbers."""
+    fmt = (lambda v: "%-10d" % v) if width == 0 else (lambda v: "0x%0*X" % (width, v))
     if new is None:
         results["failed"] += 1
         print("  FAILED   %-26s %s" % (name, how))
     elif old is None or new != old:
         results["changed"] += 1
-        was = ("was 0x%0*X" % (width, old)) if old is not None else "not recorded"
-        print("  CHANGED  %-26s 0x%0*X   %s; %s" % (name, width, new, was, how))
+        was = ("was " + fmt(old).strip()) if old is not None else "not recorded"
+        print("  CHANGED  %-26s %s   %s; %s" % (name, fmt(new), was, how))
     else:
         results["same"] += 1
-        print("  same     %-26s 0x%0*X   %s" % (name, width, new, how))
+        print("  same     %-26s %s   %s" % (name, fmt(new), how))
 
 
 def check(label, ok):
     results["same" if ok else "failed"] += 1
     print("  %-8s %s" % ("ok" if ok else "FAILED", label))
+
+
+# ---------------------------------------------------------------- slots by behaviour
+
+# The remover homes its fourth, third and second arguments, a dword, the key and
+# the icon type as a word, in that order. Its first instruction on the world map
+# in 2976 and 3392 alike; the minimap's remover has it five bytes in on 3392.
+REMOVER_HOMES = bytes.fromhex("44894C24204C894424186689542410")
+
+
+def copies_xmm1_early(rva):
+    """The update takes its float in xmm1 and saves it before anything else."""
+    return any(i.mnemonic in ("vmovaps", "movaps") and i.op_str.endswith(", xmm1") for i in dis(rva, 0x80))
+
+
+def map_slots(wm, mm):
+    """(update, dispatcher, remover) slot numbers, found on the world map and
+    checked on the minimap, or None for each one that is not certain.
+
+    remover     the one slot whose function homes the three arguments above
+                in its first 24 bytes
+    dispatcher  the slot before it, which calls two virtuals: the slot before
+                itself and the slot before the update ([169, 34] on 2976,
+                [173, 35] on 3392)
+    update      the one slot that saves xmm1 in its first 0x80 bytes and calls
+                the slot before itself, and it must be the dispatcher's second
+                call plus one
+    """
+    n = slot_count(wm)
+    rem = [i for i in range(n) if not is_stub(slot(wm, i)) and REMOVER_HOMES in raw(slot(wm, i), 24)]
+    upd = [i for i in range(n) if not is_stub(slot(wm, i)) and copies_xmm1_early(slot(wm, i))
+           and (i - 1) in vcalls(slot(wm, i))]
+    print("  info     the world map vtable has %d slots; remover candidates %s, update candidates %s" % (n, rem, upd))
+    if len(rem) != 1 or len(upd) != 1:
+        return None, None, None
+    r, u = rem[0], upd[0]
+    dsp = r - 1
+    dcalls = vcalls(slot(wm, dsp))
+    ok = (dsp - 1) in dcalls and (u - 1) in dcalls and (dsp - 1) in vcalls(slot(wm, r))
+    print("  info     slot %d calls %s; the dispatcher calls the slot before itself and the slot before the update%s"
+          % (dsp, dcalls, "" if ok else ": NO"))
+    if not ok:
+        return u, None, r
+    if mm:
+        mcalls = vcalls(slot(mm, dsp))
+        mupd = [i for i in range(slot_count(mm)) if not is_stub(slot(mm, i)) and copies_xmm1_early(slot(mm, i))
+                and (i - 1) in vcalls(slot(mm, i))]
+        check("the minimap has the same layout: its slot %d calls %s and its update is slot %s" % (dsp, mcalls, mupd),
+              (dsp - 1) in mcalls and (u - 1) in mcalls and mupd == [u])
+    return u, dsp, r
+
+
+def alert_slot(vt):
+    """The one slot whose function names Toast, BountyHunter and TimerGauge."""
+    want = {b"Toast", b"BountyHunter", b"TimerGauge"}
+    hits = []
+    for i in range(slot_count(vt)):
+        f = slot(vt, i)
+        if is_stub(f) or not func_of(f):
+            continue
+        got = {string_at(t) for t in (rip(x) for x in dis(f) if x.mnemonic == "lea") if t}
+        if want <= got:
+            hits.append(i)
+    return hits[0] if len(hits) == 1 else None
+
+
+def gimmick_offsets(vt):
+    """The sub-object pointer and the detect byte, from the gimmick's own slots.
+
+    The sub-object setter is the one slot that is exactly
+        mov rax, [rcx + S]; mov byte ptr [rax + Y], 1; ret
+    (123 with S 0x440 on 2976, 124 with S 0x450 on 3392). The detect byte is
+    the one offset past +0x300 that a slot writes from r15b and a slot compares
+    with 0 (124 and 7 on 2976, 125 and 7 on 3392, +0x463 and +0x473).
+    """
+    n = slot_count(vt)
+    setters = []
+    written, compared = {}, {}
+    for i in range(n):
+        f = slot(vt, i)
+        if is_stub(f):
+            continue
+        head = dis(f, 0x18)
+        if len(head) >= 3 and head[0].mnemonic == "mov" and head[1].mnemonic == "mov" and head[2].mnemonic == "ret":
+            m0 = re.match(r"rax, qword ptr \[rcx \+ (0x[0-9a-f]+)\]$", head[0].op_str)
+            m1 = re.match(r"byte ptr \[rax \+ (0x[0-9a-f]+)\], 1$", head[1].op_str)
+            if m0 and m1:
+                setters.append((i, int(m0.group(1), 16), int(m1.group(1), 16)))
+        if not func_of(f):
+            continue
+        for ins in dis(f):
+            m = re.match(r"byte ptr \[r\w+ \+ (0x[0-9a-f]+)\], (r15b|0)$", ins.op_str)
+            if not m:
+                continue
+            off = int(m.group(1), 16)
+            if ins.mnemonic == "mov" and m.group(2) == "r15b":
+                written.setdefault(off, set()).add(i)
+            elif ins.mnemonic == "cmp" and m.group(2) == "0":
+                compared.setdefault(off, set()).add(i)
+    both = sorted(k for k in written if k in compared and k >= 0x300)
+    sub = setters[0][1] if len(setters) == 1 else None
+    if len(setters) == 1:
+        print("  info     gimmick slot %d sets +0x%X on the sub-object it reads at +0x%X" %
+              (setters[0][0], setters[0][2], setters[0][1]))
+    else:
+        print("  info     %d gimmick slots have the sub-object setter's shape" % len(setters))
+    det = both[0] if len(both) == 1 else None
+    for k in both:
+        print("  info     gimmick slots %s write +0x%X from r15b and slots %s compare it with 0" %
+              (sorted(written[k]), k, sorted(compared[k])))
+    return sub, det
+
+
+def reflected_offset(field, near=None):
+    """Where the reflection registration of a field name puts it: a lea of
+    the name followed within 250 instructions by mov dword ptr [rip+X], imm.
+    With near, the registration closest to that address, since common names
+    are registered by many classes. Returns (offset, function) or (None, None)."""
+    found = []
+    pat = b"\0" + field.encode("ascii") + b"\0"
+    for m in re.finditer(re.escape(pat), d):
+        srva = o2r(m.start() + 1)
+        if srva is None:
+            continue
+        for p in xrefs(srva):
+            f = func_of(p)
+            if not f:
+                continue
+            ins = dis(f[0])
+            k = next((j for j, i in enumerate(ins) if i.address - IB <= p < i.address - IB + i.size), None)
+            if k is None or ins[k].mnemonic != "lea":
+                continue
+            for n in ins[k:k + 250]:
+                mm = re.match(r"dword ptr \[rip \+ 0x[0-9a-f]+\], (0x[0-9a-f]{1,4})$", n.op_str)
+                if n.mnemonic == "mov" and mm:
+                    found.append((int(mm.group(1), 16), f[0]))
+                    break
+    if not found:
+        return None, None
+    if near is None:
+        return found[0] if len(set(found)) == 1 else (None, None)
+    return min(found, key=lambda t: abs(t[1] - near))
+
+
+def lgso_layout(glob):
+    """The element stride the table's readers multiply by, and every float
+    triple they read through a strided element: (stride, votes, triples)."""
+    funcs = sorted({f[0] for f in (func_of(p) for p in xrefs(glob)) if f})
+    strides = {}
+    triples = set()
+    for f in funcs:
+        ins = dis(f)
+        for k, i in enumerate(ins):
+            m = re.match(r"(\w+), \w+, (0x[0-9a-f]+)$", i.op_str)
+            if i.mnemonic != "imul" or not m or not 0x80 <= int(m.group(2), 16) < 0x200:
+                continue
+            s = int(m.group(2), 16)
+            strides[s] = strides.get(s, 0) + 1
+            offs = set()
+            for nxt in ins[k:k + 120]:
+                m2 = re.match(r"xmm\d+, dword ptr \[%s \+ (0x[0-9a-f]+)\]$" % m.group(1), nxt.op_str)
+                if nxt.mnemonic in ("vmovss", "movss") and m2:
+                    offs.add(int(m2.group(1), 16))
+            triples |= {(s, o) for o in offs if o + 4 in offs and o + 8 in offs}
+    if not strides:
+        return None, 0, set()
+    best = max(strides, key=strides.get)
+    return best, strides[best], {o for s, o in triples if s == best}
 
 
 def main():
@@ -269,15 +489,29 @@ def main():
                 "kGimmickVtable": ".?AVClientGimmickActorComponent@pa@@"}[k]
         vts[k] = vtable_by_name(name)
         report(k, vts[k], rec(k), "RTTI " + name)
+    pick = ".?AVTrocTrProcessPickUpItemOnceTimer@pa@@"
+    report("kPickUpVtableRva", vtable_by_name(pick), rec("kPickUpVtableRva", PICKUP), "RTTI %s (pickup.cpp)" % pick)
 
     print("\nsavemap.cpp classes")
     for rva, name in re.findall(r'\{(0x[0-9A-Fa-f]+), "(\.\?AV[^"]+)", 0\}', SAVEMAP):
         report(name[4:-5], vtable_by_name(name), int(rva, 16), "RTTI")
 
+    print("\nslot numbers, by what each function does")
+    wm, mm, cam = vts["kWorldMapVtable"], vts["kMiniMapVtable"], vts["kCameraTPSVtable"]
+    u, dsp, r = map_slots(wm, mm) if wm else (None, None, None)
+    report("kSlotUpdate", u, rec("kSlotUpdate"), "saves xmm1 first and calls the slot before it", 0)
+    report("kSlotCreateIcon", dsp, rec("kSlotCreateIcon"), "the slot before the remover, calling the two above", 0)
+    report("kSlotRemoveIcon", r, rec("kSlotRemoveIcon"), "homes r9d, r8 and dx in that order", 0)
+    for k, v in (("kSlotUpdate", u), ("kSlotCreateIcon", dsp), ("kSlotRemoveIcon", r)):
+        if wm and v is not None and v != rec(k) and is_stub(slot(wm, rec(k))):
+            print("  info     the recorded %s, slot %d, now holds the ret 0 stub" % (k, rec(k)))
+    al = vts["kAlertRootVtable"]
+    report("kSlotAlertCall", alert_slot(al) if al else None, rec("kSlotAlertCall"),
+           "names Toast, BountyHunter and TimerGauge", 0)
+
     print("\nfunctions")
-    wm, cam = vts["kWorldMapVtable"], vts["kCameraTPSVtable"]
-    report("kRemoveIconBody", slot(wm, rec("kSlotRemoveIcon")) if wm else None, rec("kRemoveIconBody"),
-           "slot %d of the world map" % rec("kSlotRemoveIcon"))
+    report("kRemoveIconBody", slot(wm, r) if wm and r is not None else None, rec("kRemoveIconBody"),
+           "slot %s of the world map" % r)
     upd = slot(cam, rec("kSlotCameraUpdate")) if cam else None
     pro, at = rec_bytes("kCameraUpdatePrologue"), rec("kCameraUpdateFieldAt")
     got = raw(upd, len(pro)) if upd else b""
@@ -320,8 +554,13 @@ def main():
            "the create's one cmp byte ptr [rip+...]" if len(flag) == 1 else "%d cmp [rip] in the create" % len(flag))
     lg = vtable_by_name(".?AVLevelGimmickSceneObjectInfoManager@pa@@")
     first = dis(slot(lg, 2), 8) if lg else []
-    report("kLgsoManagerGlobal", rip(first[0]) if first and first[0].mnemonic == "mov" else None,
-           rec("kLgsoManagerGlobal"), "the store in slot 2 of LevelGimmickSceneObjectInfoManager")
+    lgso = rip(first[0]) if first and first[0].mnemonic == "mov" else None
+    report("kLgsoManagerGlobal", lgso, rec("kLgsoManagerGlobal"),
+           "the store in slot 2 of LevelGimmickSceneObjectInfoManager")
+    sm = vtable_by_name(".?AVSpecialModeInfoManager@pa@@")
+    first = dis(slot(sm, 2), 8) if sm else []
+    report("kSpecialModeManagerGlobal", rip(first[0]) if first and first[0].mnemonic == "mov" else None,
+           rec("kSpecialModeManagerGlobal"), "the store in slot 2 of SpecialModeInfoManager")
 
     print("\nthe ray cast")
     pat = (b"\x48\x8B\xC4\x48\x89\x58\x08\x48\x89\x70\x10\x48\x89\x78\x18\x4C\x89\x60\x20"
@@ -353,15 +592,10 @@ def main():
 
     print("\nstruct offsets with an anchor in the code")
     g = vts["kGimmickVtable"]
-    if g:
-        tgt = rec("kOff_Gimmick_DetectTgt")
-        check("gimmick slot 124 writes the detect byte at +0x%X" % tgt,
-              tgt in offsets_in(slot(g, 124), r"mov byte ptr \[r\w+ \+ (0x[0-9a-f]+)\], r"))
-        check("gimmick slot 7 compares it", tgt in offsets_in(slot(g, 7), r"cmp byte ptr \[r\w+ \+ (0x[0-9a-f]+)\], 0"))
-        sub = rec("kOff_Gimmick_Sub")
-        first = dis(slot(g, 123), 8)
-        check("gimmick slot 123 reads its sub-object at +0x%X" % sub,
-              bool(first) and ("+ 0x%x]" % sub) in first[0].op_str)
+    sub, det = gimmick_offsets(g) if g else (None, None)
+    report("kOff_Gimmick_Sub", sub, rec("kOff_Gimmick_Sub"), "the gimmick slot that only sets a byte on it", 3)
+    report("kOff_Gimmick_DetectTgt", det, rec("kOff_Gimmick_DetectTgt"),
+           "the one byte past +0x300 written from r15b and compared with 0", 3)
     cm = vtable_by_name(".?AVServerContentsMiscActorComponent@pa@@")
     if cm:
         load = slot(cm, 10)
@@ -369,8 +603,33 @@ def main():
         text = " ".join(i.op_str for i in dis(load))
         print("  info     ServerContentsMiscActorComponent slot 10, the save's load routine, is 0x%08X" % load)
         check("it builds the field map at +0x%X" % fmap, ("+ 0x%x]" % fmap) in text)
-        check("and steps its records by 0x%X" % rec("kRecordBytes", SAVEMAP),
-              (", 0x%x" % rec("kRecordBytes", SAVEMAP)) in text)
+        strides = {}
+        for i in dis(load):
+            m = re.match(r"\w+, (0x[0-9a-f]+)$", i.op_str)
+            if i.mnemonic in ("add", "imul") and m and 0x300 <= int(m.group(1), 16) < 0x500:
+                strides[int(m.group(1), 16)] = strides.get(int(m.group(1), 16), 0) + 1
+        best = max(strides, key=strides.get) if strides else None
+        report("kRecordBytes", best, rec("kRecordBytes", SAVEMAP),
+               "the load routine's commonest step, %s" % ", ".join("0x%X x%d" % kv for kv in sorted(strides.items())), 3)
+    # The record's fields, from the reflection registrations. Each registers
+    # one field name and stores its offset. The position the mod reads is
+    # +0x1C into each transform on 2976, which this cannot see.
+    st, near = reflected_offset("_initStateNameHash")
+    report("kOff_State", st, rec("kOff_State", SAVEMAP), "reflection of _initStateNameHash", 3)
+    if near:
+        org, _ = reflected_offset("_originSpawnTransform", near)
+        tf, _ = reflected_offset("_transform", near)
+        report("kOff_OriginPos", org + 0x1C if org is not None else None, rec("kOff_OriginPos", SAVEMAP),
+               "reflection of _originSpawnTransform nearest it, plus 0x1C", 3)
+        report("kOff_Pos", tf + 0x1C if tf is not None else None, rec("kOff_Pos", SAVEMAP),
+               "reflection of _transform nearest it, plus 0x1C", 3)
+    if lgso:
+        stride, votes, trips = lgso_layout(lgso)
+        report("kOff_LgsoData_Stride", stride, rec("kOff_LgsoData_Stride"),
+               "what %d of the table's readers multiply an element index by" % votes, 3)
+        pos = rec("kOff_LgsoData_Transform") + rec("kOff_Transform_Pos")
+        check("a reader of the table reads a position at +0x%X (kOff_LgsoData_Transform + 0x%X); triples read: %s" %
+              (pos, rec("kOff_Transform_Pos"), ", ".join("+0x%X" % t for t in sorted(trips))), pos in trips)
     if wm:
         size = None
         for p in xrefs(wm):
@@ -391,8 +650,12 @@ def main():
     print("  at runtime. Ship a build, load a save, and copy the values from these log lines:")
     print('    [actors] manager 0x... via global +0x...')
     print('    [savemap] the ServerActorManager is held at global +0x..., not the recorded ...')
-    print("  The LGSO record stride, the Transform offset and the detect component's lit byte")
-    print("  have no single anchor here. A table count far from 18,000 in the log means the stride moved.")
+    print("  The detect component's lit byte, the gimmick sub-object's active count and the camera's")
+    print("  pivot, quaternion and world copies have no anchor here. A table count far from 18,000")
+    print("  in the log means the table layout above is wrong after all.")
+    print("  kSpecialModeRows is data, not code: read gamedata/specialmode.staticinfoheader out of")
+    print("  package 0008 with Master Looter's cdtables.load_table(\"specialmode\") and compare its rows")
+    print("  and their order with kModes in aim.cpp (%d rows recorded)." % rec("kSpecialModeRows"))
 
     print("\n%d same, %d changed, %d failed" % (results["same"], results["changed"], results["failed"]))
     return 2 if results["failed"] else 1 if results["changed"] else 0

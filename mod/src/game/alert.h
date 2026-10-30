@@ -15,7 +15,7 @@
 
 namespace gs::alert
 {
-    // Take slot 144 on the alert root's vtable. The vtable must be RTTI
+    // Take slot kSlotAlertCall (146 on 3392, 144 before) on the alert root's vtable. The vtable must be RTTI
     // verified before this is called.
     bool InstallSpy(uintptr_t alertVtable);
     void RemoveSpy();

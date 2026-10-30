@@ -198,11 +198,12 @@ namespace
         fputs("; says. One you have already switched on is left alone. 0 leaves them to Kinds.\n", f);
         fputs("Teleporters=1\n", f);
         fputs("\n", f);
-        fputs("; Which of the map's marker pictures a pin uses, as two numbers. 1,4 is the\n", f);
-        fputs("; one on the Change Marker list I use; 4,14 is the plain marker you get\n", f);
-        fputs("; by default. The first is 0 to 13 and the second 0 to 14. To find another,\n", f);
-        fputs("; place one by hand with Change Marker and read the style pair out of the log.\n", f);
-        fputs("PinStyle=1,4\n", f);
+        fputs("; Which of the map's marker pictures a pin uses, as two numbers. 0,11 is the\n", f);
+        fputs("; red diamond on the Change Marker list. The first is 0 to 13 and the second\n", f);
+        fputs("; 0 to 14. To find another, place one by hand with Change Marker and read the\n", f);
+        fputs("; style pair out of the log. The DLC update renumbered them, and 1,4, the old\n", f);
+        fputs("; default, is read as 0,11.\n", f);
+        fputs("PinStyle=0,11\n", f);
         fputs("\n", f);
         fputs("; ------------------------------------------------------------------ aiming\n", f);
         fputs("\n", f);
@@ -396,8 +397,16 @@ namespace gs::Settings
             else if (_stricmp(key, "PinStyle") == 0)
             {
                 int a = -1, b = -1;
-                if (sscanf_s(val, "%d,%d", &a, &b) == 2 &&
-                    a >= 0 && a <= 13 && b >= 0 && b <= 14)
+                if (sscanf_s(val, "%d,%d", &a, &b) == 2 && a == 1 && b == 4)
+                {
+                    // The red diamond before the DLC update renumbered the
+                    // pictures. Left alone it draws a white diamond on a red
+                    // square, and an existing ini is never rewritten.
+                    GS_LOG("settings: PinStyle=1,4 was the red diamond before the DLC update; it is 0,11 "
+                           "now, so pins use 0,11");
+                }
+                else if (sscanf_s(val, "%d,%d", &a, &b) == 2 &&
+                         a >= 0 && a <= 13 && b >= 0 && b <= 14)
                 {
                     g_values.pinStyle1 = static_cast<uint8_t>(a);
                     g_values.pinStyle2 = static_cast<uint8_t>(b);

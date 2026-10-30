@@ -6,6 +6,13 @@
 
 namespace gs::vtable
 {
+    bool IsEmptySlot(const void* fn)
+    {
+        const auto* code = static_cast<const uint8_t*>(fn);
+        if (!fn || !rtti::Readable(code, 3)) return false;
+        return code[0] == 0xC2 && code[1] == 0x00 && code[2] == 0x00;
+    }
+
     bool Install(uintptr_t vtable, int index, void* replacement, Swap& out, void* volatile* publish)
     {
         out = Swap{};
@@ -14,6 +21,7 @@ namespace gs::vtable
         void** slot = reinterpret_cast<void**>(vtable) + index;
         if (!rtti::Readable(slot, sizeof(void*))) return false;
         if (*slot == replacement) return false;
+        if (IsEmptySlot(*slot)) return false;
 
         // The vtable lives in the image's data section, which is read-only at
         // runtime. Open the one page for the one write, then close it again.

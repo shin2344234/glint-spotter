@@ -167,7 +167,7 @@ int main()
     const uintptr_t gc2 = reinterpret_cast<uintptr_t>(gim2);
     *reinterpret_cast<uintptr_t*>(gim2 + gs::sig::kOff_Gimmick_Sub) = 0x0000100200000000ull;
     lit = true;
-    Expect("ReadLit refuses it instead of reading 0x1B8 off it",
+    Expect("ReadLit refuses it instead of reading the active count off it",
            !ReadLit(0, 0, gc2, kVtable, &lit));
 
     printf("-- a pool walk that runs off the end of its allocation --\n");
