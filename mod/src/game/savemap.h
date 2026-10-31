@@ -7,8 +7,8 @@
 // so the flash could pin a sealed artifact taken an hour earlier. The save
 // knows which ones are gone: a load does not spawn them again.
 //
-// It keeps that in FieldGimmickSaveData (vtable 0x05C4FD48 on 3446, 0x3C0
-// bytes, the records of a vector inside FieldSaveData, vtable 0x05C4F568).
+// It keeps that in FieldGimmickSaveData (vtable 0x05C53E08 on 3460, 0x3C0
+// bytes, the records of a vector inside FieldSaveData, vtable 0x05C53388).
 // Each record carries the gimmick's origin transform, position at +0x364,
 // and its saved state as a hash at +0x38C, _initStateNameHash. On 2976 the
 // record was 0x3D8 bytes with those two at +0x210 and +0x21C. State hashes

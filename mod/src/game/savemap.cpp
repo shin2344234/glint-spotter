@@ -110,11 +110,11 @@ namespace
     // has moved it, which every patch so far has.
     struct Cls { uintptr_t rva; const char* name; uintptr_t va; };
     Cls g_cls[] = {
-        {0x05C4FD48, ".?AVFieldGimmickSaveData@pa@@", 0},
-        {0x05C4F568, ".?AVFieldSaveData@pa@@", 0},
-        {0x05EE1B08, ".?AVServerActorManager@pa@@", 0},
-        {0x05EE1908, ".?AVServerUserActor@pa@@", 0},
-        {0x05ED8F28, ".?AVServerContentsMiscActorComponent@pa@@", 0},
+        {0x05C53E08, ".?AVFieldGimmickSaveData@pa@@", 0},
+        {0x05C53388, ".?AVFieldSaveData@pa@@", 0},
+        {0x05EE5CE8, ".?AVServerActorManager@pa@@", 0},
+        {0x05EE5B08, ".?AVServerUserActor@pa@@", 0},
+        {0x05EDD0F8, ".?AVServerContentsMiscActorComponent@pa@@", 0},
     };
     enum { kRecord, kField, kServerManager, kServerUser, kContentsMisc, kClassCount };
     uintptr_t Vt(int i) { return g_cls[i].va; }
@@ -477,8 +477,10 @@ namespace
     // loads. 0x071ED058 on 3424, matched from the code that takes the 3392
     // address at 0x050606E3 and 0x0549C4F7, and found with no search in play.
     // 0x071F0048 on 3446 by the same match from 3424 (0x050622D3, 0x0549E0E7
-    // and 0x0549E0F8 agree), not yet seen in play.
-    constexpr uintptr_t kServerManagerGlobal = 0x071F0048;
+    // and 0x0549E0F8 agree), found with no search in play. 0x071F4258 on 3460
+    // by the same match from 3446 (0x05063D83 and 0x0549FD77 agree), not yet
+    // seen in play.
+    constexpr uintptr_t kServerManagerGlobal = 0x071F4258;
     constexpr int kUsersMax = 64;   // list entries asked for the component
     constexpr uintptr_t kOff_Mgr_User = 0xB8, kOff_Actor_Comps = 0x68, kOff_Comps_ContentsMisc = 0x368;
     // The DLC build moved the map to +0x330 (the insert is 0x02B4D250 on 3424,
