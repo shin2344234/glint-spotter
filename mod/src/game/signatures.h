@@ -50,11 +50,17 @@
 // 3462, the patch of 1 November, moved 19 of them again by 0x330 to 0x1000
 // and left every slot, struct offset and the stride where 3460 had them.
 //
+// 3479, the second patch of 1 November, moved five functions down by 0x50 to
+// 0xD0 and nothing else: every vtable, global, slot and offset reads the same
+// as on 3462. The create and the server remove are checked at a fixed address,
+// so a 3462 build on 3479 keeps its pins but cannot take the game's own
+// markers off.
+//
 // The full write-up is in FEASIBILITY.md.
 
 namespace gs::sig
 {
-    constexpr const char* kExeVersion = "1.0.0.3462";
+    constexpr const char* kExeVersion = "1.0.0.3479";
 
     // The two root UI controls that own every map icon. Slot 36 is the per frame
     // update, slot 174 creates an icon (35 and 170 through 2976). The vtables are also found by RTTI at
@@ -98,7 +104,7 @@ namespace gs::sig
     // stub, which is why rebase.py finds the remover by that prologue rather
     // than by its index.
     constexpr int kSlotRemoveIcon = 175;
-    constexpr uintptr_t kRemoveIconBody = 0x00F59B00;
+    constexpr uintptr_t kRemoveIconBody = 0x00F59AB0;
 
     // Who asked for a removal. Two functions call the same slot and only
     // one of them is the player pressing delete: the icon builder removes
@@ -236,8 +242,8 @@ namespace gs::sig
     // 2976 found them the same way: the create and the server remove moved by
     // 0x70, the upsert and the erase did not move, and the acknowledgements
     // still reach the submodule through +0x68 and +0x168.
-    constexpr uintptr_t kPinCreate       = 0x02B1F160;
-    constexpr uintptr_t kPinServerRemove = 0x02B1F630;
+    constexpr uintptr_t kPinCreate       = 0x02B1F110;
+    constexpr uintptr_t kPinServerRemove = 0x02B1F5E0;
     constexpr uint8_t   kPinCreatePrologue[15] = {
         0x4C, 0x89, 0x4C, 0x24, 0x20,   // mov [rsp+0x20], r9
         0x4C, 0x89, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8
@@ -298,7 +304,7 @@ namespace gs::sig
     constexpr uintptr_t kCameraTPSVtable   = 0x05A9BFD0;
     constexpr const char* kCameraTPSClass  = ".?AVPlayerCameraTPSMode@gameClientScript@pa@@";
     constexpr int       kSlotCameraUpdate  = 2;
-    constexpr uintptr_t kCameraTPSUpdate   = 0x0139FD20;
+    constexpr uintptr_t kCameraTPSUpdate   = 0x0139FCD0;
     constexpr uint8_t   kCameraUpdatePrologue[22] = {
         0x48, 0x8B, 0xC4,                         // mov rax, rsp
         0x48, 0x89, 0x58, 0x08,                   // mov [rax+8], rbx
@@ -527,7 +533,7 @@ constexpr uintptr_t kGimmickVtable         = 0x0593F9E0;
     // and normal out) and what it uses. Found at runtime by byte pattern, with
     // the facade and the frame offset decoded from its own RIP-relative
     // operands; these are the fallback and the record.
-    constexpr uintptr_t kRayCastWrapper   = 0x03CED3A0;
+    constexpr uintptr_t kRayCastWrapper   = 0x03CED2D0;
     constexpr uintptr_t kPhysicsFacade    = 0x06E87188;
     constexpr uintptr_t kPhysicsFrameOff  = 0x071A2EB0;
     constexpr int       kSlotCastRay      = 61;   // still 61 on 3392: the wrapper calls [rax+0x1E8]
