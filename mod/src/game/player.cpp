@@ -30,6 +30,12 @@ namespace
     // Session eighteen: a yaw quaternion (x, y, z, w) sits right before each
     // position, +0xA4 before the local one and +0x28C before the world one.
     constexpr uintptr_t kOff_Tf_WorldQuat  = 0x28C;
+    // For the played body when it is not the player actor, Master Looter's
+    // signatures.h again: the entity id, the type descriptor whose second
+    // byte is the type tag, and the status component's second category byte.
+    constexpr uintptr_t kOff_Ent_Eid       = 0x60;
+    constexpr uintptr_t kOff_Ent_TypeInfo  = 0x88;
+    constexpr uintptr_t kOff_Status_Cat2   = 0x2F0;
 
     std::atomic<void*> g_comp{nullptr};
     std::atomic<uintptr_t> g_actor{0};
@@ -41,6 +47,11 @@ namespace
     int g_describeLeft = 3;   // first few reads log the whole walk
     uint32_t g_lostAtMs = 0;  // when the player last stopped answering
     int g_recoverTriesLeft = 8;  // a fault costs one; run out and it stops
+    // The body being played when it is a second character's, and its id.
+    std::atomic<uintptr_t> g_body{0};
+    std::atomic<uint32_t> g_bodyEid{0};
+    std::atomic<uint32_t> g_bodyLookMs{0};
+    std::mutex g_bodySearch;
 
     using gs::rtti::Deref;
 
@@ -137,6 +148,158 @@ namespace
                           static_cast<unsigned long long>(off), reinterpret_cast<void*>(c), NameOf(c));
         }
         GS_LOG("[player]   block+0x1A0 -> 0x%p transform, %s", reinterpret_cast<void*>(tf), NameOf(tf));
+    }
+
+    // While a world loads every position reads near (0, 1000, 0), and the
+    // pinning side refuses anything within a hundred of the origin.
+    bool OnPlaceholder(const float* w) { return std::fabs(w[0]) + std::fabs(w[2]) < 100.0f; }
+
+    // These two run on every entity in the pools, and B0 is every world
+    // object, so the handler is the guard and there is no VirtualQuery.
+    // Deref asks one per call, and actors.cpp measured what a thousand of
+    // those a pass cost.
+    uint32_t EidAt(uintptr_t e)
+    {
+        __try
+        {
+            if (e < 0x10000 || (e & 7) != 0) return 0;
+            return *reinterpret_cast<const uint32_t*>(e + kOff_Ent_Eid);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+    }
+
+    uint8_t TypeTag(uintptr_t e)
+    {
+        __try
+        {
+            if (e < 0x10000 || (e & 7) != 0) return 0xFF;
+            const uintptr_t ti = *reinterpret_cast<const uintptr_t*>(e + kOff_Ent_TypeInfo);
+            if (ti < 0x10000) return 0xFF;
+            return *reinterpret_cast<const uint8_t*>(ti + 1);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return 0xFF; }
+    }
+
+    uint8_t Cat2(uintptr_t e)
+    {
+        __try
+        {
+            const uintptr_t comps = Deref(e + kOff_Ent_Comps);
+            for (uintptr_t off = 0; comps && off < kComps_SlotsEnd; off += 8)
+            {
+                const uintptr_t c = Deref(comps + off);
+                const char* n = c ? NameOf(c) : nullptr;
+                if (!n || !strstr(n, "ClientStatusActorComponent")) continue;
+                if (!gs::rtti::Readable(reinterpret_cast<const void*>(c + kOff_Status_Cat2), 1)) return 0;
+                return *reinterpret_cast<const uint8_t*>(c + kOff_Status_Cat2);
+            }
+            return 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+    }
+
+    // A body from the pools that reads somewhere real. With `eid` set it is
+    // that entity; with it zero it is any body wearing the pair Master
+    // Looter found only on the one being played, type tag 04 with status
+    // category 0E, in two Damiane logs from two machines.
+    uintptr_t FindBody(uint32_t eid, int* seenOut)
+    {
+        static uintptr_t pool[1536];
+        const int n = gs::actors::Offered(pool, 1536);
+        uintptr_t found = 0;
+        int seen = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            const uint32_t id = EidAt(pool[i]);
+            if ((id >> 24) != 0xB0) continue;
+            if (eid ? id != eid : (TypeTag(pool[i]) != 0x04 || Cat2(pool[i]) != 0x0E)) continue;
+            float v[3]{}, w[7]{};
+            uintptr_t actor = 0, tf = 0;
+            uint32_t parent = 0;
+            if (!Walk(pool[i], v, w, &actor, &tf, &parent, true)) continue;
+            if (!std::isfinite(w[0]) || !std::isfinite(w[2]) || OnPlaceholder(w)) continue;
+            ++seen;
+            if (!found) found = pool[i];
+        }
+        *seenOut = seen;
+        return found;
+    }
+
+    // Damiane and Oongka. The player actor, the one carrying the login and
+    // detect components and the flash's own, stays at the loading
+    // placeholder for as long as either is played, and the body that moves
+    // is a second entity with a B0 id. AsunaKaoru's log on 2 November had the
+    // actor at (0, 1000, 0) from the first read to the last, every mark
+    // refused for it, and the flash's tail naming B0100002 each time it went
+    // up. Master Looter has known that body since issue #36.
+    //
+    // This returns that body's position in place of the actor's, and only
+    // while the actor reads the placeholder. The search through the pools
+    // needs a reason to run: the flash naming a B0 body, or one found
+    // earlier this session. Kliff waiting out a load has neither, so his
+    // loads read nothing more than they did.
+    bool BodyInstead(float* vOut, float* wOut)
+    {
+        // Filled here and copied out only on success, because a walk that
+        // fails halfway has already written the world half.
+        float v[3]{}, w[7]{};
+        auto give = [&]() { memcpy(vOut, v, sizeof(v)); memcpy(wOut, w, sizeof(w)); return true; };
+        uint16_t m1 = 0, m2 = 0;
+        uint32_t t1 = 0, t2 = 0;
+        uint32_t want = 0;
+        if (gs::aim::ModeRecords(&m1, &m2, &t1, &t2) && (t1 >> 24) == 0xB0) want = t1;
+        const uint32_t known = g_bodyEid.load();
+        if (want && want != known) g_body.store(0);
+
+        if (const uintptr_t b = g_body.load())
+        {
+            uintptr_t actor = 0, tf = 0;
+            uint32_t parent = 0;
+            if (EidAt(b) == known && Walk(b, v, w, &actor, &tf, &parent, true) &&
+                std::isfinite(w[0]) && std::isfinite(w[2]) && !OnPlaceholder(w))
+                return give();
+            g_body.store(0);
+        }
+
+        if (!want && !known) return false;
+        const uint32_t now = GetTickCount();
+        if (now - g_bodyLookMs.load() < 1000) return false;
+        std::unique_lock<std::mutex> lock(g_bodySearch, std::try_to_lock);
+        if (!lock.owns_lock()) return false;
+        g_bodyLookMs.store(now);
+
+        int seen = 0;
+        const uint32_t first = want ? want : known;
+        const char* how = want ? "the flash names it" : "it has the id found before";
+        uintptr_t found = FindBody(first, &seen);
+        if (!found && !want)
+        {
+            found = FindBody(0, &seen);
+            how = "it wears the played body's type tag 04 and status category 0E";
+        }
+        if (!found)
+        {
+            static uint32_t s_missSaid = 0;
+            if (s_missSaid != first)
+            {
+                s_missSaid = first;
+                GS_LOG("[player] the player actor reads the loading placeholder and the body %08X is not "
+                       "in the actor manager's pools yet; positions wait for it", s_missSaid);
+            }
+            return false;
+        }
+
+        const uint32_t eid = EidAt(found);
+        uintptr_t actor = 0, tf = 0;
+        uint32_t parent = 0;
+        if (!Walk(found, v, w, &actor, &tf, &parent, true)) return false;
+        g_body.store(found);
+        if (g_bodyEid.exchange(eid) != eid)
+            GS_LOG_OK("[player] a second character is being played. The player actor stays at the loading "
+                      "placeholder, so positions come from the body %08X at 0x%p, world (%.1f, %.1f, %.1f), "
+                      "because %s (%d matching in the pools)",
+                      eid, reinterpret_cast<void*>(found), w[0], w[1], w[2], how, seen);
+        return give();
     }
 }
 
@@ -307,6 +470,14 @@ namespace gs::player
         const bool worldOk = std::isfinite(w[0]) && std::isfinite(w[1]) && std::isfinite(w[2]) &&
                              std::fabs(w[0]) + std::fabs(w[1]) + std::fabs(w[2]) < 1.0e6f;
         if (!worldOk) return p;
+        // The actor on the placeholder is a load for Kliff and the whole
+        // session for Damiane or Oongka, whose body is somewhere else.
+        // Everything below except the position stays on the actor.
+        if (OnPlaceholder(w))
+            BodyInstead(v, w);
+        else if (g_body.exchange(0))
+            GS_LOG("[player] the player actor reads (%.1f, %.1f, %.1f) again, so positions come from it "
+                   "and not the body %08X", w[0], w[1], w[2], g_bodyEid.load());
         p.lx = v[0]; p.ly = v[1]; p.lz = v[2];
         p.x = w[0]; p.y = w[1]; p.z = w[2];
         p.ox = w[0] - v[0]; p.oy = w[1] - v[1]; p.oz = w[2] - v[2];
