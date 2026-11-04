@@ -73,6 +73,21 @@ namespace gs::load
 #include "game/rtti.cpp"
 #include "game/player.cpp"
 
+// The camera's world copy of the played body, which the tests set.
+bool g_camValid = false;
+float g_cam[3]{};
+namespace gs::camera
+{
+    Pose Read()
+    {
+        Pose p;
+        p.valid = true;
+        p.worldValid = g_camValid;
+        memcpy(p.world, g_cam, sizeof(g_cam));
+        return p;
+    }
+}
+
 // Real classes, so the RTTI the reader names components by is real too.
 namespace pa
 {
@@ -135,6 +150,13 @@ namespace
             memcpy(tf + 0x29C, w, 12);
             memcpy(tf + 0xB4, l, 12);
         }
+        // World and local given apart, for a world position that is wrong.
+        void Raw(float wx, float wy, float wz, float lx, float ly, float lz)
+        {
+            const float w[3] = {wx, wy, wz}, l[3] = {lx, ly, lz};
+            memcpy(tf + 0x29C, w, 12);
+            memcpy(tf + 0xB4, l, 12);
+        }
         uintptr_t Ptr() const { return reinterpret_cast<uintptr_t>(e); }
     };
 
@@ -182,12 +204,14 @@ int main()
 
     printf("-- Kliff waiting out a load --\n");
     actor.At(0.0f, 1000.0f, 0.0f, 0.0f, 0.0f);
+    Sleep(600);   // positions are chosen twice a second
     p = gs::player::Read();
     Expect("the placeholder stands, with nothing to say a second character is played", p.valid && Near(p.x, 0.0f) && Near(p.y, 1000.0f));
     Expect("and the pools are still not searched", g_offered == 0);
 
     printf("-- Damiane, the flash naming B0100002 --\n");
     g_tail = 0xB0100002;
+    Sleep(600);   // positions are chosen twice a second
     p = gs::player::Read();
     Expect("the position is her body's world position", p.valid && Near(p.x, -11937.0f) && Near(p.y, 926.8f) && Near(p.z, -5766.3f));
     Expect("and the local one is her body's too", Near(p.lx, -11937.0f + 12000.0f) && Near(p.lz, -5766.3f + 6000.0f));
@@ -230,6 +254,7 @@ int main()
 
     printf("-- swapped back to Kliff --\n");
     actor.At(-9100.0f, 52.0f, -4100.0f);
+    Sleep(600);   // positions are chosen twice a second
     p = gs::player::Read();
     Expect("the position is the player actor's again", p.valid && Near(p.x, -9100.0f) && Near(p.z, -4100.0f));
     Expect("and the switch is logged", g_againLines == 1);
@@ -240,6 +265,78 @@ int main()
     Sleep(1100);
     p = gs::player::Read();
     Expect("the placeholder stands rather than any body", p.valid && Near(p.x, 0.0f) && Near(p.z, 0.0f));
+
+    // AsunaKaoru's 4 November log on 1.1.38. The actor is not on the
+    // placeholder any more: it stays where Kliff last stood while Damiane
+    // walks, and only the camera moves with her.
+    printf("-- Damiane, the actor left standing where Kliff was, no flash yet --\n");
+    g_tail = 0;
+    actor.At(-12083.6f, 866.8f, -4884.1f, -12000.0f, -5000.0f);
+    static Ent damiane3(0xB0100002, 0x04, 0x0E);
+    damiane3.At(-11911.5f, 834.2f, -5022.4f, -11000.0f, -5000.0f);
+    // Another body wearing her tags, far from the camera, which must lose.
+    damiane2.At(-3000.0f, 200.0f, 1500.0f, -3000.0f, 0.0f);
+    Pool({&bystander, &damiane2, &oongka, &damiane3}, world, 1500);
+    g_camValid = true;
+    g_cam[0] = -11911.5f; g_cam[1] = 835.7f; g_cam[2] = -5022.4f;
+    Sleep(5100);
+    p = gs::player::Read();
+    Expect("the position is her body's, beside the camera", p.valid && Near(p.x, -11911.5f) && Near(p.z, -5022.4f));
+    Expect("not the actor's 212 m away", !Near(p.x, -12083.6f));
+    Expect("and not the other body with her tags", !Near(p.x, -3000.0f));
+    Expect("so the sub-level origin is hers", Near(p.ox, -11000.0f) && Near(p.oz, -5000.0f));
+
+    printf("-- she walks with the flash down --\n");
+    damiane3.At(-11905.0f, 834.0f, -5015.0f, -11000.0f, -5000.0f);
+    g_cam[0] = -11905.0f; g_cam[1] = 835.5f; g_cam[2] = -5015.0f;
+    Sleep(600);
+    p = gs::player::Read();
+    Expect("the position follows her body", p.valid && Near(p.x, -11905.0f) && Near(p.z, -5015.0f));
+
+    printf("-- Kliff after a load: the world position reads near zero and the local one is right --\n");
+    g_tail = 0xA0100001;
+    actor.Raw(0.44f, 0.566f, 0.847f, -918.162f, 834.105f, -18.530f);
+    g_cam[0] = -11917.8f; g_cam[1] = 835.6f; g_cam[2] = -5019.5f;
+    Sleep(600);
+    p = gs::player::Read();
+    Expect("the position is his local one in the camera's origin",
+           p.valid && Near(p.x, -11918.162f) && Near(p.y, 834.105f) && Near(p.z, -5018.530f));
+    Expect("so the origin is (-11000, 0, -5000)", Near(p.ox, -11000.0f) && Near(p.oy, 0.0f) && Near(p.oz, -5000.0f));
+    Expect("and the flash naming him dropped Damiane's body", gs::player::Actor() == actor.Ptr() && g_bodyEid.load() == 0);
+    for (int i = 0; i < 20; ++i) p = gs::player::Read();
+    Expect("reads between choices keep the origin", p.valid && Near(p.x, -11918.162f) && Near(p.z, -5018.530f));
+    actor.At(0.0f, 1000.0f, 0.0f, 0.0f, 0.0f);
+    p = gs::player::Read();
+    Expect("a load in between reads the placeholder, not the placeholder moved by his origin",
+           p.valid && Near(p.x, 0.0f) && Near(p.z, 0.0f));
+    actor.Raw(0.44f, 0.566f, 0.847f, -918.162f, 834.105f, -18.530f);
+
+    printf("-- his world position comes good --\n");
+    actor.At(-11906.8f, 832.6f, -5032.7f, -11000.0f, -5000.0f);
+    g_cam[0] = -11906.8f; g_cam[1] = 834.1f; g_cam[2] = -5032.7f;
+    Sleep(600);
+    p = gs::player::Read();
+    Expect("the position is the actor's own", p.valid && Near(p.x, -11906.8f) && Near(p.z, -5032.7f));
+
+    printf("-- back to Kliff with the flash's tail still naming Damiane --\n");
+    g_tail = 0xB0100002;
+    Sleep(1100);
+    p = gs::player::Read();
+    Expect("the camera agrees with the actor, so the actor wins", p.valid && Near(p.x, -11906.8f) && Near(p.z, -5032.7f));
+
+    printf("-- no camera, the flash naming Damiane, the actor off the placeholder --\n");
+    g_camValid = false;
+    actor.At(-12083.6f, 866.8f, -4884.1f, -12000.0f, -5000.0f);
+    Sleep(1100);
+    p = gs::player::Read();
+    Expect("the flash's word picks her body", p.valid && Near(p.x, -11905.0f) && Near(p.z, -5015.0f));
+
+    printf("-- no camera, Kliff walking with no flash --\n");
+    g_tail = 0xA0100001;
+    actor.At(-9200.0f, 52.0f, -4200.0f);
+    Sleep(600);
+    p = gs::player::Read();
+    Expect("the actor, as before", p.valid && Near(p.x, -9200.0f) && Near(p.z, -4200.0f));
 
     printf("\n%s\n", failures ? "FAILURES" : "all pass");
     return failures ? 1 : 0;

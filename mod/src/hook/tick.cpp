@@ -686,9 +686,21 @@ namespace
             // minus local offset moves it to the map's.
             if (cam.dist > 0.5f && cam.dist < 30.0f)
             {
-                const float cx = cam.pivot[0] + (pp.x - pp.lx) - cam.fwd[0] * cam.dist;
-                const float cy = cam.pivot[1] + (pp.y - pp.ly) - cam.fwd[1] * cam.dist + 0.6f;
-                const float cz = cam.pivot[2] + (pp.z - pp.lz) - cam.fwd[2] * cam.dist;
+                // The camera's own world copy of the pivot when it has one.
+                // Moving the local pivot by the player's offset put the
+                // origin 840 m off while Damiane was played on 4 November,
+                // because her body and the camera were in different
+                // sub-levels.
+                float px = cam.pivot[0] + (pp.x - pp.lx);
+                float py = cam.pivot[1] + (pp.y - pp.ly);
+                float pz = cam.pivot[2] + (pp.z - pp.lz);
+                if (cam.worldValid)
+                {
+                    px = cam.world[0]; py = cam.world[1]; pz = cam.world[2];
+                }
+                const float cx = px - cam.fwd[0] * cam.dist;
+                const float cy = py - cam.fwd[1] * cam.dist + 0.6f;
+                const float cz = pz - cam.fwd[2] * cam.dist;
                 // The pivot is in the sub-level's frame and the player's world
                 // minus local offset moves it to the map's, which is right only
                 // while both are in the same frame. When the answer lands far
@@ -1711,6 +1723,17 @@ extern "C" void gs_OnMinimapTick(void* self)
         // heap to get it sooner. Waiting that long to be able to press was the
         // price of not freezing, and this is how the price gets paid back.
         gs::player::Pos pp = gs::player::Read();
+        // A position within a hundred of the origin is the loading
+        // placeholder or a world position that has not been filled in, and
+        // a press from it pins whatever lies on a line from the middle of
+        // the map: 3.7 km off in AsunaKaoru's 4 November log. The camera's
+        // copy goes in its place, or the press is refused below.
+        if (pp.valid && std::fabs(pp.x) + std::fabs(pp.z) < 100.0f)
+        {
+            GS_LOG("[mark] the player reads (%.1f, %.1f, %.1f), which is not a place on the map; trying "
+                   "the camera's position", pp.x, pp.y, pp.z);
+            pp = gs::player::Pos{};
+        }
         if (!pp.valid)
         {
             const gs::camera::Pose cam = gs::camera::Read();

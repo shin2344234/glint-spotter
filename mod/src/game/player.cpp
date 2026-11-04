@@ -10,6 +10,7 @@
 #include "game/rtti.h"
 #include "game/actors.h"
 #include "game/aim.h"
+#include "game/camera.h"
 
 namespace
 {
@@ -51,7 +52,6 @@ namespace
     std::atomic<uintptr_t> g_body{0};
     std::atomic<uint32_t> g_bodyEid{0};
     std::atomic<uint32_t> g_bodyLookMs{0};
-    std::mutex g_bodySearch;
 
     using gs::rtti::Deref;
 
@@ -198,15 +198,55 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
     }
 
+    float Dist(const float* a, const float* b)
+    {
+        const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // The camera follows whichever body is being played, and keeps that
+    // body's world position beside its pivot (camera.h). That makes it the
+    // referee between the player actor and a second character's body: on 4
+    // November AsunaKaoru's actor stood still where Kliff last was for the
+    // whole of her time as Damiane and as Oongka, off the placeholder, while
+    // the camera's world copy moved with the body she played. The pivot sits
+    // about a metre and a half above the feet, so "agrees" is 40 m, the same
+    // margin the view ray uses.
+    constexpr float kAgree = 40.0f;
+
+    // Read at most every quarter second, because the camera's own read asks
+    // VirtualQuery once and Read() runs from every thread.
+    std::mutex g_camMutex;
+    uint32_t g_camMs = 0;
+    float g_camWorld[3]{};
+    bool g_camOk = false;
+
+    bool CameraWorld(float* out)
+    {
+        std::lock_guard<std::mutex> lock(g_camMutex);
+        const uint32_t now = GetTickCount();
+        if (!g_camMs || now - g_camMs >= 250)
+        {
+            g_camMs = now ? now : 1;
+            const gs::camera::Pose cam = gs::camera::Read();
+            g_camOk = cam.valid && cam.worldValid && !OnPlaceholder(cam.world);
+            if (g_camOk) memcpy(g_camWorld, cam.world, sizeof(g_camWorld));
+        }
+        if (g_camOk) memcpy(out, g_camWorld, sizeof(g_camWorld));
+        return g_camOk;
+    }
+
     // A body from the pools that reads somewhere real. With `eid` set it is
     // that entity; with it zero it is any body wearing the pair Master
     // Looter found only on the one being played, type tag 04 with status
-    // category 0E, in two Damiane logs from two machines.
-    uintptr_t FindBody(uint32_t eid, int* seenOut)
+    // category 0E, in two Damiane logs from two machines. With `nearTo` set,
+    // only a body within kAgree of it counts, and the nearest one wins.
+    uintptr_t FindBody(uint32_t eid, const float* nearTo, int* seenOut)
     {
         static uintptr_t pool[1536];
         const int n = gs::actors::Offered(pool, 1536);
         uintptr_t found = 0;
+        float best = 0;
         int seen = 0;
         for (int i = 0; i < n; ++i)
         {
@@ -217,89 +257,235 @@ namespace
             uintptr_t actor = 0, tf = 0;
             uint32_t parent = 0;
             if (!Walk(pool[i], v, w, &actor, &tf, &parent, true)) continue;
-            if (!std::isfinite(w[0]) || !std::isfinite(w[2]) || OnPlaceholder(w)) continue;
+            if (!std::isfinite(w[0]) || !std::isfinite(w[1]) || !std::isfinite(w[2]) || OnPlaceholder(w))
+                continue;
             ++seen;
-            if (!found) found = pool[i];
+            const float d = nearTo ? Dist(w, nearTo) : 0.0f;
+            if (nearTo && d > kAgree) continue;
+            if (!found || d < best) { found = pool[i]; best = d; }
         }
         *seenOut = seen;
         return found;
     }
 
-    // Damiane and Oongka. The player actor, the one carrying the login and
-    // detect components and the flash's own, stays at the loading
-    // placeholder for as long as either is played, and the body that moves
-    // is a second entity with a B0 id. AsunaKaoru's log on 2 November had the
-    // actor at (0, 1000, 0) from the first read to the last, every mark
-    // refused for it, and the flash's tail naming B0100002 each time it went
-    // up. Master Looter has known that body since issue #36.
-    //
-    // This returns that body's position in place of the actor's, and only
-    // while the actor reads the placeholder. The search through the pools
-    // needs a reason to run: the flash naming a B0 body, or one found
-    // earlier this session. Kliff waiting out a load has neither, so his
-    // loads read nothing more than they did.
-    bool BodyInstead(float* vOut, float* wOut)
+    // Where positions come from. Decided twice a second and used in between,
+    // so the reads every thread makes cost what they always did.
+    enum Source : int { kFromActor = 0, kFromBody = 1, kFromShifted = 2 };
+    std::atomic<int> g_source{kFromActor};
+    std::atomic<uint32_t> g_pickMs{0};
+    std::atomic<uint32_t> g_tagLookMs{0};
+    std::mutex g_pick;
+    // For kFromShifted, the sub-level origin in whole kilometres. Every
+    // origin seen in a log has been a multiple of 1000 with y at 0:
+    // (-9000, 0, -4000), (-11000, 0, -5000), (-12000, 0, -5000).
+    std::atomic<int> g_shiftX{0}, g_shiftZ{0};
+    bool g_disagreeSaid = false;
+
+    // The body held, read where it stands. False when the block is gone or
+    // somebody else's, or it reads the placeholder.
+    bool ReadHeldBody(float* v, float* w)
     {
-        // Filled here and copied out only on success, because a walk that
-        // fails halfway has already written the world half.
-        float v[3]{}, w[7]{};
-        auto give = [&]() { memcpy(vOut, v, sizeof(v)); memcpy(wOut, w, sizeof(w)); return true; };
-        uint16_t m1 = 0, m2 = 0;
-        uint32_t t1 = 0, t2 = 0;
-        uint32_t want = 0;
-        if (gs::aim::ModeRecords(&m1, &m2, &t1, &t2) && (t1 >> 24) == 0xB0) want = t1;
-        const uint32_t known = g_bodyEid.load();
-        if (want && want != known) g_body.store(0);
-
-        if (const uintptr_t b = g_body.load())
-        {
-            uintptr_t actor = 0, tf = 0;
-            uint32_t parent = 0;
-            if (EidAt(b) == known && Walk(b, v, w, &actor, &tf, &parent, true) &&
-                std::isfinite(w[0]) && std::isfinite(w[2]) && !OnPlaceholder(w))
-                return give();
-            g_body.store(0);
-        }
-
-        if (!want && !known) return false;
-        const uint32_t now = GetTickCount();
-        if (now - g_bodyLookMs.load() < 1000) return false;
-        std::unique_lock<std::mutex> lock(g_bodySearch, std::try_to_lock);
-        if (!lock.owns_lock()) return false;
-        g_bodyLookMs.store(now);
-
-        int seen = 0;
-        const uint32_t first = want ? want : known;
-        const char* how = want ? "the flash names it" : "it has the id found before";
-        uintptr_t found = FindBody(first, &seen);
-        if (!found && !want)
-        {
-            found = FindBody(0, &seen);
-            how = "it wears the played body's type tag 04 and status category 0E";
-        }
-        if (!found)
-        {
-            static uint32_t s_missSaid = 0;
-            if (s_missSaid != first)
-            {
-                s_missSaid = first;
-                GS_LOG("[player] the player actor reads the loading placeholder and the body %08X is not "
-                       "in the actor manager's pools yet; positions wait for it", s_missSaid);
-            }
-            return false;
-        }
-
-        const uint32_t eid = EidAt(found);
+        const uintptr_t b = g_body.load();
+        if (!b) return false;
         uintptr_t actor = 0, tf = 0;
         uint32_t parent = 0;
-        if (!Walk(found, v, w, &actor, &tf, &parent, true)) return false;
+        if (EidAt(b) == g_bodyEid.load() && Walk(b, v, w, &actor, &tf, &parent, true) &&
+            std::isfinite(w[0]) && std::isfinite(w[1]) && std::isfinite(w[2]) && !OnPlaceholder(w))
+            return true;
+        g_body.store(0);
+        return false;
+    }
+
+    // Look for the played body in the pools. `eid` first when there is one;
+    // the tag pair only when `tagToo`. Holds g_body and g_bodyEid on success.
+    bool SearchBody(uint32_t eid, bool tagToo, const float* nearTo, float* v, float* w)
+    {
+        const uint32_t now = GetTickCount();
+        int seen = 0;
+        uintptr_t found = 0;
+        const char* how = "the flash names it";
+        if (eid && now - g_bodyLookMs.load() >= 1000)
+        {
+            g_bodyLookMs.store(now);
+            found = FindBody(eid, nearTo, &seen);
+            if (!found)
+            {
+                static uint32_t s_missSaid = 0;
+                if (s_missSaid != eid)
+                {
+                    s_missSaid = eid;
+                    GS_LOG("[player] the flash names the body %08X and it is not in the actor manager's "
+                           "pools%s yet; positions wait for it", eid, nearTo ? " beside the camera" : "");
+                }
+            }
+        }
+        if (!found && tagToo && now - g_tagLookMs.load() >= 5000)
+        {
+            g_tagLookMs.store(now);
+            found = FindBody(0, nearTo, &seen);
+            how = "it wears the played body's type tag 04 and status category 0E";
+        }
+        if (!found) return false;
+
+        const uint32_t id = EidAt(found);
+        uintptr_t actor = 0, tf = 0;
+        uint32_t parent = 0;
+        float bv[3]{}, bw[7]{};
+        if (!Walk(found, bv, bw, &actor, &tf, &parent, true)) return false;
         g_body.store(found);
-        if (g_bodyEid.exchange(eid) != eid)
-            GS_LOG_OK("[player] a second character is being played. The player actor stays at the loading "
-                      "placeholder, so positions come from the body %08X at 0x%p, world (%.1f, %.1f, %.1f), "
+        if (g_bodyEid.exchange(id) != id)
+            GS_LOG_OK("[player] a second character is being played. The player actor stays behind, "
+                      "so positions come from the body %08X at 0x%p, world (%.1f, %.1f, %.1f), "
                       "because %s (%d matching in the pools)",
-                      eid, reinterpret_cast<void*>(found), w[0], w[1], w[2], how, seen);
-        return give();
+                      id, reinterpret_cast<void*>(found), bw[0], bw[1], bw[2], how, seen);
+        memcpy(v, bv, sizeof(bv));
+        memcpy(w, bw, sizeof(bw));
+        return true;
+    }
+
+    void SaySource(int was, int now, const float* w)
+    {
+        if (was == now) return;
+        if (now == kFromActor && was == kFromBody)
+            GS_LOG("[player] the player actor reads (%.1f, %.1f, %.1f) again, so positions come from it "
+                   "and not the body %08X", w[0], w[1], w[2], g_bodyEid.load());
+        else if (now == kFromShifted)
+            GS_LOG("[player] the player actor's world position is wrong and its local one is right, so "
+                   "positions are local plus (%d, 0, %d), the origin the camera puts it in; world "
+                   "(%.1f, %.1f, %.1f)", g_shiftX.load() * 1000, g_shiftZ.load() * 1000, w[0], w[1], w[2]);
+        else if (now == kFromActor && was == kFromShifted)
+            GS_LOG("[player] the player actor's world position agrees with the camera again, (%.1f, %.1f, %.1f)",
+                   w[0], w[1], w[2]);
+    }
+
+    // Damiane and Oongka, and Kliff's world position after a load.
+    //
+    // The player actor carries the login, detect and flash components, and
+    // while Damiane or Oongka is played the body that moves is a second
+    // entity with a B0 id. 1.1.38 used that body only while the actor read
+    // the loading placeholder, from AsunaKaoru's 2 November log. Her 4
+    // November log on 1.1.38 had the actor off the placeholder, standing
+    // still at (-12083.6, 866.8, -4884.1) where Kliff had been, so the body
+    // was never looked for: every press as Damiane cast from that spot and
+    // pinned glints 279 to 710 m off, and as Oongka nothing was on the line
+    // at all. The same log had Kliff's world position reading (0.4, 0.6,
+    // 0.8) for two minutes after a load while his local one was right, and
+    // one press pinned a glint 3.7 km away from it.
+    //
+    // So the choice is now made against the camera: the actor when it
+    // agrees, the actor's local position moved by a whole-kilometre origin
+    // when that agrees, and the body the flash named, or the one wearing
+    // the played body's tags, when it agrees. With no camera, or nothing
+    // agreeing, the flash's tail decides: a B0 id means that body, an A0 id
+    // means the actor, and the placeholder means a body known before.
+    void Choose(const float* av, const float* aw, float* v, float* w)
+    {
+        const int was = g_source.load();
+        const uint32_t now = GetTickCount();
+        std::unique_lock<std::mutex> lock(g_pick, std::defer_lock);
+        const bool decide = now - g_pickMs.load() >= 500 && lock.try_lock();
+        if (!decide)
+        {
+            if (was == kFromBody && ReadHeldBody(v, w)) return;
+            // Not across a load: the local position goes to the placeholder
+            // as well, and moved by an origin it would look like a place.
+            if (was == kFromShifted && !OnPlaceholder(av))
+            {
+                v[0] = av[0]; v[1] = av[1]; v[2] = av[2];
+                memcpy(w, aw, 7 * sizeof(float));
+                w[0] = av[0] + g_shiftX.load() * 1000.0f;
+                w[1] = av[1];
+                w[2] = av[2] + g_shiftZ.load() * 1000.0f;
+                return;
+            }
+            memcpy(v, av, 3 * sizeof(float));
+            memcpy(w, aw, 7 * sizeof(float));
+            return;
+        }
+        g_pickMs.store(now ? now : 1);
+
+        uint16_t m1 = 0, m2 = 0;
+        uint32_t t1 = 0, t2 = 0;
+        uint32_t tailBody = 0;
+        bool tailActor = false;
+        if (gs::aim::ModeRecords(&m1, &m2, &t1, &t2))
+        {
+            if ((t1 >> 24) == 0xB0) tailBody = t1;
+            else if ((t1 >> 24) == 0xA0) tailActor = true;
+        }
+        if (tailBody && tailBody != g_bodyEid.load()) g_body.store(0);
+        const uint32_t eid = tailBody ? tailBody : g_bodyEid.load();
+        const bool actorReal = !OnPlaceholder(aw);
+
+        float cam[3]{};
+        const bool haveCam = CameraWorld(cam);
+        int pick = -1;
+        float bv[3]{}, bw[7]{};
+        if (haveCam)
+        {
+            if (actorReal && Dist(aw, cam) <= kAgree) pick = kFromActor;
+            if (pick < 0 && !OnPlaceholder(av))
+            {
+                const int sx = static_cast<int>(std::lround((cam[0] - av[0]) / 1000.0f));
+                const int sz = static_cast<int>(std::lround((cam[2] - av[2]) / 1000.0f));
+                const float sw[3] = {av[0] + sx * 1000.0f, av[1], av[2] + sz * 1000.0f};
+                if (Dist(sw, cam) <= kAgree)
+                {
+                    g_shiftX.store(sx);
+                    g_shiftZ.store(sz);
+                    pick = kFromShifted;
+                }
+            }
+            if (pick < 0)
+            {
+                if (ReadHeldBody(bv, bw) && Dist(bw, cam) <= kAgree) pick = kFromBody;
+                else if (SearchBody(eid, true, cam, bv, bw)) pick = kFromBody;
+            }
+            if (pick >= 0) g_disagreeSaid = false;
+            else if (!g_disagreeSaid)
+            {
+                g_disagreeSaid = true;
+                GS_LOG("[player] the camera puts the played body at (%.1f, %.1f, %.1f), and neither the player "
+                       "actor at (%.1f, %.1f, %.1f) nor any second body agrees; the flash's tail %08X decides",
+                       cam[0], cam[1], cam[2], aw[0], aw[1], aw[2], t1);
+            }
+        }
+        if (pick < 0)
+        {
+            // A body only on the flash's word or with the actor on the
+            // placeholder, and the tag pair only for a body known before
+            // that has gone, the way 1.1.38 did it.
+            pick = kFromActor;
+            if (!tailActor && (tailBody || !actorReal) && eid &&
+                (ReadHeldBody(bv, bw) || SearchBody(eid, !tailBody, nullptr, bv, bw)))
+                pick = kFromBody;
+        }
+
+        if (pick == kFromBody)
+        {
+            memcpy(v, bv, sizeof(bv));
+            memcpy(w, bw, sizeof(bw));
+        }
+        else
+        {
+            memcpy(v, av, 3 * sizeof(float));
+            memcpy(w, aw, 7 * sizeof(float));
+            if (pick == kFromShifted)
+            {
+                w[0] = av[0] + g_shiftX.load() * 1000.0f;
+                w[1] = av[1];
+                w[2] = av[2] + g_shiftZ.load() * 1000.0f;
+            }
+        }
+        g_source.store(pick);
+        SaySource(was, pick, w);
+        // Kliff named by the flash and read from the actor: whatever body was
+        // held belongs to a character he is not playing any more.
+        if (tailActor && pick != kFromBody)
+        {
+            g_body.store(0);
+            g_bodyEid.store(0);
+        }
     }
 }
 
@@ -470,14 +656,14 @@ namespace gs::player
         const bool worldOk = std::isfinite(w[0]) && std::isfinite(w[1]) && std::isfinite(w[2]) &&
                              std::fabs(w[0]) + std::fabs(w[1]) + std::fabs(w[2]) < 1.0e6f;
         if (!worldOk) return p;
-        // The actor on the placeholder is a load for Kliff and the whole
-        // session for Damiane or Oongka, whose body is somewhere else.
+        // The actor, a second character's body, or the actor's local
+        // position in the origin the camera names; Choose says which.
         // Everything below except the position stays on the actor.
-        if (OnPlaceholder(w))
-            BodyInstead(v, w);
-        else if (g_body.exchange(0))
-            GS_LOG("[player] the player actor reads (%.1f, %.1f, %.1f) again, so positions come from it "
-                   "and not the body %08X", w[0], w[1], w[2], g_bodyEid.load());
+        {
+            float av[3] = {v[0], v[1], v[2]}, aw[7];
+            memcpy(aw, w, sizeof(aw));
+            Choose(av, aw, v, w);
+        }
         p.lx = v[0]; p.ly = v[1]; p.lz = v[2];
         p.x = w[0]; p.y = w[1]; p.z = w[2];
         p.ox = w[0] - v[0]; p.oy = w[1] - v[1]; p.oz = w[2] - v[2];
