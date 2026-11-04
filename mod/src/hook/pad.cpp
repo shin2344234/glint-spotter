@@ -32,6 +32,21 @@ namespace
     std::atomic<uint16_t> g_buzzStrength{0};
     bool g_buzzing = false;
     uint16_t g_sentStrength = 0;   // what the motors were last told, 0 while off
+    // Pump's own clock for the pattern it is playing. A pattern is timed from
+    // the pass that first sees it, not from when Buzz was called: the loop
+    // that runs Pump takes a pool walk of 40 to 50 ms every half second on top
+    // of its 50 ms sleep, so a 90 ms buzz timed from the call could be over
+    // before Pump ever looked and never reach the motors at all.
+    uint32_t g_playing = 0;        // the g_buzzStart value being played, 0 for none
+    uint32_t g_playFrom = 0;       // when Pump first saw it
+    uint32_t g_lastSendMs = 0;     // when the motors were last written
+    bool g_sendFailSaid = false;   // a failed write has been logged this session
+    // While a buzz is on it is written again every pass. The game calls
+    // XInputSetState itself, through a wrapper at 0xEDBA0F0 on 1.0.0.3527 that
+    // scales both motors by its own vibration setting, so a write of its own
+    // can stop ours. AsunaKaoru felt no buzz at all on 1.1.39-test1, with every
+    // press handled and the pad on XInput slot 0.
+    constexpr uint32_t kResendMs = 40;
     using SetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_VIBRATION*);
     SetStateFn g_setState = nullptr;
 
@@ -129,7 +144,7 @@ namespace gs::pad
             // The pad left mid-buzz. Forget that the motors were running, or
             // the next Pump after it comes back sees the state it wanted and
             // makes no call.
-            if (was) { g_buzzing = false; g_sentStrength = 0; }
+            if (was) { g_buzzing = false; g_sentStrength = 0; g_lastSendMs = 0; }
             return false;
         }
 
@@ -173,34 +188,67 @@ namespace gs::pad
         const bool viaXInput = g_setState && g_pad >= 0;
         const bool viaDirect = !viaXInput && gs::hidpad::CanRumble();
         if (!viaXInput && !viaDirect) return;
+        const uint32_t now = GetTickCount();
         bool want = false;
+        bool fresh = false;
         const uint32_t start = g_buzzStart.load();
-        if (start)
+        if (start && start != g_playing)
+        {
+            g_playing = start;
+            g_playFrom = now;
+            fresh = true;
+        }
+        if (g_playing)
         {
             const uint32_t on = g_buzzOn.load();
             const uint32_t period = on + g_buzzOff.load();
-            const uint32_t elapsed = GetTickCount() - start;
+            const uint32_t elapsed = now - g_playFrom;
             want = period != 0 && elapsed / period < g_buzzCount.load() && elapsed % period < on;
         }
         // A new pattern can start while the motors run; its strength is sent
-        // even though on stays on.
+        // even though on stays on. While on, it is sent again every pass.
         const uint16_t strength = want ? g_buzzStrength.load() : 0;
-        if (want == g_buzzing && strength == g_sentStrength) return;
+        const bool changed = want != g_buzzing || strength != g_sentStrength;
+        if (!changed && !(want && now - g_lastSendMs >= kResendMs)) return;
         g_buzzing = want;
         g_sentStrength = strength;
+        g_lastSendMs = now ? now : 1;
+        bool ok = true;
+        DWORD rc = ERROR_SUCCESS;
         if (viaXInput)
         {
             XINPUT_VIBRATION v{};
-            if (want)
-            {
-                v.wLeftMotorSpeed = g_buzzStrength.load();
-                v.wRightMotorSpeed = g_buzzStrength.load();
-            }
-            g_setState(static_cast<DWORD>(g_pad), &v);
+            v.wLeftMotorSpeed = strength;
+            v.wRightMotorSpeed = strength;
+            rc = g_setState(static_cast<DWORD>(g_pad), &v);
+            ok = rc == ERROR_SUCCESS;
         }
         else
         {
-            gs::hidpad::Rumble(want ? static_cast<uint8_t>(g_buzzStrength.load() >> 8) : 0);
+            ok = gs::hidpad::Rumble(want ? static_cast<uint8_t>(strength >> 8) : 0);
+        }
+        // One line per buzz, so a report of a silent pad can be checked
+        // against what was sent and what the call said back.
+        if (fresh && want)
+        {
+            if (viaXInput)
+                GS_LOG("pad: buzz %u for %u ms (x%u, %u ms after it was asked for) on XInput slot %d; "
+                       "XInputSetState returned %lu",
+                       strength, g_buzzOn.load(), g_buzzCount.load(), now - start, g_pad,
+                       static_cast<unsigned long>(rc));
+            else
+                GS_LOG("pad: buzz %u for %u ms (x%u, %u ms after it was asked for) through the pad's "
+                       "HID output; the write %s",
+                       strength, g_buzzOn.load(), g_buzzCount.load(), now - start,
+                       ok ? "went through" : "failed");
+        }
+        else if (!ok && !g_sendFailSaid)
+        {
+            g_sendFailSaid = true;
+            if (viaXInput)
+                GS_LOG("pad: XInputSetState on slot %d returned %lu", g_pad, static_cast<unsigned long>(rc));
+            else
+                GS_LOG("pad: a rumble write through the pad's HID output failed");
         }
     }
 
