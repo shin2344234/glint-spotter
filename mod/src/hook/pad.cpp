@@ -31,6 +31,7 @@ namespace
     std::atomic<uint32_t> g_buzzCount{0};
     std::atomic<uint16_t> g_buzzStrength{0};
     bool g_buzzing = false;
+    uint16_t g_sentStrength = 0;   // what the motors were last told, 0 while off
     using SetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_VIBRATION*);
     SetStateFn g_setState = nullptr;
 
@@ -128,7 +129,7 @@ namespace gs::pad
             // The pad left mid-buzz. Forget that the motors were running, or
             // the next Pump after it comes back sees the state it wanted and
             // makes no call.
-            if (was) g_buzzing = false;
+            if (was) { g_buzzing = false; g_sentStrength = 0; }
             return false;
         }
 
@@ -147,6 +148,16 @@ namespace gs::pad
     void Pulses(uint16_t strength, uint32_t onMs, uint32_t offMs, uint32_t count)
     {
         const uint32_t now = GetTickCount();
+        // A weaker buzz waits for a stronger one to finish. AsunaKaoru pressed
+        // again within 150 ms of a pin landing on 4 November, the second press
+        // found the pin already there, and its 90 ms nothing-placed buzz
+        // restarted the clock on the 450 ms pin buzz and cut it to 90.
+        if (const uint32_t start = g_buzzStart.load())
+        {
+            const uint32_t period = g_buzzOn.load() + g_buzzOff.load();
+            const uint32_t total = period * g_buzzCount.load();
+            if (strength < g_buzzStrength.load() && now - start < total) return;
+        }
         g_buzzStrength.store(strength);
         g_buzzOn.store(onMs);
         g_buzzOff.store(offMs);
@@ -171,8 +182,12 @@ namespace gs::pad
             const uint32_t elapsed = GetTickCount() - start;
             want = period != 0 && elapsed / period < g_buzzCount.load() && elapsed % period < on;
         }
-        if (want == g_buzzing) return;
+        // A new pattern can start while the motors run; its strength is sent
+        // even though on stays on.
+        const uint16_t strength = want ? g_buzzStrength.load() : 0;
+        if (want == g_buzzing && strength == g_sentStrength) return;
         g_buzzing = want;
+        g_sentStrength = strength;
         if (viaXInput)
         {
             XINPUT_VIBRATION v{};
