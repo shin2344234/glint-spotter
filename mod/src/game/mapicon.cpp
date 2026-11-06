@@ -14,6 +14,7 @@
 #include "game/rtti.h"
 #include "game/signatures.h"
 #include "hook/pad.h"
+#include "hook/chime.h"
 #include "hook/vtable.h"
 
 namespace
@@ -526,6 +527,9 @@ namespace gs::mapicon
         // 450 ms, up from 220: at 220 a pin landing mid-fight or on a horse
         // was easy to miss.
         if (gs::Settings::Get().rumble) gs::pad::Buzz(28000, 450);
+        // The sound, for a keyboard player or anyone who wants both. Only a
+        // flag here; the key thread plays it.
+        if (gs::Settings::Get().sound) gs::chime::Ring();
 
         // The same icon on the minimap, only when the ini asks.
         //

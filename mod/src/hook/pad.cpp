@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "core/settings.h"
 #include "hook/hidpad.h"
+#include "hook/iathook.h"
 
 namespace
 {
@@ -50,6 +51,73 @@ namespace
     using SetStateFn = DWORD(WINAPI*)(DWORD, XINPUT_VIBRATION*);
     SetStateFn g_setState = nullptr;
 
+    // The guard on the game's own motor writes. Resending every 40 ms is not
+    // enough when the game writes more often than that: AsunaKaoru's pad
+    // stopped buzzing after 1.1.37 with every buzz logged as sent, which is
+    // what a stream of zeros from the game between our writes would look
+    // like. So the game's calls go through GameSetState, and while a buzz is
+    // on, any motor the game asks for below the buzz is raised to it. Outside
+    // a buzz every call goes through untouched.
+    SetStateFn g_gameSetState = nullptr;   // what the game's import entry held
+    constexpr int kGuardMax = 4;
+    void** g_guardAt[kGuardMax]{};
+    int g_guardN = 0;
+    std::atomic<int> g_guardSlot{-1};      // the slot being buzzed, -1 while no buzz is on
+    std::atomic<uint16_t> g_guardStrength{0};
+    std::atomic<uint32_t> g_gameWrites{0};
+    std::atomic<uint32_t> g_gameRaised{0};
+    std::atomic<uint32_t> g_gameLast{0};   // left << 16 | right, as the game last asked
+    uint32_t g_writesAtStart = 0;
+    uint32_t g_raisedAtStart = 0;
+    bool g_firstGameWriteSaid = false;
+    uint32_t g_lastHoldCheckMs = 0;
+    bool g_guardLostSaid = false;
+
+    DWORD WINAPI GameSetState(DWORD user, XINPUT_VIBRATION* v)
+    {
+        g_gameWrites.fetch_add(1, std::memory_order_relaxed);
+        if (!v) return g_gameSetState(user, v);
+        g_gameLast.store((static_cast<uint32_t>(v->wLeftMotorSpeed) << 16) | v->wRightMotorSpeed,
+                         std::memory_order_relaxed);
+        const int slot = g_guardSlot.load(std::memory_order_acquire);
+        if (slot < 0 || user != static_cast<DWORD>(slot)) return g_gameSetState(user, v);
+        const uint16_t s = g_guardStrength.load(std::memory_order_relaxed);
+        if (v->wLeftMotorSpeed >= s && v->wRightMotorSpeed >= s) return g_gameSetState(user, v);
+        XINPUT_VIBRATION raised = *v;
+        if (raised.wLeftMotorSpeed < s) raised.wLeftMotorSpeed = s;
+        if (raised.wRightMotorSpeed < s) raised.wRightMotorSpeed = s;
+        g_gameRaised.fetch_add(1, std::memory_order_relaxed);
+        return g_gameSetState(user, &raised);
+    }
+
+    void InstallGuard()
+    {
+        // Ordinal 3 is XInputSetState in all three libraries. Every build
+        // looked at, 3462 through 3576, imports it by ordinal from
+        // XINPUT1_4.dll, under two descriptors.
+        const char* dlls[] = {"XINPUT1_4.dll", "xinput1_3.dll", "XINPUT9_1_0.dll"};
+        for (const char* dll : dlls)
+        {
+            int differs = 0;
+            g_guardN = gs::iathook::SwapAll(dll, 3, "XInputSetState", reinterpret_cast<void*>(&GameSetState),
+                                            reinterpret_cast<void**>(&g_gameSetState), g_guardAt,
+                                            kGuardMax, &differs);
+            if (differs)
+                GS_LOG("pad: %d of the game's XInputSetState entries in %s held a different address "
+                       "from the first, so the guard left %s alone", differs, dll,
+                       differs == 1 ? "it" : "them");
+            if (g_guardN)
+            {
+                GS_LOG("pad: the game's own motor writes now go through the guard, %d import entr%s in %s. "
+                       "While a buzz is on, a motor the game asks for below the buzz is raised to it.",
+                       g_guardN, g_guardN == 1 ? "y" : "ies", dll);
+                return;
+            }
+        }
+        GS_LOG("pad: the game imports XInputSetState through no entry the guard can reach, so its own "
+               "motor writes can still cut a buzz short");
+    }
+
     // Look for a pad on any of the four slots and keep the first that answers.
     //
     // Asking a slot with nothing on it is the expensive call in XInput, so this
@@ -90,6 +158,8 @@ namespace gs::pad
             }
         }
         if (!g_getState) GS_LOG("pad: no XInput library, so Xbox pads are not read");
+        if (g_setState && gs::Settings::Get().padGuard) InstallGuard();
+        else if (g_setState) GS_LOG("pad: PadGuard=0, so the game's own motor writes go straight through");
         if (gs::Settings::Get().directPad) gs::hidpad::Start();
         else GS_LOG("pad: DirectPad=0, so a PlayStation pad works only through Steam Input or DS4Windows");
         return g_getState != nullptr || gs::Settings::Get().directPad;
@@ -144,7 +214,11 @@ namespace gs::pad
             // The pad left mid-buzz. Forget that the motors were running, or
             // the next Pump after it comes back sees the state it wanted and
             // makes no call.
-            if (was) { g_buzzing = false; g_sentStrength = 0; g_lastSendMs = 0; }
+            if (was)
+            {
+                g_buzzing = false; g_sentStrength = 0; g_lastSendMs = 0;
+                g_guardSlot.store(-1, std::memory_order_release);
+            }
             return false;
         }
 
@@ -185,10 +259,34 @@ namespace gs::pad
         // XInput first when there is a pad on it. With Steam Input on, that is
         // the virtual pad, and Steam passes the buzz on to the real one; writing
         // to the real one as well would buzz it twice over.
+        const uint32_t now = GetTickCount();
+        if (g_guardN)
+        {
+            if (!g_firstGameWriteSaid && g_gameWrites.load(std::memory_order_relaxed))
+            {
+                g_firstGameWriteSaid = true;
+                const uint32_t last = g_gameLast.load(std::memory_order_relaxed);
+                GS_LOG("pad: the game wrote the motors itself for the first time, asking for %u/%u",
+                       last >> 16, last & 0xFFFF);
+            }
+            // Something else could put the entries back: the protector, an
+            // overlay, another mod. Checked every ten seconds, said once.
+            if (!g_guardLostSaid && now - g_lastHoldCheckMs >= 10000)
+            {
+                g_lastHoldCheckMs = now;
+                for (int i = 0; i < g_guardN && i < kGuardMax; ++i)
+                {
+                    if (*g_guardAt[i] == reinterpret_cast<void*>(&GameSetState)) continue;
+                    g_guardLostSaid = true;
+                    GS_LOG("pad: XInputSetState import entry %d no longer points at the guard (it holds "
+                           "0x%p), so the game's writes there go around it", i, *g_guardAt[i]);
+                    break;
+                }
+            }
+        }
         const bool viaXInput = g_setState && g_pad >= 0;
         const bool viaDirect = !viaXInput && gs::hidpad::CanRumble();
         if (!viaXInput && !viaDirect) return;
-        const uint32_t now = GetTickCount();
         bool want = false;
         bool fresh = false;
         const uint32_t start = g_buzzStart.load();
@@ -210,9 +308,19 @@ namespace gs::pad
         const uint16_t strength = want ? g_buzzStrength.load() : 0;
         const bool changed = want != g_buzzing || strength != g_sentStrength;
         if (!changed && !(want && now - g_lastSendMs >= kResendMs)) return;
+        const bool ended = g_buzzing && !want;
         g_buzzing = want;
         g_sentStrength = strength;
         g_lastSendMs = now ? now : 1;
+        // The guard first, so a game write that lands between this and the
+        // call below is already raised.
+        g_guardStrength.store(strength, std::memory_order_relaxed);
+        g_guardSlot.store(want && viaXInput ? g_pad : -1, std::memory_order_release);
+        if (fresh && want)
+        {
+            g_writesAtStart = g_gameWrites.load(std::memory_order_relaxed);
+            g_raisedAtStart = g_gameRaised.load(std::memory_order_relaxed);
+        }
         bool ok = true;
         DWORD rc = ERROR_SUCCESS;
         if (viaXInput)
@@ -242,7 +350,18 @@ namespace gs::pad
                        strength, g_buzzOn.load(), g_buzzCount.load(), now - start,
                        ok ? "went through" : "failed");
         }
-        else if (!ok && !g_sendFailSaid)
+        else if (ended && g_guardN && viaXInput)
+        {
+            // How much the game fought the buzz, which is the number that
+            // says whether the guard was needed.
+            const uint32_t last = g_gameLast.load(std::memory_order_relaxed);
+            GS_LOG("pad: buzz over. The game wrote the motors %u time(s) while it ran, %u of them below "
+                   "the buzz and raised to it; the game last asked for %u/%u",
+                   g_gameWrites.load(std::memory_order_relaxed) - g_writesAtStart,
+                   g_gameRaised.load(std::memory_order_relaxed) - g_raisedAtStart,
+                   last >> 16, last & 0xFFFF);
+        }
+        if (!ok && !g_sendFailSaid && !(fresh && want))
         {
             g_sendFailSaid = true;
             if (viaXInput)
@@ -253,4 +372,16 @@ namespace gs::pad
     }
 
     bool Connected() { return g_connected; }
+
+    void Stop(bool processTerminating)
+    {
+        g_guardSlot.store(-1, std::memory_order_release);
+        // Same bargain as the save watch: on teardown the game is leaving
+        // anyway, and otherwise a call already inside the guard still returns
+        // through it.
+        if (processTerminating || !g_guardN) return;
+        gs::iathook::Restore(g_guardAt, g_guardN, reinterpret_cast<void*>(&GameSetState),
+                             reinterpret_cast<void*>(g_gameSetState));
+        g_guardN = 0;
+    }
 }

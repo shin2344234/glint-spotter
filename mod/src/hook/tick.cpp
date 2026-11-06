@@ -403,6 +403,10 @@ namespace
     gs::saveslot::Id g_pendingFull;
     gs::saveslot::Id g_pendingPeek;
     bool g_everSawLoad = false;
+    // When g_pendingFull was set, so a load the restore never acted on can be
+    // named in the log instead of passing in silence.
+    uint32_t g_pendingFullMs = 0;
+    bool g_pendingFullSaid = false;
 
     // What the file watch caught. A write is unambiguous, since the game only
     // writes the save being played, so that one is acted on where it lands.
@@ -426,6 +430,9 @@ namespace
                     GS_LOG_OK("[save] the game read the whole of %s, so it is loading it", text);
                     g_pendingFull = ev[i].id;
                     g_everSawLoad = true;
+                    g_pendingFullMs = GetTickCount();
+                    if (!g_pendingFullMs) g_pendingFullMs = 1;
+                    g_pendingFullSaid = false;
                 }
                 else
                 {
@@ -460,9 +467,33 @@ namespace
         const uint32_t nowLook = GetTickCount();
         if (lookedMs && nowLook - lookedMs < 2000) return;
         lookedMs = nowLook;
-        if (!gs::player::Read().valid) return;
+        // A save read through a minute ago that nothing has acted on. Each
+        // early return below is a different reason, and before this build
+        // every one of them was silent, so a load that brought no pins back
+        // left nothing in the log to say why.
+        const bool loadWaiting = g_pendingFull.ok() && !g_pendingFullSaid &&
+                                 nowLook - g_pendingFullMs > 60000;
+        if (!gs::player::Read().valid)
+        {
+            if (loadWaiting)
+            {
+                g_pendingFullSaid = true;
+                GS_LOG("[pins] a save was read a minute ago and the player still does not read, so the "
+                       "pins have not been put back yet");
+            }
+            return;
+        }
         const uintptr_t sub = gs::pinmodel::Submodule();
-        if (!sub) return;
+        if (!sub)
+        {
+            if (loadWaiting)
+            {
+                g_pendingFullSaid = true;
+                GS_LOG("[pins] a save was read a minute ago and the game's marker copy is not found, so "
+                       "the pins have nowhere to go back to yet");
+            }
+            return;
+        }
 
         // A load builds a new player, so the actor moving is a world being
         // built, and unlike the map's icons it moves once. The first signal
@@ -499,12 +530,33 @@ namespace
             mine = gs::realpin::MineInList();
             lost = live > 0 && mine >= 0 && mine < live;
         }
-        if (!fresh && !lost && !pending) return;
+        if (!fresh && !lost && !pending)
+        {
+            if (loadWaiting)
+            {
+                g_pendingFullSaid = true;
+                GS_LOG("[pins] a save was read a minute ago and the mod has not seen a world built since: "
+                       "the player actor and the marker copy are where they were, and %d of the mod's "
+                       "%d pin(s) on the map still have records. So nothing was put back. If the map "
+                       "has no pins, this is the case to report.", mine, live);
+            }
+            return;
+        }
 
         // Twenty seconds between restores, so that whatever the cause, one bad
         // reading cannot put a second copy of every pin on the map.
         const uint32_t now = GetTickCount();
-        if (lastMs && now - lastMs < 20000) return;
+        static uint32_t waitSaidFor = 0;
+        if (lastMs && now - lastMs < 20000)
+        {
+            if (waitSaidFor != lastMs)
+            {
+                waitSaidFor = lastMs;
+                GS_LOG("[pins] a world was built %.1f s after the last restore; the pins go back once "
+                       "twenty seconds have passed", (now - lastMs) / 1000.0f);
+            }
+            return;
+        }
         lastMs = now;
         seen = sub;
         pending = false;
@@ -553,10 +605,24 @@ namespace
         g_armed.clear();
         gs::mapicon::ForgetAll();
         g_pendingN = 0;
-        if (!gs::Settings::Get().keepPins) return;
+        if (!gs::Settings::Get().keepPins)
+        {
+            GS_LOG("[pins] KeepPins=0, so nothing from the file goes back on the map");
+            return;
+        }
         gs::pinstore::Saved saved[256];
         const int n = gs::pinstore::All(saved, 256);
-        if (n == 0) return;
+        if (n == 0)
+        {
+            const int other = gs::pinstore::Elsewhere();
+            if (!chosen.ok() && !g_everSawLoad)
+                GS_LOG("[pins] the save watch has not seen any save read this session, so the mod "
+                       "cannot tell which save this is; it has no pins in hand%s",
+                       other ? ", and the file's pins stay with the saves they belong to" : "");
+            else
+                GS_LOG("[pins] nothing to put back for this save%s", other ? " (see above)" : "");
+            return;
+        }
         for (int i = 0; i < n; ++i) QueuePin(saved[i].x, saved[i].y, saved[i].z, saved[i].label);
         GS_LOG_OK("[pins] %s; %d pin(s) from the file are queued and go on as soon as the map has "
                   "been opened once", fresh ? "a world" : "the world was rebuilt", n);
@@ -1824,14 +1890,26 @@ extern "C" void gs_OnMinimapTick(void* self)
                     // the line, and the floor threw it away. Pointed twenty
                     // degrees or more below level, the crosshair is on the
                     // ground near you and near is what is meant.
-                    const float pressReach = gs::Settings::Get().pressReach;
+                    //
+                    // PressKinds=1 is for players who want a press to mark
+                    // what the flash would. AsunaKaoru pressed at her feet on
+                    // 4 November and got a copper vein, then at the sea and
+                    // got a level chunk record kilometres out. With it on the
+                    // Kinds line applies, level chunks are refused, and a
+                    // PressReach of zero borrows Reach, the flash's ceiling.
+                    const gs::Settings::Values& cfg = gs::Settings::Get();
+                    float pressReach = cfg.pressReach;
+                    if (pressReach <= 0.0f && cfg.pressKinds && cfg.reach > 0.0f) pressReach = cfg.reach;
                     const float pressNear = sv.fy / flen < -0.36f ? 5.0f : 25.0f;
+                    if (cfg.pressKinds)
+                        GS_LOG("[mark] PressKinds=1: only what the Kinds line names, out to %.0f m",
+                               pressReach > 0.0f ? pressReach : 0.0f);
                     const int sn = gs::lgso::OnBearing(pp.x, pp.z, sv.ox, sv.oy, sv.oz,
                                                        sv.fx / flen, sv.fz / flen, sv.fy / flen,
-                                                       gs::Settings::Get().rodMetres, 0.0f, 25.0f,
+                                                       cfg.rodMetres, 0.0f, 25.0f,
                                                        pressNear,
                                                        pressReach > 0.0f ? pressReach : 1.0e9f,
-                                                       sight, sightDist, 4, true);
+                                                       sight, sightDist, 4, !cfg.pressKinds);
 
                     // And, whatever the rod said, the eight things closest to
                     // the sight line. Five apertures have been tried without

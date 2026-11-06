@@ -160,6 +160,13 @@ namespace gs::Settings
         // as the right bearing.
         float pressReach = 0.0f;
 
+        // Whether a press honours Kinds. Off: a press marks whatever lies on
+        // the sight line, which is how it has worked since session
+        // seventy-two. On: the Kinds line applies, level chunk records are
+        // refused, and a PressReach of zero borrows Reach. AsunaKaoru asked
+        // on 4 November after a press at the sea pinned a chunk far out.
+        bool pressKinds = false;
+
         // Eight metres, and this one is arithmetic rather than another guess.
         //
         // The things I was missing sat between three hundred and
@@ -270,6 +277,24 @@ namespace gs::Settings
         // the spy captured sixty times over. Doing what vanilla does puts the
         // marker on the screen you are already looking at.
         bool rumble = true;
+
+        // Whether the game's own writes to the pad's motors are held up to the
+        // buzz while one is on. The game calls XInputSetState itself, and on
+        // builds from 3527 its writes between the mod's left AsunaKaoru with
+        // no buzz at all. On, because the buzz is the point. The switch is
+        // for a protector or overlay that objects to the import entries
+        // changing.
+        bool padGuard = true;
+
+        // A sound when a pin lands, for a keyboard player or a pad with no
+        // motors. Off by default, since a sound nobody asked for in the middle
+        // of the game's own audio is worse than none. GalaxyGamerLIVE asked
+        // for it on 4 November. The game's own notice and sounds are not
+        // reachable yet, so this is Windows playing a file: soundFile when it
+        // names one, a path from bin64 where the plugin sits or a full one, or the
+        // system's Asterisk sound when it is empty.
+        bool sound = false;
+        char soundFile[240] = "";
 
         // Whether a DualSense or DualShock 4 is read straight off HID. On by
         // default, because the alternative is Steam Input, and Steam Input

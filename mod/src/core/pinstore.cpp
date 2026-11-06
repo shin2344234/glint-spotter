@@ -179,6 +179,44 @@ namespace
         return g_groups.size() - 1;
     }
 
+    // Pins in every group but the one in hand.
+    int PinsElsewhere()
+    {
+        int n = 0;
+        for (size_t i = 0; i < g_groups.size(); ++i)
+            if (i != g_cur) n += static_cast<int>(g_groups[i].pins.size());
+        return n;
+    }
+
+    // When the save in hand has no pins and the file has some under other
+    // saves, which is what a pin file that "still has the pins" but a map
+    // without them looks like. GearedToDeath's report on 6 November, bug
+    // 1167082, was that: pins in GlintSpotter.pins, none on the map after a
+    // load, and the log could not say which save the mod thought it was in.
+    void LogElsewhere(const char* why)
+    {
+        const int other = PinsElsewhere();
+        if (!other || !g_groups[g_cur].pins.empty()) return;
+        GS_LOG("[pins] %s, so none go back on the map. The file holds %d pin(s) under other saves:",
+               why, other);
+        int listed = 0;
+        for (size_t i = 0; i < g_groups.size() && listed < 8; ++i)
+        {
+            const Group& g = g_groups[i];
+            if (i == g_cur || g.pins.empty()) continue;
+            ++listed;
+            char slots[96]{};
+            size_t w = 0;
+            for (size_t k = 0; k < g.slots.size() && w + 16 < sizeof(slots); ++k)
+                w += static_cast<size_t>(sprintf_s(slots + w, sizeof(slots) - w, "%sslot%d",
+                                                   k ? ", " : "", g.slots[k].slot));
+            GS_LOG("[pins]   group [%u], %u pin(s), saves %s", static_cast<unsigned>(i + 1),
+                   static_cast<unsigned>(g.pins.size()), w ? slots : "none yet");
+        }
+        GS_LOG("[pins] If one of those is the save you loaded, the game opened a different slot than "
+               "the one the mod saw last. The [save] lines above say which file it read.");
+    }
+
     void Bind(size_t group, const Slot& s)
     {
         const size_t was = Owner(s);
@@ -287,8 +325,10 @@ namespace gs::pinstore
         {
             g_cur = owner;
             g_groups[g_cur].touched = ++g_clock;
-            GS_LOG_OK("[pins] this save has %u pin(s) of its own",
-                      static_cast<unsigned>(g_groups[g_cur].pins.size()));
+            GS_LOG_OK("[pins] slot%d has %u pin(s) of its own, in group [%u]", slot,
+                      static_cast<unsigned>(g_groups[g_cur].pins.size()),
+                      static_cast<unsigned>(g_cur + 1));
+            LogElsewhere("this save's group has no pins");
             return;
         }
 
@@ -305,7 +345,10 @@ namespace gs::pinstore
             GS_LOG_OK("[pins] a save the mod has not seen before; the %u pin(s) in hand belong to "
                       "it from now on", static_cast<unsigned>(adopted));
         else
-            GS_LOG_OK("[pins] a save the mod has not seen before, starting with no pins");
+        {
+            GS_LOG_OK("[pins] slot%d is a save the mod has not seen before, starting with no pins", slot);
+            LogElsewhere("the mod has never seen this save written or read while it had pins");
+        }
     }
 
     void SavedTo(uint32_t account, int32_t slot)
@@ -335,6 +378,15 @@ namespace gs::pinstore
         g_cur = Mint();
         GS_LOG("[pins] a world with no save read in front of it, so this is a new game; it starts "
                "with no pins and takes them along when it is first saved");
+        LogElsewhere("the save watch saw no save file read before this world, so the mod took it for "
+                     "a new game");
+    }
+
+    int Elsewhere()
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        Cur();
+        return PinsElsewhere();
     }
 
     void Add(float x, float y, float z, const char* label)

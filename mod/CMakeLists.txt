@@ -48,6 +48,7 @@ add_library(GlintSpotter SHARED
     src/game/savemap.cpp
     src/hook/thunk.asm
     src/hook/pad.cpp
+    src/hook/chime.cpp
     src/hook/hidpad.cpp
     src/hook/hidpad_parse.cpp
     src/core/settings.cpp

@@ -64,6 +64,40 @@
           "help": "Buzzes the controller when a pin lands. The map is rarely open at that moment, so this is usually the only thing that tells you it worked.",
           "order": 4
         },
+        "PadGuard": {
+          "label": "Keep the buzz from being cut short",
+          "type": "bool",
+          "true": "1",
+          "false": "0",
+          "group": "Marking",
+          "default": "1",
+          "help": [
+            "Keeps the game's own writes to the controller's motors from cutting a buzz short.",
+            "Turn it off if the game or an overlay misbehaves with it on."
+          ],
+          "order": 28
+        },
+        "Sound": {
+          "label": "Play a sound on a pin",
+          "type": "bool",
+          "true": "1",
+          "false": "0",
+          "group": "Marking",
+          "default": "0",
+          "help": "Plays a sound when a pin lands, for keyboard play or alongside the buzz.",
+          "order": 29
+        },
+        "SoundFile": {
+          "label": "Pin sound file",
+          "type": "string",
+          "group": "Marking",
+          "default": "",
+          "help": [
+            "The .wav to play when Sound is on, either a full path or a file name in bin64 beside the plugin.",
+            "Left empty, it is the Windows Asterisk sound."
+          ],
+          "order": 30
+        },
         "DirectPad": {
           "label": "Read PlayStation pads directly",
           "type": "bool",
@@ -190,10 +224,23 @@
           "max": 20000.0,
           "unit": "m",
           "help": [
-            "How far out a press will look, in metres. Zero means no limit.",
+            "How far out a press will look, in metres. Zero means no limit, or Reach when PressKinds is on.",
             "A nonzero value below 50 is rejected and the previous number is kept."
           ],
           "order": 13
+        },
+        "PressKinds": {
+          "label": "Press marks only the Kinds list",
+          "type": "bool",
+          "true": "1",
+          "false": "0",
+          "group": "Aiming",
+          "default": "0",
+          "help": [
+            "Off lets the key and the controller chord mark anything on the sight line: a bridge, a camp, an ore vein, a patch of sea.",
+            "On makes them mark only what the Kinds line names, the same as Blinding Flash, out to Reach."
+          ],
+          "order": 31
         },
         "AutoCone": {
           "label": "Automatic marker cone",

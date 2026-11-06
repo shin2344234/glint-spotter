@@ -53,4 +53,8 @@ namespace gs::pad
     void Pump();
 
     bool Connected();
+
+    // Put the game's XInputSetState import entries back, unless the process is
+    // going away anyway.
+    void Stop(bool processTerminating);
 }

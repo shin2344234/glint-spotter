@@ -167,6 +167,15 @@ namespace
         fputs("; moment, so this is usually the only thing that tells you it worked.\n", f);
         fputs("Rumble=1\n", f);
         fputs("\n", f);
+        fputs("; 1 keeps the game's own writes to the pad's motors from cutting a buzz short.\n", f);
+        fputs("; 0 if the game or an overlay misbehaves with it on.\n", f);
+        fputs("PadGuard=1\n", f);
+        fputs("\n", f);
+        fputs("; 1 plays a sound when a pin lands. SoundFile names a .wav, either a full path\n", f);
+        fputs("; or one from this folder. Left empty, it is the Windows Asterisk sound.\n", f);
+        fputs("Sound=0\n", f);
+        fputs("SoundFile=\n", f);
+        fputs("\n", f);
         fputs("; 1 reads a DualSense or DualShock 4 directly, so the chord and the buzz work\n", f);
         fputs("; without Steam Input, and the game keeps its PlayStation button pictures.\n", f);
         fputs("; 0 leaves those pads to Steam Input or DS4Windows. Xbox pads are unaffected.\n", f);
@@ -213,8 +222,14 @@ namespace
         fputs("; number to put here.\n", f);
         fputs("Rod=8.0\n", f);
         fputs("\n", f);
-        fputs("; How far out a press looks, in metres. Zero means no limit.\n", f);
+        fputs("; How far out a press looks, in metres. Zero means no limit, or Reach when\n", f);
+        fputs("; PressKinds is 1.\n", f);
         fputs("PressReach=0\n", f);
+        fputs("\n", f);
+        fputs("; 0 lets the key and the pad chord mark anything on the sight line: a bridge,\n", f);
+        fputs("; a camp, an ore vein, a patch of sea. 1 makes them mark only what the Kinds\n", f);
+        fputs("; line below names, the same as Blinding Flash, out to Reach.\n", f);
+        fputs("PressKinds=0\n", f);
         fputs("\n", f);
         fputs("; The automatic marker's cone, in degrees. Wider than a press on purpose:\n", f);
         fputs("; nobody aims carefully during a flash, and a miss there is a glint lost.\n", f);
@@ -280,12 +295,15 @@ namespace
         {"Sweep", &Values::sweep},
         {"RayFallback", &Values::rayFallback},
         {"Rumble", &Values::rumble},
+        {"PadGuard", &Values::padGuard},
         {"DirectPad", &Values::directPad},
         {"RealMarkers", &Values::realMarkers},
         {"KeepPins", &Values::keepPins},
         {"Teleporters", &Values::teleporters},
         {"ClearTaken", &Values::clearTaken},
         {"MiniPin", &Values::miniPin},
+        {"PressKinds", &Values::pressKinds},
+        {"Sound", &Values::sound},
     };
     struct Number { const char* key; float Values::* member; float lo, hi; bool zeroIsOff; const char* kept; };
     const Number kNumbers[] = {
@@ -379,6 +397,10 @@ namespace gs::Settings
             {
                 strncpy_s(g_values.kinds, sizeof(g_values.kinds), val, _TRUNCATE);
             }
+            else if (_stricmp(key, "SoundFile") == 0)
+            {
+                strncpy_s(g_values.soundFile, sizeof(g_values.soundFile), val, _TRUNCATE);
+            }
             else if (_stricmp(key, "Chord") == 0)
             {
                 const uint16_t bits = ChordBits(val);
@@ -455,6 +477,9 @@ namespace gs::Settings
         GS_LOG("settings: Mark=%s", g_values.mark);
         GS_LOG("settings: ClearTaken=%d, ClearNear=%.0f metres%s, Teleporters=%d", g_values.clearTaken ? 1 : 0,
                g_values.clearNear, g_values.clearNear > 0.0f ? "" : " (off)", g_values.teleporters ? 1 : 0);
+        GS_LOG("settings: PressKinds=%d, Rumble=%d, PadGuard=%d, Sound=%d%s%s", g_values.pressKinds ? 1 : 0,
+               g_values.rumble ? 1 : 0, g_values.padGuard ? 1 : 0, g_values.sound ? 1 : 0,
+               g_values.soundFile[0] ? ", SoundFile=" : "", g_values.soundFile);
         return g_values;
     }
 

@@ -29,7 +29,8 @@ before you install it.
   bridges, dungeon mouths, shops. Anything the game keeps in its own level data,
   which is most things worth walking to.
 - **Buzzes the controller when a pin lands**, because the map is not open at that
-  moment and there is nothing else to tell you.
+  moment and there is nothing else to tell you. `Sound=1` in the ini plays a
+  sound as well, the Windows Asterisk sound or any .wav named in `SoundFile`.
 - **Removes a pin with the map's own button.** Put the cursor on one and the
   prompt changes to Remove Marker, the same as for a marker you placed by hand.
   Press it and the pin goes.
@@ -91,7 +92,9 @@ Switch Pro and other pads still need Steam Input.
 Everything else is in `GlintSpotter.ini` beside the plugin, and every key has a
 comment saying what it does. The two worth knowing are `Rod`, which is how
 precisely a press has to be aimed, and `Kinds`, which is what Blinding Flash
-is willing to mark. `Teleporters=0` stops it marking abyss ruins.
+is willing to mark. A press marks anything on the sight line, ore veins and
+patches of sea included, and `PressKinds=1` holds it to the `Kinds` list too.
+`Teleporters=0` stops it marking abyss ruins.
 
 ## Limitations
 
@@ -119,8 +122,8 @@ Read these before you decide whether the build is for you.
   table that your sight line passes near, and if what you are pointing at is not
   in that table, something behind it might be. The log names what it took and
   what else was close.
-- **No on-screen message.** The buzz is the only feedback. The game's own popup
-  system has not been found yet.
+- **No on-screen message.** The buzz, and the sound when `Sound=1`, are the only
+  feedback. The game's own popup system has not been found yet.
 
 ## Reporting a problem
 

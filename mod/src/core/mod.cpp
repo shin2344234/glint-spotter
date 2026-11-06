@@ -26,6 +26,7 @@
 #include "game/camera.h"
 #include "game/physics.h"
 #include "hook/pad.h"
+#include "hook/chime.h"
 #include "hook/hidpad.h"
 #include "hook/tick.h"
 #include "hook/watch.h"
@@ -1126,6 +1127,7 @@ namespace
                 // Whatever the ini's Chord names, held for Hold milliseconds.
                 if (gs::pad::ChordHeld(g_chord, g_chordHold, 0)) OnTrigger("the pad chord");
                 gs::pad::Pump();
+                gs::chime::Pump();
             }
             // The entity set, off the game's thread. Twice a second is plenty:
             // an entity stays in the set twelve seconds after it was last seen.
@@ -1786,6 +1788,7 @@ namespace gs::Mod
         if (!processTerminating && g_slotThread) WaitForSingleObject(g_slotThread, 1000);
         if (g_slotThread) { CloseHandle(g_slotThread); g_slotThread = nullptr; }
         gs::hidpad::Stop(processTerminating);
+        gs::pad::Stop(processTerminating);
         gs::savemap::Stop(processTerminating);
         // The vtable slots go back only when the process is staying up. On
         // teardown the game is leaving anyway, and a write to its memory from

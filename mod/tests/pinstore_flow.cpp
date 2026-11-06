@@ -51,6 +51,18 @@ namespace
     }
 
     void Mark(float x) { gs::pinstore::Add(x, 0.0f, 0.0f, "pin"); }
+
+    void ExpectElsewhere(const char* what, int want)
+    {
+        const int n = gs::pinstore::Elsewhere();
+        if (n == want)
+        {
+            printf("ok    %-56s %d elsewhere\n", what, n);
+            return;
+        }
+        ++failures;
+        printf("FAIL  %-56s wanted %d elsewhere, got %d\n", what, want, n);
+    }
 }
 
 int main()
@@ -97,6 +109,13 @@ int main()
     Expect("loading slot0 gives the one that took it", 1);
     gs::pinstore::Loaded(kAcct, 3);
     Expect("slot3 still has its own", 2);
+
+    printf("\n-- a load of a slot the mod never saw, the 1167082 case --\n");
+    gs::pinstore::Loaded(kAcct, 7);
+    Expect("slot7 starts with none of its own", 0);
+    ExpectElsewhere("and the log can say how many sit under other saves", 3);
+    gs::pinstore::Loaded(kAcct, 3);
+    ExpectElsewhere("from slot3, the others are slot0's one", 1);
 
     printf("\n-- a new game --\n");
     gs::pinstore::NewGame();

@@ -70,4 +70,9 @@ namespace gs::pinstore
     // Copy out the pins for the save being played. Returns how many.
     int All(Saved* out, int n);
     int Count();
+
+    // Pins written down under every save but the one being played. A load
+    // that brings back nothing while this is above zero is the case the log
+    // has to explain.
+    int Elsewhere();
 }
