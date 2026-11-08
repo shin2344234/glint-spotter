@@ -1,5 +1,5 @@
 @echo off
-rem Glint Spotter tests. Six of them, all compiling real source files rather
+rem Glint Spotter tests. Seven of them, all compiling real source files rather
 rem than copies, with the log and the settings stubbed out.
 rem
 rem   parse_paths     the save-path parser, against the paths the game was
@@ -14,6 +14,8 @@ rem   stale_actors    the entity set reading components a load has freed, which
 rem                   is where 16 September's access violations came from
 rem   player_body     the position when Damiane or Oongka is played, whose body
 rem                   is not the player actor, from AsunaKaoru's 2 November bug
+rem   save_queue      the save opens the title screen queues up, which lost the
+rem                   one naming the save when the queue filled
 rem
 rem Run it by full quoted path from PowerShell; the space in the repo path
 rem breaks a bare "cmd /c run.bat". Anything it builds lands in build\.
@@ -31,7 +33,7 @@ if not exist "%OUT%" mkdir "%OUT%"
 pushd "%OUT%"
 
 set FAILED=0
-for %%T in (parse_paths pinstore_flow flash_flag pad_reports stale_actors player_body) do (
+for %%T in (parse_paths pinstore_flow flash_flag pad_reports stale_actors player_body save_queue) do (
   rem The last build's exe is deleted first. Left in place, a test that no
   rem longer compiled ran its old self and the run printed all of them passing.
   if exist "%OUT%\%%T.exe" del "%OUT%\%%T.exe"
@@ -55,5 +57,5 @@ if "!FAILED!"=="1" (
   exit /b 1
 )
 echo.
-echo all six pass
+echo all seven pass
 endlocal

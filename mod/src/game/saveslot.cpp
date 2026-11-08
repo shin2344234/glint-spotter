@@ -29,7 +29,7 @@ namespace
     std::mutex g_mutex;
     gs::saveslot::Event g_queue[kQueue];
     int g_queued = 0;
-    bool g_dropped = false;
+    int g_dropped = 0;
 
     // Save files with a handle open, and how much of each has been read. Small
     // and fixed: only save.save goes in, and an entry leaves as soon as it has
@@ -133,9 +133,29 @@ namespace
     }
 
     // Called with the lock held.
+    //
+    // Nothing drains this until the first world tick, so every look the game
+    // takes from the title screen on sits here until then. This machine puts
+    // 27 in for one launch with 14 slots: a pass over them all, a second pass,
+    // and last of all the one being loaded. More slots, or a few more trips
+    // through the load menu, and it fills. It used to refuse whatever came
+    // once it was full, and what comes last is the only open the slot choice
+    // goes by, so the world was filed under whichever slot the menu looked at
+    // last. Pins in the file, none on the map, and a clean launch afterward.
+    // A full queue lets go of its oldest plain open now. Saves and full reads
+    // stay, because each of those says something an open does not.
     void PushLocked(const gs::saveslot::Id& id, bool write, bool full)
     {
-        if (g_queued >= kQueue) { g_dropped = true; return; }
+        if (g_queued >= kQueue)
+        {
+            ++g_dropped;
+            int oldest = -1;
+            for (int i = 0; i < g_queued && oldest < 0; ++i)
+                if (!g_queue[i].write && !g_queue[i].full) oldest = i;
+            if (oldest < 0) return;
+            for (int i = oldest + 1; i < g_queued; ++i) g_queue[i - 1] = g_queue[i];
+            --g_queued;
+        }
         g_queue[g_queued].id = id;
         g_queue[g_queued].write = write;
         g_queue[g_queued].full = full;
@@ -343,11 +363,11 @@ namespace gs::saveslot
     {
         Expire();
         int got = 0;
-        bool dropped = false;
+        int dropped = 0;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
             dropped = g_dropped;
-            g_dropped = false;
+            g_dropped = 0;
             for (; got < g_queued && got < n; ++got) out[got] = g_queue[got];
             // What did not fit stays, in order. The first build cleared the
             // queue whatever it had handed over, and the game opening eight
@@ -360,7 +380,8 @@ namespace gs::saveslot
         // the log's, so holding both at once in one order here and the other
         // order there is the shape a deadlock comes in.
         if (dropped)
-            GS_LOG_ERR("[save] more save opens arrived than the queue holds; one was missed");
+            GS_LOG("[save] the queue filled before anything read it, so the oldest %d save open(s) "
+                   "were let go and the newest kept", dropped);
         return got;
     }
 
