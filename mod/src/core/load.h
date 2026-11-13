@@ -39,6 +39,7 @@ namespace gs::load
         kSaveLive,               // the loaded gimmicks' live state and pickups
         kSavePublish,            // the taken set and the state map
         kTableLoad,              // the glint table's count and read
+        kClearDecide,            // which pins are done, for the tick to take off
         kSiteCount
     };
 

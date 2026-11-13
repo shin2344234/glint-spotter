@@ -1156,6 +1156,10 @@ namespace
                 // answering, which after a load is the whole problem.
                 { gs::load::Timer t(gs::load::kRecover); gs::player::Recover(); }
             }
+            // Which pins are done, decided here and taken off on the tick. It
+            // ran on the tick through 1.1.40 and cost the game 3 to 6 ms a
+            // second at times, mostly in reading the player.
+            { gs::load::Timer t(gs::load::kClearDecide); gs::tick::DecideClears(now); }
             // The live watch, when the ini asks for it: armed once the player
             // is found, so the entity set can name what each call is about,
             // and again every three seconds for threads started since.

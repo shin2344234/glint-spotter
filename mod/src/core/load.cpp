@@ -38,7 +38,7 @@ namespace
         "the pick up hook",
         "the entity set", "  walking the pools", "finding the player again", "the pad and the chord",
         "reading the save records", "the live state and pickups", "the taken set and state map",
-        "the glint table",
+        "the glint table", "deciding which pins are done",
     };
 
     // VirtualQuery calls by thread, so the report says whose they are.

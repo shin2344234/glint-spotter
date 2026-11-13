@@ -17,6 +17,7 @@
 #include "core/log.h"
 #include "core/pinstore.h"
 #include "game/actors.h"
+#include "game/clearcheck.h"
 #include "game/lgso.h"
 #include "game/pickup.h"
 #include "game/player.h"
@@ -92,9 +93,10 @@ namespace
     // changing its vector, must not hand the glint back for that second.
     std::unordered_set<uintptr_t> g_taken;
     // Where each of them stands, so a pin can ask whether the thing under it
-    // has gone without knowing which placement it was.
-    struct Spot { float x, y, z; };
-    std::vector<Spot> g_takenAt;
+    // has gone without knowing which placement it was. On a grid, because the
+    // set can grow toward the 45,604 placements the 2.05.00 table holds and a
+    // pin asks about nine cells, not every one of them.
+    gs::clearcheck::SpotGrid g_takenAt;
     // Placement address -> the saved states on it, and -> the live state of
     // the loaded gimmick standing on it, both for the log. Under g_mutex.
     std::unordered_map<uintptr_t, std::string> g_saveStates;
@@ -303,7 +305,7 @@ namespace
     void Take(int place)
     {
         const gs::lgso::Place& q = g_places[place];
-        if (g_taken.insert(q.at).second) g_takenAt.push_back({q.x, q.y, q.z});
+        if (g_taken.insert(q.at).second) g_takenAt.Add(q.x, q.y, q.z);
     }
 
     void Publish(const std::vector<Rec>& recs, const std::vector<int>& live)
@@ -328,7 +330,7 @@ namespace
         if (g_takenComp != g_lastComp || g_takenGen != g_placesGen)
         {
             g_taken.clear();
-            g_takenAt.clear();
+            g_takenAt.Clear();
             g_takenComp = g_lastComp;
             g_takenGen = g_placesGen;
         }
@@ -888,7 +890,7 @@ namespace
                     {
                         std::lock_guard<std::mutex> lock(g_mutex);
                         g_taken.clear();
-                        g_takenAt.clear();
+                        g_takenAt.Clear();
                     }
                     if (Say())
                     {
@@ -1006,12 +1008,7 @@ namespace gs::savemap
     bool TakenNear(float x, float y, float z)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        for (const Spot& s : g_takenAt)
-        {
-            const float ex = s.x - x, ez = s.z - z;
-            if (std::fabs(s.y - y) <= kJoinHeight && ex * ex + ez * ez <= kJoinMetres * kJoinMetres) return true;
-        }
-        return false;
+        return g_takenAt.Near(x, y, z, kJoinMetres, kJoinHeight);
     }
 
     int TakenCount()

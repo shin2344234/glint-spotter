@@ -585,6 +585,27 @@ namespace gs::mapicon
         return got;
     }
 
+    bool PinById(int64_t keyId, LivePin* out)
+    {
+        const int total = g_placedN.load();
+        for (int i = 0; i < total && i < kMaxPins; ++i)
+        {
+            const Placed& p = g_placed[i];
+            if (p.gone || p.id != keyId) continue;
+            if (out)
+            {
+                out->id = p.id;
+                out->x = p.x; out->y = p.y; out->z = p.z;
+                memcpy(out->label, p.label, sizeof(out->label));
+                out->label[sizeof(out->label) - 1] = 0;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    int MaxPins() { return kMaxPins; }
+
     void Remember(float x, float y, float z, const char* label, int64_t keyId)
     {
         const int i = g_placedN.load();

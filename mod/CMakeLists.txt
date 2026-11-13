@@ -47,6 +47,7 @@ add_library(GlintSpotter SHARED
     src/hook/tick.cpp
     src/hook/watch.cpp
     src/game/savemap.cpp
+    src/game/clearcheck.cpp
     src/hook/thunk.asm
     src/hook/pad.cpp
     src/hook/chime.cpp

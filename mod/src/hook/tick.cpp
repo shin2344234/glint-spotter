@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <atomic>
+#include <mutex>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -17,6 +18,7 @@
 #include "game/mapicon.h"
 #include "game/player.h"
 #include "game/aim.h"
+#include "game/clearcheck.h"
 #include "game/nearest.h"
 #include "game/actors.h"
 #include "game/lgso.h"
@@ -457,11 +459,22 @@ namespace
         }
     }
 
-    // A key or chord pin the player has been well away from, by its key. Only
-    // an armed pin comes off for being walked up to, so one dropped beside him
-    // stays until he has left and come back. Keys belong to the world that
-    // issued them, so a new world starts the map empty.
-    std::unordered_map<int64_t, bool> g_armed;
+    // Pins the key thread has found done, waiting for the tick to take them
+    // off. Each carries the world it was decided in; keys belong to the world
+    // that issued them, so a new world drops the queue and the key thread's
+    // armed set along with it.
+    std::mutex g_clearMutex;
+    std::vector<gs::clearcheck::Done> g_clearQueue;
+    std::vector<uint32_t> g_clearQueueGen;
+    std::atomic<uint32_t> g_worldGen{1};
+
+    void NewWorldForClears()
+    {
+        g_worldGen.fetch_add(1);
+        std::lock_guard<std::mutex> lock(g_clearMutex);
+        g_clearQueue.clear();
+        g_clearQueueGen.clear();
+    }
 
     void RestoreOnNewWorld()
     {
@@ -615,7 +628,7 @@ namespace
         if (oldN) GS_LOG("[pins] %d old pin(s) taken off first", oldN);
         // Entity ids belong to the world that issued them.
         ForgetMarked();
-        g_armed.clear();
+        NewWorldForClears();
         gs::mapicon::ForgetAll();
         g_pendingN = 0;
         if (!gs::Settings::Get().keepPins)
@@ -1650,7 +1663,6 @@ namespace
         gs::pinstore::Drop(gx, gz);
         QueryPerformanceCounter(&t[3]);
         SettleAt(gx, gz);
-        g_armed.erase(p.id);
         QueryPerformanceCounter(&t[4]);
         auto ms = [&](int i) { return 1000.0 * static_cast<double>(t[i + 1].QuadPart - t[i].QuadPart) /
                                       static_cast<double>(f.QuadPart); };
@@ -1658,49 +1670,78 @@ namespace
                   "the pins file %.2f, settle %.2f", p.label, p.x, p.y, p.z, why, ms(0), ms(1), ms(2), ms(3));
     }
 
-    // Once a second, the pins that have done their job come off. A Glint pin
-    // is the automatic marker's, and it goes when the save reader has the
-    // placement under it as taken, which covers a pickup the moment the loaded
-    // gimmick's state changes. Any other label is a pin from the key or the
-    // chord, and it goes when the player walks up to it.
-    constexpr float kArmMetres = 10.0f;
-    uint32_t g_clearLastMs = 0;
-
-    void AutoClear(uint32_t now)
+    // The pins the key thread found done come off here, on the thread that
+    // owns icons. Nothing is read from the game and no lock but the queue's is
+    // taken: the queue is tried, never waited on, and a busy one is left for
+    // the next pulse. Each pin is looked up again by key, so one the player
+    // removed or the map replaced since the decision stays where it is.
+    void ApplyClears()
     {
-        const gs::Settings::Values& s = gs::Settings::Get();
-        if (!s.clearTaken && s.clearNear <= 0.0f) return;
-        if (now - g_clearLastMs < 1000) return;
-        g_clearLastMs = now;
-        const gs::player::Pos pp = gs::player::Read();
-        // Near the origin is the loading placeholder, not the player.
-        if (!pp.valid || pp.x * pp.x + pp.z * pp.z < 100.0f * 100.0f) return;
-        gs::mapicon::LivePin pins[256];
-        const int n = gs::mapicon::LivePins(pins, 256);
-        for (int i = 0; i < n; ++i)
+        static std::vector<gs::clearcheck::Done> todo;
+        static std::vector<uint32_t> todoGen;
         {
-            const gs::mapicon::LivePin& p = pins[i];
-            if (strcmp(p.label, "Glint") == 0)
-            {
-                if (s.clearTaken &&
-                    (gs::savemap::TakenNear(p.x, p.y, p.z) || gs::pinstore::TakenNear(p.x, p.y, p.z)))
-                    RemoveOwnPin(p, "the save has what it marked as taken");
-                continue;
-            }
-            if (s.clearNear <= 0.0f) continue;
-            const float dx = p.x - pp.x, dz = p.z - pp.z;
-            const float d = std::sqrt(dx * dx + dz * dz);
-            bool& armed = g_armed[p.id];
-            if (d > s.clearNear + kArmMetres)
-                armed = true;
-            else if (armed && d <= s.clearNear)
-            {
-                char why[64];
-                _snprintf_s(why, sizeof(why), _TRUNCATE, "you are %.0f metres from it", d);
-                RemoveOwnPin(p, why);
-            }
+            std::unique_lock<std::mutex> lock(g_clearMutex, std::try_to_lock);
+            if (!lock.owns_lock() || g_clearQueue.empty()) return;
+            todo.swap(g_clearQueue);
+            todoGen.swap(g_clearQueueGen);
         }
+        const uint32_t gen = g_worldGen.load();
+        for (size_t i = 0; i < todo.size(); ++i)
+        {
+            const gs::clearcheck::Pin& d = todo[i].pin;
+            gs::mapicon::LivePin p;
+            if (todoGen[i] != gen || !gs::mapicon::PinById(d.id, &p)) continue;
+            const float dx = p.x - d.x, dz = p.z - d.z;
+            if (dx * dx + dz * dz > 0.5f * 0.5f) continue;
+            RemoveOwnPin(p, todo[i].why);
+        }
+        todo.clear();
+        todoGen.clear();
     }
+
+    // A site on the game's thread that ran slow. Every one is counted; a line
+    // goes out at most every 500 ms, and once a minute a summary says how many
+    // there were, the worst, and how many had no line of their own.
+    struct SlowSite
+    {
+        const char* what;
+        double limitMs;
+        uint32_t windowMs = 0, lastLineMs = 0;
+        uint32_t count = 0, unlogged = 0;
+        double worst = 0.0;
+        uint64_t total = 0;
+
+        // True when this one should get its line.
+        bool Note(double ms, uint32_t now)
+        {
+            if (!windowMs) windowMs = now ? now : 1;
+            if (ms <= limitMs) return false;
+            ++count;
+            ++total;
+            if (ms > worst) worst = ms;
+            if (lastLineMs && now - lastLineMs < 500)
+            {
+                ++unlogged;
+                return false;
+            }
+            lastLineMs = now ? now : 1;
+            return true;
+        }
+
+        void Summary(uint32_t now)
+        {
+            if (!windowMs || now - windowMs < 60000) return;
+            if (count)
+                GS_LOG_ERR("[load] %s ran over %.0f ms %u time(s) in the last %u s, the worst %.1f ms; %u of them "
+                           "had no line of their own, and %llu this session", what, limitMs, count,
+                           (now - windowMs) / 1000, worst, unlogged, static_cast<unsigned long long>(total));
+            windowMs = now ? now : 1;
+            count = unlogged = 0;
+            worst = 0.0;
+        }
+    };
+    SlowSite g_slowAuto{"the automatic marker", 15.0};
+    SlowSite g_slowClear{"taking done pins off", 3.0};
 
     // Slot 35 on the world map root, the same per-frame update the minimap
     // carries. Plain C++ rather than the assembler thunk the minimap uses:
@@ -1758,11 +1799,10 @@ extern "C" void gs_OnMinimapTick(void* self)
             { Timer t(kPulseAuto); AutoMark(GetTickCount()); }
             // A slow one says which part. The 23 September 12:48 report had
             // one pass at 74.5 ms while its timed parts were all under 3.
-            static int slowAutoLeft = 20;
             const double total = LastMs(kPulseAuto);
-            if (total > 15.0 && slowAutoLeft > 0)
+            const uint32_t nowMs = GetTickCount();
+            if (g_slowAuto.Note(total, nowMs))
             {
-                --slowAutoLeft;
                 const double parts = LastMs(kAutoRay) + LastMs(kAutoSet) + LastMs(kAutoTable) + LastMs(kAutoAim) +
                                      LastMs(kPlacePin);
                 GS_LOG_ERR("[load] the automatic marker took %.1f ms: view ray %.2f, entity set %.2f, glint table "
@@ -1770,21 +1810,20 @@ extern "C" void gs_OnMinimapTick(void* self)
                            total, LastMs(kAutoRay), LastMs(kAutoSet), LastMs(kAutoTable), LastMs(kAutoAim),
                            LastMs(kPlacePin), total - parts);
             }
+            g_slowAuto.Summary(nowMs);
         }
         {
             gs::load::Timer t(gs::load::kPulseClear);
             LARGE_INTEGER a, b, f;
             QueryPerformanceCounter(&a);
-            AutoClear(GetTickCount());
+            ApplyClears();
             QueryPerformanceCounter(&b);
             QueryPerformanceFrequency(&f);
             const double ms = 1000.0 * static_cast<double>(b.QuadPart - a.QuadPart) / static_cast<double>(f.QuadPart);
-            static int slowLeft = 20;
-            if (ms > 3.0 && slowLeft > 0)
-            {
-                --slowLeft;
-                GS_LOG_ERR("[clear] the pin check took %.1f ms on the game's thread", ms);
-            }
+            const uint32_t nowMs = GetTickCount();
+            if (g_slowClear.Note(ms, nowMs))
+                GS_LOG_ERR("[clear] taking done pins off took %.1f ms on the game's thread", ms);
+            g_slowClear.Summary(nowMs);
         }
 
         // The camera object moves; the probe follows it.
@@ -2314,4 +2353,68 @@ namespace gs::tick
     }
 
     void RequestMark() { g_markPending.store(true); }
+
+    void DecideClears(uint32_t nowMs)
+    {
+        // The armed set lives on this thread only. A new world on the tick
+        // bumps the generation, and that empties it here.
+        static std::unordered_map<int64_t, bool> armed;
+        static uint32_t armedGen = 0, lastMs = 0;
+        static std::vector<gs::mapicon::LivePin> live;
+        static std::vector<gs::clearcheck::Pin> pins;
+        static std::vector<gs::clearcheck::Done> done;
+        if (lastMs && nowMs - lastMs < 1000) return;
+        lastMs = nowMs ? nowMs : 1;
+
+        const uint32_t gen = g_worldGen.load();
+        if (gen != armedGen)
+        {
+            armed.clear();
+            armedGen = gen;
+        }
+        const gs::Settings::Values& s = gs::Settings::Get();
+        if (!s.clearTaken && s.clearNear <= 0.0f) return;
+        const gs::player::Pos pp = gs::player::Read();
+        // Near the origin is the loading placeholder, not the player.
+        if (!pp.valid || pp.x * pp.x + pp.z * pp.z < 100.0f * 100.0f) return;
+
+        // Every pin the map list holds. Through 1.1.40 the check copied 256,
+        // so pins placed past that were never taken off.
+        const int cap = gs::mapicon::MaxPins();
+        if (static_cast<int>(live.size()) < cap) live.resize(static_cast<size_t>(cap));
+        const int n = gs::mapicon::LivePins(live.data(), cap);
+        pins.resize(static_cast<size_t>(n));
+        for (int i = 0; i < n; ++i)
+        {
+            pins[i].id = live[i].id;
+            pins[i].x = live[i].x; pins[i].y = live[i].y; pins[i].z = live[i].z;
+            memcpy(pins[i].label, live[i].label, sizeof(pins[i].label));
+            pins[i].label[sizeof(pins[i].label) - 1] = 0;
+        }
+        done.resize(static_cast<size_t>(n > 0 ? n : 1));
+        gs::clearcheck::Inputs in;
+        in.clearTaken = s.clearTaken;
+        in.clearNear = s.clearNear;
+        in.px = pp.x;
+        in.pz = pp.z;
+        auto taken = [](float x, float y, float z) {
+            return gs::savemap::TakenNear(x, y, z) || gs::pinstore::TakenNear(x, y, z);
+        };
+        const int got = gs::clearcheck::Decide(pins.data(), n, in, taken, armed, done.data(), n);
+        if (!got) return;
+
+        std::lock_guard<std::mutex> lock(g_clearMutex);
+        // A world rebuilt while this ran has none of these pins.
+        if (g_worldGen.load() != gen) return;
+        for (int i = 0; i < got; ++i)
+        {
+            // Asked about again next second until the tick has taken it off.
+            bool queued = false;
+            for (const auto& q : g_clearQueue)
+                if (q.pin.id == done[i].pin.id) { queued = true; break; }
+            if (queued) continue;
+            g_clearQueue.push_back(done[i]);
+            g_clearQueueGen.push_back(gen);
+        }
+    }
 }

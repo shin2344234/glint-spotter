@@ -123,6 +123,10 @@ namespace gs::mapicon
     // Read on the game's UI thread, the one that places and forgets them.
     struct LivePin { int64_t id; float x, y, z; char label[16]; };
     int LivePins(LivePin* out, int n);
+    // The one placed pin with this key, if it is still on the map.
+    bool PinById(int64_t keyId, LivePin* out);
+    // How many pins the mod can track between two loads.
+    int MaxPins();
 
     // A world has been rebuilt, so nothing the mod drew is on the map any
     // more and none of its keys mean anything. Start again.

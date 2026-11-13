@@ -49,4 +49,10 @@ namespace gs::tick
 
     // Ask the tick to place a pin on its next run, on the game's thread.
     void RequestMark();
+
+    // Once a second, from the key thread: work out which of the mod's pins
+    // are done (a Glint pin whose placement the save has as taken, or a key
+    // or chord pin the player has walked back up to) and queue them for the
+    // tick to take off. Paced here, so calling it more often is harmless.
+    void DecideClears(uint32_t nowMs);
 }
