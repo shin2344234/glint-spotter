@@ -9,7 +9,7 @@ all and press a button, and it pins that instead. The pin lands on the world
 map where the thing stands, so you can walk away and come back to it, and the
 map's own Remove Marker takes it off again when you are done.
 
-An ASI plugin for Crimson Desert, game version 2.04.08, exe 1.0.0.3576, the 6 November patch. Read the limitations
+An ASI plugin for Crimson Desert, game version 2.05.00, exe 1.0.0.3663, the 13 November patch. Read the limitations
 before you install it.
 
 ## What it does
@@ -163,10 +163,12 @@ behind a paid tier.
 
 ## Compatibility
 
-Built against Crimson Desert executable 1.0.0.3576, game version 2.04.08, the 6 November patch. A
+Built against Crimson Desert executable 1.0.0.3663, game version 2.05.00, the 13 November patch. A
 game patch moves the addresses it reads, and the mod checks each one against the
 running game before touching it, so a patched game gets a mod that does nothing
-rather than a crash.
+rather than a crash. Since 1.1.40 it also finds the level gimmick table, the
+flash check and the game's marker calls again at startup when a patch has moved
+them, and the log says which ones it had to look for.
 
 It runs alongside other ASI plugins, including Crimson Route and Master Looter.
 It only ever replaces vtable slots it has verified, and it forwards to whatever
