@@ -10,6 +10,7 @@
 #include "game/pinmodel.h"
 #include "game/actors.h"
 #include "game/player.h"
+#include "game/locate.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
 #include "game/typescan.h"
@@ -89,8 +90,8 @@ namespace
         if (!Base()) return false;
         __try
         {
-            const auto* create = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinCreate);
-            const auto* remove = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinServerRemove);
+            const auto* create = reinterpret_cast<const uint8_t*>(g_base + gs::locate::PinCreate());
+            const auto* remove = reinterpret_cast<const uint8_t*>(g_base + gs::locate::PinServerRemove());
             if (!gs::rtti::Readable(create, sizeof(gs::sig::kPinCreatePrologue))) return false;
             if (!gs::rtti::Readable(remove, sizeof(gs::sig::kPinRemovePrologue))) return false;
             // The map's marker-added handler used to be checked here as well.
@@ -109,8 +110,8 @@ namespace
             GS_LOG_ERR("[real] the marker calls at +0x%llX and +0x%llX do not start with the bytes this "
                        "build was written against, so the game has been patched. Pins stay drawn and "
                        "undeletable until the addresses are found again.",
-                       static_cast<unsigned long long>(gs::sig::kPinCreate),
-                       static_cast<unsigned long long>(gs::sig::kPinServerRemove));
+                       static_cast<unsigned long long>(gs::locate::PinCreate()),
+                       static_cast<unsigned long long>(gs::locate::PinServerRemove()));
         else
             GS_LOG_OK("[real] the game's own marker calls are where this build expects them");
         return g_bytesOk;
@@ -176,9 +177,11 @@ namespace
     bool OnlineFlag(bool* out)
     {
         if (!Base()) return false;
+        const uintptr_t flag = gs::locate::PinOnlineFlag();
+        if (!flag) return false;
         __try
         {
-            const auto* p = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinOnlineFlag);
+            const auto* p = reinterpret_cast<const uint8_t*>(g_base + flag);
             if (!gs::rtti::Readable(p, 1)) return false;
             *out = *p != 0;
             return true;
@@ -208,7 +211,7 @@ namespace
         if (!client) return false;
         __try
         {
-            const auto* code = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinUpsert);
+            const auto* code = reinterpret_cast<const uint8_t*>(g_base + gs::locate::PinUpsert());
             if (!gs::rtti::Readable(code, sizeof(gs::sig::kPinUpsertPrologue))) return false;
             if (memcmp(code, gs::sig::kPinUpsertPrologue,
                        sizeof(gs::sig::kPinUpsertPrologue)) != 0)
@@ -236,7 +239,7 @@ namespace
         struct { const void* ptr; int32_t count; int32_t pad; } desc{record, 1, 0};
         int32_t err = -1;
 
-        const auto fn = reinterpret_cast<UpsertFn>(g_base + gs::sig::kPinUpsert);
+        const auto fn = reinterpret_cast<UpsertFn>(g_base + gs::locate::PinUpsert());
         __try
         {
             fn(reinterpret_cast<void*>(client), &err, 0, &desc);
@@ -373,11 +376,11 @@ namespace gs::realpin
         // off the disassembly and both nothing but register spills and pushes,
         // so they mean the same thing wherever they are copied to.
         const bool a = gs::inlinehook::Install(
-            g_createHook, g_base + gs::sig::kPinCreate, 15,
+            g_createHook, g_base + gs::locate::PinCreate(), 15,
             reinterpret_cast<void*>(&DetourCreate),
             gs::sig::kPinCreatePrologue, sizeof(gs::sig::kPinCreatePrologue));
         const bool b = gs::inlinehook::Install(
-            g_removeHook, g_base + gs::sig::kPinServerRemove, 14,
+            g_removeHook, g_base + gs::locate::PinServerRemove(), 14,
             reinterpret_cast<void*>(&DetourRemove),
             gs::sig::kPinRemovePrologue, sizeof(gs::sig::kPinRemovePrologue));
         GS_LOG(a && b
@@ -494,7 +497,7 @@ namespace gs::realpin
         if (!client || !g_base) return false;
         __try
         {
-            const auto* code = reinterpret_cast<const uint8_t*>(g_base + gs::sig::kPinRemove);
+            const auto* code = reinterpret_cast<const uint8_t*>(g_base + gs::locate::PinRemove());
             if (!gs::rtti::Readable(code, sizeof(gs::sig::kPinRemovePrologue2))) return false;
             if (memcmp(code, gs::sig::kPinRemovePrologue2,
                        sizeof(gs::sig::kPinRemovePrologue2)) != 0)
@@ -510,7 +513,7 @@ namespace gs::realpin
 
         int32_t err = -1;
         int64_t want = id;
-        const auto fn = reinterpret_cast<EraseFn>(g_base + gs::sig::kPinRemove);
+        const auto fn = reinterpret_cast<EraseFn>(g_base + gs::locate::PinRemove());
         __try
         {
             fn(reinterpret_cast<void*>(client), &err, &want, 0);

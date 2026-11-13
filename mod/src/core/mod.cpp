@@ -14,6 +14,7 @@
 #include "core/settings.h"
 #include "core/pinstore.h"
 #include "game/saveslot.h"
+#include "game/locate.h"
 #include "game/alert.h"
 #include "game/mapicon.h"
 #include "game/realpin.h"
@@ -195,11 +196,11 @@ namespace
         uintptr_t base = 0;
         size_t size = 0;
         if (!gs::typescan::ModuleRange(base, size)) return;
-        const uintptr_t at = base + gs::sig::kLgsoManagerGlobal;
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(at), 8))
+        const uintptr_t rva = gs::locate::LgsoGlobal();
+        const uintptr_t at = base + rva;
+        if (!rva || !gs::rtti::Readable(reinterpret_cast<const void*>(at), 8))
         {
-            GS_LOG("[lgso] the global at +0x%llX is not readable",
-                   static_cast<unsigned long long>(gs::sig::kLgsoManagerGlobal));
+            GS_LOG("[lgso] the global at +0x%llX is not readable", static_cast<unsigned long long>(rva));
             return;
         }
         const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(at);
@@ -212,15 +213,20 @@ namespace
         const char* cls = gs::rtti::VtableClassName(
             reinterpret_cast<const void*>(*reinterpret_cast<const uintptr_t*>(mgr)));
         const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
-        const uintptr_t recs = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Records);
-        GS_LOG_OK("[lgso] manager 0x%p (%s) via the global, %u record(s), array 0x%p",
+        const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Rows);
+        GS_LOG_OK("[lgso] manager 0x%p (%s) via the global, %u record(s), rows at 0x%p",
                   reinterpret_cast<void*>(mgr), cls ? ShortName(cls) : "?", count,
-                  reinterpret_cast<void*>(recs));
-        if (!count || recs < 0x10000) return;
-        if (!gs::rtti::Readable(reinterpret_cast<const void*>(recs), 8ull * (count < 8 ? count : 8))) return;
+                  reinterpret_cast<void*>(rows));
+        if (!count || count > 100000 || rows < 0x10000) return;
+        if (!gs::rtti::Readable(reinterpret_cast<const void*>(rows),
+                                static_cast<size_t>(count) * gs::sig::kOff_Table_RowStride)) return;
 
         const gs::player::Pos pp = gs::player::Read();
-        const auto* arr = reinterpret_cast<const uintptr_t*>(recs);
+        auto rowRecord = [rows](uint32_t i)
+        {
+            return *reinterpret_cast<const uintptr_t*>(
+                rows + static_cast<uintptr_t>(i) * gs::sig::kOff_Table_RowStride + gs::sig::kOff_Table_RowRecord);
+        };
 
         // The whole table, then the handful nearest the player.
         //
@@ -236,7 +242,7 @@ namespace
         uint32_t total = 0;
         for (uint32_t i = 0; i < count; ++i)
         {
-            const uintptr_t rec = arr[i];
+            const uintptr_t rec = rowRecord(i);
             if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x70)) continue;
             for (uintptr_t off = 0; off + 16 <= 0x70; off += 8)
             {
@@ -281,7 +287,7 @@ namespace
 
         for (uint32_t i = 0; i < count && i < 3; ++i)
         {
-            const uintptr_t rec = arr[i];
+            const uintptr_t rec = rowRecord(i);
             if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x100)) continue;
             char tag[24];
             _snprintf_s(tag, sizeof(tag), _TRUNCATE, "lgso%u", i);
@@ -449,7 +455,7 @@ namespace
         // the lines below one at a time and adding them up is work nobody
         // sending in a log should have to do.
         int sigOk = 0, sigStale = 0, sigMissing = 0;
-        const char* missingNames[4]{};
+        const char* missingNames[8]{};
 
         for (const Expect& e : expected)
         {
@@ -491,7 +497,7 @@ namespace
                 }
                 else
                 {
-                    if (sigMissing < 4) missingNames[sigMissing] = ShortName(e.name);
+                    if (sigMissing < 8) missingNames[sigMissing] = ShortName(e.name);
                     ++sigMissing;
                     GS_LOG_ERR("signatures.h +0x%08llX no longer matches %s and RTTI did not offer it",
                                static_cast<unsigned long long>(e.rva), ShortName(e.name));
@@ -522,11 +528,15 @@ namespace
             }
             else
             {
-                if (sigMissing < 4) missingNames[sigMissing] = "ClientGimmickActorComponent";
+                if (sigMissing < 8) missingNames[sigMissing] = "ClientGimmickActorComponent";
                 ++sigMissing;
                 GS_LOG_ERR("ClientGimmickActorComponent not found by address or RTTI; gimmicks found by name, no glint byte");
             }
         }
+
+        // The two table managers and the marker calls, which were fixed
+        // addresses with no second route until 3663. game/locate.cpp.
+        gs::locate::Report(sigOk, sigStale, sigMissing, missingNames, 8);
 
         // One line saying how the pass went, so a log answers the question it
         // is usually sent in to answer. A stale address RTTI found again is the
@@ -550,7 +560,7 @@ namespace
             // inside the code whose whole job is reporting that something is
             // wrong.
             char names[256]{};
-            for (int i = 0; i < sigMissing && i < 4; ++i)
+            for (int i = 0; i < sigMissing && i < 8; ++i)
             {
                 if (i) strncat_s(names, ", ", _TRUNCATE);
                 strncat_s(names, missingNames[i] ? missingNames[i] : "?", _TRUNCATE);
@@ -1030,11 +1040,16 @@ namespace
         if (!gs::typescan::ModuleRange(base, size)) return;
         uintptr_t mgr = 0;
         uint32_t rows = 0;
-        const auto* at = reinterpret_cast<const void*>(base + gs::sig::kSpecialModeManagerGlobal);
+        const uintptr_t rva = gs::locate::SpecialModeGlobal();
+        if (!rva) return;
+        const auto* at = reinterpret_cast<const void*>(base + rva);
         if (!gs::rtti::Readable(at, 8)) return;
         mgr = *reinterpret_cast<const uintptr_t*>(at);
-        if (mgr < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(mgr + 8), 4)) return;
-        rows = *reinterpret_cast<const uint32_t*>(mgr + 8);
+        // The row count, at +0x28 since 3663's container change; +0x08 holds
+        // the table's name now.
+        if (mgr < 0x10000 ||
+            !gs::rtti::Readable(reinterpret_cast<const void*>(mgr + gs::sig::kOff_Lgso_Count), 4)) return;
+        rows = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
         if (!rows) return;   // not loaded yet
         said = true;
         gs::aim::SetModeTableRows(rows);

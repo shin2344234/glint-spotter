@@ -482,14 +482,29 @@ def lgso_layout(glob):
     for f in funcs:
         ins = dis(f)
         for k, i in enumerate(ins):
+            # imul r, r, imm; or since 3663, where the stride is 0xC0,
+            # lea r, [s + s*k] then shl r, n, which is (k + 1) << n.
             m = re.match(r"(\w+), \w+, (0x[0-9a-f]+)$", i.op_str)
-            if i.mnemonic != "imul" or not m or not 0x80 <= int(m.group(2), 16) < 0x200:
+            if i.mnemonic == "imul" and m:
+                reg, s = m.group(1), int(m.group(2), 16)
+            else:
+                ml = re.match(r"(\w+), \[(\w+) \+ \2\*([248])\]$", i.op_str)
+                if i.mnemonic != "lea" or not ml:
+                    continue
+                reg, s = ml.group(1), None
+                for nxt in ins[k + 1:k + 4]:
+                    ms = re.match(r"%s, (\d+|0x[0-9a-f]+)$" % reg, nxt.op_str)
+                    if nxt.mnemonic == "shl" and ms:
+                        s = (int(ml.group(3)) + 1) << int(ms.group(1), 0)
+                        break
+                if s is None:
+                    continue
+            if not 0x80 <= s < 0x200:
                 continue
-            s = int(m.group(2), 16)
             strides[s] = strides.get(s, 0) + 1
             offs = set()
             for nxt in ins[k:k + 120]:
-                m2 = re.match(r"xmm\d+, dword ptr \[%s \+ (0x[0-9a-f]+)\]$" % m.group(1), nxt.op_str)
+                m2 = re.match(r"xmm\d+, dword ptr \[%s \+ (0x[0-9a-f]+)\]$" % reg, nxt.op_str)
                 if nxt.mnemonic in ("vmovss", "movss") and m2:
                     offs.add(int(m2.group(1), 16))
             triples |= {(s, o) for o in offs if o + 4 in offs and o + 8 in offs}
@@ -497,6 +512,41 @@ def lgso_layout(glob):
         return None, 0, set()
     best = max(strides, key=strides.get)
     return best, strides[best], {o for s, o in triples if s == best}
+
+
+def table_container(glob):
+    """The row count and entry array offsets of a static table, read off the
+    resolver that loads the table from its global, compares the key with the
+    count, loads the entries and indexes them by three (0x18 bytes). 3663
+    gave every table this shape. (count, rows), each None when not seen."""
+    counts, rowsat = {}, {}
+    for p in xrefs(glob):
+        f = func_of(p)
+        if not f:
+            continue
+        body = dis(f[0])
+        at = next((j for j, i in enumerate(body) if i.address - IB <= p < i.address - IB + i.size), None)
+        if at is None:
+            continue
+        ins = body[at:at + 10]
+        if ins[0].mnemonic != "mov":
+            continue
+        reg = ins[0].op_str.split(",")[0]
+        c = r = None
+        for k, i in enumerate(ins[1:8], 1):
+            m = re.match(r"\w+, dword ptr \[%s \+ (0x[0-9a-f]+)\]$" % reg, i.op_str)
+            if i.mnemonic == "cmp" and m and c is None:
+                c = int(m.group(1), 16)
+            m = re.match(r"\w+, qword ptr \[%s \+ (0x[0-9a-f]+)\]$" % reg, i.op_str)
+            if i.mnemonic == "mov" and m and c is not None and k + 1 < len(ins) and \
+                    re.match(r"\w+, \[(\w+) \+ \1\*2\]$", ins[k + 1].op_str):
+                r = int(m.group(1), 16)
+                break
+        if c is not None and r is not None:
+            counts[c] = counts.get(c, 0) + 1
+            rowsat[r] = rowsat.get(r, 0) + 1
+    best = lambda d: max(d, key=d.get) if d else None
+    return best(counts), best(rowsat)
 
 
 def main():
@@ -651,6 +701,15 @@ def main():
                "reflection of _originSpawnTransform nearest it, plus 0x1C", 3)
         report("kOff_Pos", tf + 0x1C if tf is not None else None, rec("kOff_Pos", SAVEMAP),
                "reflection of _transform nearest it, plus 0x1C", 3)
+    for glob, what in ((lgso, "level gimmick"), (rip(first[0]) if first and first[0].mnemonic == "mov" else None,
+                                                  "special mode")):
+        if not glob:
+            continue
+        cnt, rows = table_container(glob)
+        report("kOff_Lgso_Count", cnt, rec("kOff_Lgso_Count"),
+               "the %s resolver's cmp of the key against [table+...]" % what, 3)
+        report("kOff_Lgso_Rows", rows, rec("kOff_Lgso_Rows"),
+               "the %s resolver's load of the 0x18-byte entries" % what, 3)
     if lgso:
         stride, votes, trips = lgso_layout(lgso)
         report("kOff_LgsoData_Stride", stride, rec("kOff_LgsoData_Stride"),

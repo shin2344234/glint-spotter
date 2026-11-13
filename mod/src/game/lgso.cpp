@@ -7,6 +7,7 @@
 
 #include "core/log.h"
 #include "core/settings.h"
+#include "game/locate.h"
 #include "game/rtti.h"
 #include "game/signatures.h"
 #include "game/typescan.h"
@@ -48,13 +49,23 @@ namespace
     gs::lgso::Place g_scratch[kMax];
     int g_tally = -1;                    // the nameless count the table was last read at
 
+    // Row i's record, or 0 for a row the game has not built yet. 3663's
+    // container: 0x18-byte entries at [manager + 0x20], record at +0x08.
+    uintptr_t RowRecord(uintptr_t rows, uint32_t i)
+    {
+        return *reinterpret_cast<const uintptr_t*>(
+            rows + static_cast<uintptr_t>(i) * gs::sig::kOff_Table_RowStride + gs::sig::kOff_Table_RowRecord);
+    }
+
     // The manager, straight from the global its own vtable maintains.
     uintptr_t Manager()
     {
         uintptr_t base = 0;
         size_t size = 0;
         if (!gs::typescan::ModuleRange(base, size)) return 0;
-        const uintptr_t mgr = gs::rtti::Deref(base + gs::sig::kLgsoManagerGlobal);
+        const uintptr_t at = gs::locate::LgsoGlobal();
+        if (!at) return 0;
+        const uintptr_t mgr = gs::rtti::Deref(base + at);
         if (mgr < 0x10000) return 0;
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(mgr), 0x80)) return 0;
         return mgr;
@@ -118,19 +129,24 @@ namespace
     // checks are cached by region: the count runs twice a second until the
     // table settles, and asking VirtualQuery afresh each time cost 45 ms a
     // call and 5 seconds of CPU in the first minute of the 23 September run.
+    uint32_t g_rowsSeen = 0;             // rows in the table at the last read
+    uint32_t g_rowsBuilt = 0;            // of those, how many had a record
+
     int ReadInto(uintptr_t mgr, gs::lgso::Place* out, int cap)
     {
         int n = 0;
+        uint32_t built = 0;
         __try
         {
             const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
-            const uintptr_t recs = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Records);
-            if (!count || count > 100000 || recs < 0x10000) return 0;
-            if (!gs::rtti::ReadableCached(reinterpret_cast<const void*>(recs), 8ull * count)) return 0;
-            const auto* arr = reinterpret_cast<const uintptr_t*>(recs);
+            const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Rows);
+            if (!count || count > 100000 || rows < 0x10000) return 0;
+            if (!gs::rtti::ReadableCached(reinterpret_cast<const void*>(rows),
+                                          static_cast<size_t>(count) * gs::sig::kOff_Table_RowStride)) return 0;
             for (uint32_t i = 0; i < count && n < cap; ++i)
             {
-                const uintptr_t rec = arr[i];
+                const uintptr_t rec = RowRecord(rows, i);
+                if (rec) ++built;
                 // The first list in the record that yields placements, looked
                 // for out to +0x100. 2944 put sixteen records' only list at
                 // +0x90, which the old 0x70 limit never reached: 345
@@ -178,6 +194,11 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
         }
+        if (out)
+        {
+            g_rowsBuilt = built;
+            g_rowsSeen = *reinterpret_cast<const volatile uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
+        }
         return n;
     }
 }
@@ -222,8 +243,9 @@ namespace gs::lgso
             {
                 // A new count is a new table as far as a copy is concerned.
                 ++g_generation;
-                GS_LOG_OK("[lgso] %d placement(s) read from the level gimmick table at 0x%p in %u ms", g_n,
-                          reinterpret_cast<void*>(mgr), took);
+                GS_LOG_OK("[lgso] %d placement(s) read from the level gimmick table at 0x%p in %u ms, "
+                          "%u of its %u rows built", g_n, reinterpret_cast<void*>(mgr), took,
+                          g_rowsBuilt, g_rowsSeen);
                 if (g_n >= kMax)
                     GS_LOG_ERR("[lgso] that is the most this build holds, so the rest of the table is not read");
             }
@@ -439,13 +461,14 @@ namespace gs::lgso
         __try
         {
             const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
-            const uintptr_t recs = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Records);
-            if (!count || recs < 0x10000) return;
-            const auto* arr = reinterpret_cast<const uintptr_t*>(recs);
+            const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Rows);
+            if (!count || count > 100000 || rows < 0x10000) return;
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(rows),
+                                    static_cast<size_t>(count) * gs::sig::kOff_Table_RowStride)) return;
             int shownRecords = 0;
             for (uint32_t i = 0; i < count && shownRecords < maxRecords; ++i)
             {
-                const uintptr_t rec = arr[i];
+                const uintptr_t rec = RowRecord(rows, i);
                 if (rec < 0x10000 || !gs::rtti::Readable(reinterpret_cast<const void*>(rec), 0x70)) continue;
                 for (uintptr_t off = 0; off + 16 <= 0x70; off += 8)
                 {

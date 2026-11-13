@@ -27,6 +27,7 @@ add_library(GlintSpotter SHARED
     src/game/rtti.cpp
     src/game/scan.cpp
     src/game/typescan.cpp
+    src/game/locate.cpp
     src/game/mapicon.cpp
     src/game/alert.cpp
     src/game/pinmodel.cpp
