@@ -35,8 +35,11 @@ namespace
     void CopyString(char* dst, size_t cap, const char* src);
     std::atomic<uint64_t> g_replayCount{0};
 
-    // Every pin this mod placed this session, for the one-per-area rule.
-    constexpr int kMaxPins = 256;
+    // Every pin this mod placed since the last load, for the one-per-area rule.
+    // A full save restores 256, so 256 here left no room for the session's own
+    // marks, and a pin past the end was never remembered: the rule could not
+    // see it and the same glint could be pinned again.
+    constexpr int kMaxPins = 1024;
     struct Placed { float x, y, z; char label[16]; bool gone; int64_t id; };
     Placed g_placed[kMaxPins];
     std::atomic<int> g_placedN{0};
@@ -585,7 +588,13 @@ namespace gs::mapicon
     void Remember(float x, float y, float z, const char* label, int64_t keyId)
     {
         const int i = g_placedN.load();
-        if (i >= kMaxPins) return;
+        if (i >= kMaxPins)
+        {
+            GS_LOG_ERR("[pins] %d pins placed since the last load is as many as the mod tracks; the "
+                       "one at (%.1f, %.1f, %.1f) is on the map but a second mark there is not refused",
+                       kMaxPins, x, y, z);
+            return;
+        }
         g_placed[i].x = x; g_placed[i].y = y; g_placed[i].z = z;
         g_placed[i].gone = false;
         g_placed[i].id = keyId;

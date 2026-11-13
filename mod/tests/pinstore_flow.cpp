@@ -155,6 +155,97 @@ int main()
     gs::pinstore::Drop(2.0f, 0.0f);
     Expect("and the map can still take one off", 2);
 
+    // KarlUrbanJeung's bug 1172040, 12 November: only the first 32 pins came
+    // back at launch, and re-marking a glint past those wrote it twice.
+    printf("\n-- more than 32 pins, and the duplicates bug 1172040 wrote --\n");
+    {
+        wchar_t buf[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, buf, MAX_PATH);
+        std::wstring base(buf);
+        base.resize(base.find_last_of(L'.'));
+        const std::wstring pinsPath = base + L".pins";
+
+        auto writeFile = [&](int pins, int dupes, int slot)
+        {
+            DeleteFileW(pinsPath.c_str());
+            FILE* f = nullptr;
+            _wfopen_s(&f, pinsPath.c_str(), L"w");
+            fprintf(f, "; test\n\n[1]\nsave %u/%d\n", kAcct, slot);
+            for (int i = 0; i < pins; ++i)
+                fprintf(f, "%.3f 540.000 %.3f Glint\n", -9000.0f - 10.0f * i, -4000.0f + 7.0f * i);
+            // The same spots again, the way a re-marked glint was written,
+            // plus one a few millimetres off to stand for rounding.
+            for (int i = 0; i < dupes; ++i)
+                fprintf(f, "%.3f 540.000 %.3f Glint\n", -9000.0f - 10.0f * (pins - 1 - i) + (i == 0 ? 0.004f : 0.0f),
+                        -4000.0f + 7.0f * (pins - 1 - i));
+            fclose(f);
+            gs::pinstore::Load(nullptr);
+        };
+        auto countAll = [&]() {
+            static gs::pinstore::Saved got[gs::pinstore::kMaxPinsPerSave + 64];
+            return gs::pinstore::All(got, gs::pinstore::kMaxPinsPerSave + 64);
+        };
+        auto expectN = [&](const char* what, int want) {
+            const int n = countAll();
+            if (n == want) { printf("ok    %-56s %d pin(s)\n", what, n); return; }
+            ++failures;
+            printf("FAIL  %-56s wanted %d, got %d\n", what, want, n);
+        };
+        auto fileLines = [&]() {
+            FILE* f = nullptr;
+            if (_wfopen_s(&f, pinsPath.c_str(), L"r") != 0 || !f) return -1;
+            int n = 0;
+            char line[256];
+            float x, y, z;
+            while (fgets(line, sizeof(line), f))
+                if (line[0] != ';' && line[0] != '[' && strncmp(line, "save ", 5) != 0 &&
+                    strncmp(line, "taken ", 6) != 0 && sscanf_s(line, "%f %f %f", &x, &y, &z) == 3)
+                    ++n;
+            fclose(f);
+            return n;
+        };
+        auto expectLines = [&](const char* what, int want) {
+            const int n = fileLines();
+            if (n == want) { printf("ok    %-56s %d line(s)\n", what, n); return; }
+            ++failures;
+            printf("FAIL  %-56s wanted %d lines, got %d\n", what, want, n);
+        };
+
+        writeFile(33, 0, 7);
+        gs::pinstore::Loaded(kAcct, 7);
+        expectN("33 pins in the file all read for their save", 33);
+
+        writeFile(200, 0, 7);
+        gs::pinstore::Loaded(kAcct, 7);
+        expectN("200 pins all read", 200);
+
+        writeFile(gs::pinstore::kMaxPinsPerSave, 0, 7);
+        gs::pinstore::Loaded(kAcct, 7);
+        expectN("256, a full save, all read", gs::pinstore::kMaxPinsPerSave);
+
+        writeFile(300, 0, 7);
+        gs::pinstore::Loaded(kAcct, 7);
+        expectN("300 lines stop at the 256 a save keeps", gs::pinstore::kMaxPinsPerSave);
+
+        writeFile(40, 9, 7);
+        expectLines("a file with 9 duplicates is written back without them", 40);
+        gs::pinstore::Loaded(kAcct, 7);
+        expectN("40 pins and 9 duplicate lines read as 40", 40);
+
+        // Re-marking one of them, the way the automatic marker did once the
+        // restore had dropped it, keeps one line for it.
+        gs::pinstore::Add(-9000.0f - 10.0f * 35, 540.0f, -4000.0f + 7.0f * 35, "Glint");
+        expectN("marking a pinned glint again adds nothing", 40);
+        expectLines("and writes no second line", 40);
+        gs::pinstore::Add(-9000.0f - 10.0f * 35, 560.0f, -4000.0f + 7.0f * 35, "Glint");
+        expectN("one 20 m above it is a different pin", 41);
+        gs::pinstore::Add(5.0f, 540.0f, 5.0f, "Glint");
+        expectN("and a new spot is added as before", 42);
+        Reload();
+        gs::pinstore::Loaded(kAcct, 7);
+        expectN("all 42 back after a relaunch", 42);
+    }
+
     printf("\n%s\n", failures ? "SOMETHING FAILED" : "all cases pass");
     return failures ? 1 : 0;
 }

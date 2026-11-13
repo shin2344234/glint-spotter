@@ -199,8 +199,12 @@ namespace
     // once. Session twenty-two placed a pin on what the sweep offered
     // instead, a registry entry, and the game went down. Pins asked for
     // before the spy has seen the real root wait here.
+    // Room for every pin one save keeps, plus as many again marked before the
+    // map is first opened. It held 32 through 1.1.40, and a restore with more
+    // than that dropped the rest without a line in the log: KarlUrbanJeung's
+    // bug 1172040, whose re-marked glints were then written to the file twice.
     struct Pending { float x, y, z; char label[16]; int64_t id; bool haveId; };
-    constexpr int kPendingMax = 32;
+    constexpr int kPendingMax = 2 * gs::pinstore::kMaxPinsPerSave;
     Pending g_pending[kPendingMax];
     int g_pendingN = 0;
 
@@ -365,7 +369,8 @@ namespace
         if (g_pendingN == 0) return;
         void* root = gs::mapicon::LastWorldRoot();
         if (!root) return;
-        GS_LOG("[mark] the world map root exists now; placing %d queued pin(s)", g_pendingN);
+        const int queued = g_pendingN;
+        GS_LOG("[mark] the world map root exists now; placing %d queued pin(s)", queued);
         // What will not place stays queued. The queue used to be emptied
         // whatever happened, so a root the map had thrown away between the
         // queueing and the flush lost those pins with nothing left to say so.
@@ -374,8 +379,11 @@ namespace
         {
             if (PlacePin(root, g_pending[i].x, g_pending[i].y, g_pending[i].z, g_pending[i].label))
                 continue;
+            GS_LOG("[mark]   queued pin %d of %d at (%.1f, %.1f, %.1f) %s did not go on; it stays queued",
+                   i + 1, queued, g_pending[i].x, g_pending[i].y, g_pending[i].z, g_pending[i].label);
             g_pending[kept++] = g_pending[i];
         }
+        GS_LOG_OK("[mark] %d of %d queued pin(s) went on the map", queued - kept, queued);
         if (kept)
             GS_LOG_ERR("[mark] %d queued pin(s) would not go on the map and are still waiting",
                        kept);
@@ -384,7 +392,12 @@ namespace
 
     bool QueuePin(float x, float y, float z, const char* label)
     {
-        if (g_pendingN >= kPendingMax) return false;
+        if (g_pendingN >= kPendingMax)
+        {
+            GS_LOG_ERR("[pins] the restore queue is full at %d; (%.1f, %.1f, %.1f) %s is held back",
+                       kPendingMax, x, y, z, label);
+            return false;
+        }
         Pending& p = g_pending[g_pendingN++];
         p.x = x; p.y = y; p.z = z;
         strncpy_s(p.label, sizeof(p.label), label, _TRUNCATE);
@@ -610,8 +623,9 @@ namespace
             GS_LOG("[pins] KeepPins=0, so nothing from the file goes back on the map");
             return;
         }
-        gs::pinstore::Saved saved[256];
-        const int n = gs::pinstore::All(saved, 256);
+        gs::pinstore::Saved saved[gs::pinstore::kMaxPinsPerSave];
+        const int n = gs::pinstore::All(saved, gs::pinstore::kMaxPinsPerSave);
+        const int inFile = gs::pinstore::Count();
         if (n == 0)
         {
             const int other = gs::pinstore::Elsewhere();
@@ -623,9 +637,21 @@ namespace
                 GS_LOG("[pins] nothing to put back for this save%s", other ? " (see above)" : "");
             return;
         }
-        for (int i = 0; i < n; ++i) QueuePin(saved[i].x, saved[i].y, saved[i].z, saved[i].label);
-        GS_LOG_OK("[pins] %s; %d pin(s) from the file are queued and go on as soon as the map has "
-                  "been opened once", fresh ? "a world" : "the world was rebuilt", n);
+        int queued = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            if (!QueuePin(saved[i].x, saved[i].y, saved[i].z, saved[i].label)) continue;
+            ++queued;
+            GS_LOG("[pins]   %d of %d: (%.1f, %.1f, %.1f) %s", queued, n, saved[i].x, saved[i].y,
+                   saved[i].z, saved[i].label);
+        }
+        GS_LOG_OK("[pins] %s; %d of the %d pin(s) this save has in the file are queued and go on as "
+                  "soon as the map has been opened once", fresh ? "a world" : "the world was rebuilt",
+                  queued, inFile);
+        if (queued < inFile)
+            GS_LOG_ERR("[pins] %d pin(s) held back: %d did not fit the restore queue and %d were past "
+                       "the %d one save keeps", inFile - queued, n - queued, inFile - n,
+                       gs::pinstore::kMaxPinsPerSave);
     }
 
     // True when a pin was placed or queued, false when nothing came of it. The

@@ -13,7 +13,7 @@
 
 namespace
 {
-    constexpr int kMaxPins = 256;     // per save
+    constexpr int kMaxPins = gs::pinstore::kMaxPinsPerSave;
     constexpr size_t kMaxGroups = 32; // saves remembered before the oldest goes
 
     struct Slot
@@ -71,6 +71,19 @@ namespace
             if (dx * dx + dz * dz < 1.0f && std::fabs(t.y - y) < 2.0f) return true;
         }
         return false;
+    }
+
+    // The index of a pin in this list at the same spot, or -1.
+    int SamePin(const std::vector<gs::pinstore::Saved>& list, float x, float y, float z)
+    {
+        const float r = gs::pinstore::kSameSpot;
+        for (size_t i = 0; i < list.size(); ++i)
+        {
+            const float dx = list[i].x - x, dz = list[i].z - z;
+            if (dx * dx + dz * dz < r * r && std::fabs(list[i].y - y) < gs::pinstore::kSameSpotUp)
+                return static_cast<int>(i);
+        }
+        return -1;
     }
 
     bool NearSpot(const std::vector<Group::Spot>& list, float x, float y, float z)
@@ -250,6 +263,8 @@ namespace gs::pinstore
 
         size_t into = 0;   // the group being read, starting with the loose one
         int pins = 0;
+        int merged = 0;    // lines at a spot the group already had
+        int over = 0;      // lines past kMaxPins in their group
         char line[256];
         while (fgets(line, sizeof(line), f))
         {
@@ -277,17 +292,50 @@ namespace gs::pinstore
                 g_groups[into].taken.push_back(t);
                 continue;
             }
-            if (g_groups[into].pins.size() >= static_cast<size_t>(kMaxPins)) continue;
             Saved p{};
             char label[64]{};
             const int n = sscanf_s(line, "%f %f %f %63s", &p.x, &p.y, &p.z, label,
                                    static_cast<unsigned>(sizeof(label)));
             if (n < 3) continue;
             strncpy_s(p.label, sizeof(p.label), n >= 4 ? label : "Pin", _TRUNCATE);
+            // A second line for a spot the group already has is one pin. Bug
+            // 1172040 wrote those: the restore dropped every pin past 32, so
+            // marking one of those glints again found no pin and wrote it twice.
+            const int same = SamePin(g_groups[into].pins, p.x, p.y, p.z);
+            if (same >= 0)
+            {
+                const Saved& was = g_groups[into].pins[static_cast<size_t>(same)];
+                GS_LOG("[pins] group [%u]: (%.3f, %.3f, %.3f) %s is a second line for the pin at "
+                       "(%.3f, %.3f, %.3f) %s; read as one pin",
+                       static_cast<unsigned>(into + 1), p.x, p.y, p.z, p.label, was.x, was.y, was.z,
+                       was.label);
+                ++merged;
+                continue;
+            }
+            if (g_groups[into].pins.size() >= static_cast<size_t>(kMaxPins))
+            {
+                GS_LOG_ERR("[pins] group [%u] already holds %d pins, as many as one save keeps; "
+                           "(%.3f, %.3f, %.3f) %s is not read",
+                           static_cast<unsigned>(into + 1), kMaxPins, p.x, p.y, p.z, p.label);
+                ++over;
+                continue;
+            }
             g_groups[into].pins.push_back(p);
             ++pins;
         }
         fclose(f);
+
+        if (merged)
+        {
+            // Written straight back, so the file says what the mod holds and
+            // the next delete on the map takes the whole pin out of it.
+            Write();
+            GS_LOG_OK("[pins] %d duplicate line(s) in the file were the same pin twice; the file is "
+                      "written again with one line per pin", merged);
+        }
+        if (over)
+            GS_LOG_ERR("[pins] %d pin line(s) were past the %d a save keeps and are not read. They "
+                       "stay out of the file from the next write.", over, kMaxPins);
 
         // Start in a group that belongs to no save, so a pin dropped before
         // the game has loaded anything has somewhere to go, and so the pins
@@ -389,16 +437,25 @@ namespace gs::pinstore
         return PinsElsewhere();
     }
 
-    void Add(float x, float y, float z, const char* label)
+    bool Add(float x, float y, float z, const char* label)
     {
-        if (!gs::Settings::Get().keepPins) return;
+        if (!gs::Settings::Get().keepPins) return false;
         std::lock_guard<std::mutex> lock(g_mutex);
         Group& g = Cur();
+        const int same = SamePin(g.pins, x, y, z);
+        if (same >= 0)
+        {
+            const Saved& was = g.pins[static_cast<size_t>(same)];
+            GS_LOG("[pins] (%.3f, %.3f, %.3f) is already written down for this save as (%.3f, %.3f, "
+                   "%.3f) %s, so the file keeps one line for it",
+                   x, y, z, was.x, was.y, was.z, was.label);
+            return true;
+        }
         if (g.pins.size() >= static_cast<size_t>(kMaxPins))
         {
-            GS_LOG_ERR("[pins] this save already has %d pins written down; this one is not",
-                       kMaxPins);
-            return;
+            GS_LOG_ERR("[pins] this save already has %d pins written down; (%.3f, %.3f, %.3f) is not",
+                       kMaxPins, x, y, z);
+            return false;
         }
         Saved s{};
         s.x = x; s.y = y; s.z = z;
@@ -406,6 +463,7 @@ namespace gs::pinstore
         g.pins.push_back(s);
         g.touched = ++g_clock;
         Write();
+        return true;
     }
 
     void Drop(float x, float z)

@@ -28,6 +28,20 @@
 
 namespace gs::pinstore
 {
+    // Pins one save keeps. The restore queue in tick.cpp is sized from this, so
+    // every pin the file holds for a save can go back on the map. Through 1.1.40
+    // that queue held 32 and dropped the rest without a word, which was
+    // KarlUrbanJeung's bug 1172040 on 12 November.
+    constexpr int kMaxPinsPerSave = 256;
+
+    // Two pins closer than this across, and within kSameSpotUp up or down, are
+    // the same pin. Marking a glint again gives its table position to the
+    // millimetre, so the duplicates bug 1172040 wrote sit at exactly the same
+    // place; half a metre leaves room for rounding in the file and none for two
+    // real pins, which the map keeps four metres apart anyway.
+    constexpr float kSameSpot = 0.5f;
+    constexpr float kSameSpotUp = 2.0f;
+
     struct Saved
     {
         float x = 0, y = 0, z = 0;
@@ -48,8 +62,10 @@ namespace gs::pinstore
     // Pins from here belong to nothing until the first save is written.
     void NewGame();
 
-    // Remember a new pin and write the file. Ignored when the list is full.
-    void Add(float x, float y, float z, const char* label);
+    // Remember a new pin and write the file. Ignored when the list is full, and
+    // when this save already has a pin at the same spot, which is logged.
+    // Returns true when the pin is in the file afterwards, either way.
+    bool Add(float x, float y, float z, const char* label);
 
     // Forget the pin nearest (x, z) within a couple of metres, and write the
     // file. Called when the map removes one.
