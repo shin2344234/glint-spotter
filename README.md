@@ -35,8 +35,8 @@ before you install it.
   prompt changes to Remove Marker, the same as for a marker you placed by hand.
   Press it and the pin goes.
 - **Pins a glint behind a hill.** The flash draws glints through terrain, so a
-  glint you can see is one you can mark. Where the game has collision loaded,
-  the log says when ground rises across the sight line.
+  glint you can see is one you can mark. With `Verbose=1`, and where the game
+  has collision loaded, the log says when ground rises across the sight line.
 
 ## Installing
 

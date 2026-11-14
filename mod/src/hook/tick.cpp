@@ -901,6 +901,7 @@ namespace
     int g_losLogsLeft = 20;
     uint32_t g_losLastMs = 0;
     bool g_losSkipSaid = false;
+    bool g_pressLosSkipSaid = false;
     uint32_t g_dupLastMs = 0;
     uint32_t g_quietLastMs = 0;
     int g_lastGlintN = -1;
@@ -2037,6 +2038,21 @@ extern "C" void gs_OnMinimapTick(void* self)
                         have = true;
                         how = "the game's own level gimmick table";
                         _snprintf_s(markLabel, sizeof(markLabel), _TRUNCATE, "%.0fm", sightDist[0]);
+                        // Verbose only since 14 November, the same as the
+                        // automatic marker's check. It is twenty-four rays
+                        // on the game's thread for one log line, and nothing
+                        // acts on it. In the 14 November 1.1.40 log the one
+                        // press of the session took 23.25 ms on the tick.
+                        if (!gs::Settings::Get().verbose)
+                        {
+                            if (!g_pressLosSkipSaid)
+                            {
+                                g_pressLosSkipSaid = true;
+                                GS_LOG("[mark] the ground check on a press is skipped, since it only ever went "
+                                       "in the log and ran on the game's thread; Verbose=1 runs it again");
+                            }
+                        }
+                        else
                         {
                             const float eye[3] = {sv.ox, sv.oy, sv.oz};
                             const float tgt[3] = {tx, ty, tz};
