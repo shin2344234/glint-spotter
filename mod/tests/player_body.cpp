@@ -19,7 +19,7 @@
 
 namespace
 {
-    int g_secondLines = 0, g_againLines = 0;
+    int g_secondLines = 0, g_againLines = 0, g_riderLines = 0, g_offLines = 0;
 }
 namespace gs::Log
 {
@@ -29,6 +29,8 @@ namespace gs::Log
         if (!fmt) return;
         if (strstr(fmt, "a second character is being played")) ++g_secondLines;
         if (strstr(fmt, "again, so positions come from it")) ++g_againLines;
+        if (strstr(fmt, "his world position comes from the copy at")) ++g_riderLines;
+        if (strstr(fmt, "the player is not riding any more")) ++g_offLines;
     }
 }
 namespace gs::typescan
@@ -157,6 +159,20 @@ namespace
             memcpy(tf + 0x29C, w, 12);
             memcpy(tf + 0xB4, l, 12);
         }
+        // On a mount: the seat offset at +0xB4 and +0x29C, the mount's id
+        // and local position, and the three copies further in.
+        void Ride(uint32_t mount, const float* seat, const float* mountLocal,
+                  const float* c324, const float* c3d0, const float* c51c)
+        {
+            *reinterpret_cast<uint32_t*>(tf + 0xC8) = mount;
+            memcpy(tf + 0xB4, seat, 12);
+            memcpy(tf + 0x29C, seat, 12);
+            memcpy(tf + 0xEC, mountLocal, 12);
+            memcpy(tf + 0x324, c324, 12);
+            memcpy(tf + 0x3D0, c3d0, 12);
+            memcpy(tf + 0x51C, c51c, 12);
+        }
+        void GetOff() { *reinterpret_cast<uint32_t*>(tf + 0xC8) = 0xFFFFFFFF; }
         uintptr_t Ptr() const { return reinterpret_cast<uintptr_t>(e); }
     };
 
@@ -337,6 +353,66 @@ int main()
     Sleep(600);
     p = gs::player::Read();
     Expect("the actor, as before", p.valid && Near(p.x, -9200.0f) && Near(p.z, -4200.0f));
+
+    // zpxo0000's report on 7 November, GitHub #9: nothing pinned on the
+    // wyvern or the dragon. The transform below is Flight Freedom's session
+    // thirteen dump of a player on a wyvern, with no camera, so the copies
+    // alone have to say where he is.
+    printf("-- on a wyvern, the seat offset where the world position should be --\n");
+    {
+        const float seat[3] = {0.0f, 0.6f, -1.6f};
+        const float mountLocal[3] = {-922.8f, 664.6f, -565.7f};
+        const float world[3] = {-6922.7f, 665.2f, -564.0f};
+        actor.Ride(0xB010039B, seat, mountLocal, seat, world, world);
+        Sleep(600);
+        p = gs::player::Read();
+        Expect("the position is the copy at +0x3D0, not the seat offset",
+               p.valid && Near(p.x, -6922.7f) && Near(p.y, 665.2f) && Near(p.z, -564.0f));
+        Expect("and getting on is logged once", g_riderLines == 1);
+        for (int i = 0; i < 20; ++i) p = gs::player::Read();
+        Expect("twenty more reads stay on it and log nothing more",
+               p.valid && Near(p.x, -6922.7f) && g_riderLines == 1);
+
+        // Flight Freedom's session four: the world at +0x324 instead.
+        const float world4[3] = {-9877.4f, 664.5f, 259.1f};
+        const float mount4[3] = {-877.4f, 663.9f, 260.6f};
+        const float zero[3] = {0.0f, 0.0f, 0.0f};
+        actor.Ride(0xB010039B, seat, mount4, world4, zero, zero);
+        Sleep(600);
+        p = gs::player::Read();
+        Expect("the copy at +0x324 when that is the live one", p.valid && Near(p.x, -9877.4f) && Near(p.z, 259.1f));
+
+        // A stale copy from somewhere else is refused, and the one that
+        // agrees is taken.
+        const float stale[3] = {-6123.4f, 640.0f, -812.9f};
+        actor.Ride(0xB010039B, seat, mountLocal, stale, stale, world);
+        Sleep(600);
+        p = gs::player::Read();
+        Expect("a copy left behind elsewhere is passed over for the one that agrees",
+               p.valid && Near(p.x, -6922.7f) && Near(p.z, -564.0f));
+
+        // A copy that only repeats local loses to one a whole origin off.
+        const float sameAsLocal[3] = {-922.7f, 665.2f, -564.0f};
+        actor.Ride(0xB010039B, seat, mountLocal, sameAsLocal, world, world);
+        Sleep(600);
+        p = gs::player::Read();
+        Expect("a copy equal to local loses to one whole kilometres off", p.valid && Near(p.x, -6922.7f));
+    }
+
+    printf("-- off the wyvern --\n");
+    actor.GetOff();
+    actor.At(-6925.0f, 664.0f, -560.0f, -6000.0f, 0.0f);
+    Sleep(600);
+    p = gs::player::Read();
+    Expect("the position is +0x29C again", p.valid && Near(p.x, -6925.0f) && Near(p.z, -560.0f));
+    Expect("and getting off is logged", g_offLines == 1);
+
+    printf("-- a world load is not a mount --\n");
+    actor.At(0.0f, 1000.0f, 0.0f, 0.0f, 0.0f);
+    Sleep(600);
+    p = gs::player::Read();
+    Expect("the placeholder stands", p.valid && Near(p.x, 0.0f) && Near(p.y, 1000.0f));
+    Expect("and no rider line is written for it", g_riderLines == 1);
 
     printf("\n%s\n", failures ? "FAILURES" : "all pass");
     return failures ? 1 : 0;

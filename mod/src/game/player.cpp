@@ -31,6 +31,21 @@ namespace
     // Session eighteen: a yaw quaternion (x, y, z, w) sits right before each
     // position, +0xA4 before the local one and +0x28C before the world one.
     constexpr uintptr_t kOff_Tf_WorldQuat  = 0x28C;
+    // A rider's transform is parented to the mount, and on a mounted player
+    // +0x29C then holds the seat offset from the mount, not a world position.
+    // Flight Freedom's session thirteen dump of a player on a wyvern read
+    // (0.0, 0.6, -1.6) at +0xB4, +0x29C and +0x324, the mount's local
+    // (-922.8, 664.6, -565.7) at +0xEC, and the world (-6922.7, 665.2, -564.0)
+    // at +0x3D0 and +0x51C. Its session four had the world at +0x324 instead.
+    // Glint's own session seventy-nine, flying, logged (-0.3, 7.3, 0.2) for
+    // the player. Both are inside the hundred the placeholder rule refuses,
+    // so the automatic marker pinned nothing on a mount. Which copy is live
+    // changes, and Broomy found +0x3D0 and +0x51C can keep an old position,
+    // so a copy is taken only when it sits a whole number of kilometres from
+    // local plus the mount's position, the sub-level origin, give or take
+    // the seat offset that sum leaves unrotated.
+    constexpr uintptr_t kTf_RiderCopies[] = {0x324, 0x3D0, 0x51C};
+    constexpr float kRiderSlack = 25.0f;
     // For the played body when it is not the player actor, Master Looter's
     // signatures.h again: the entity id, the type descriptor whose second
     // byte is the type tag, and the status component's second category byte.
@@ -61,13 +76,54 @@ namespace
         return n ? n : "(no rtti)";
     }
 
+    bool OnPlaceholder(const float* w) { return std::fabs(w[0]) + std::fabs(w[2]) < 100.0f; }
+
+    // The rider's world position out of the transform's copies, read inside
+    // Walk's handler. `local` is local plus the mount's position. A copy a
+    // whole number of kilometres off is taken first; one that equals local
+    // is taken only when none is, because a copy that merely repeats the
+    // sub-level position would put the pin kilometres off wherever the
+    // origin is not zero. Returns the offset taken, or 0.
+    uintptr_t RiderCopy(uintptr_t tf, const float* local, float* world)
+    {
+        uintptr_t same = 0;
+        float sameAt[3]{};
+        for (uintptr_t off : kTf_RiderCopies)
+        {
+            float c[3];
+            memcpy(c, reinterpret_cast<const void*>(tf + off), sizeof(c));
+            if (!std::isfinite(c[0]) || !std::isfinite(c[1]) || !std::isfinite(c[2]) || OnPlaceholder(c))
+                continue;
+            const float kx = std::round((c[0] - local[0]) / 1000.0f);
+            const float kz = std::round((c[2] - local[2]) / 1000.0f);
+            if (std::fabs(c[0] - local[0] - kx * 1000.0f) > kRiderSlack ||
+                std::fabs(c[2] - local[2] - kz * 1000.0f) > kRiderSlack ||
+                std::fabs(c[1] - local[1]) > kRiderSlack)
+                continue;
+            if (kx != 0.0f || kz != 0.0f)
+            {
+                memcpy(world, c, sizeof(c));
+                return off;
+            }
+            if (!same)
+            {
+                same = off;
+                memcpy(sameAt, c, sizeof(c));
+            }
+        }
+        if (same) memcpy(world, sameAt, sizeof(sameAt));
+        return same;
+    }
+
     // The whole walk in one guarded leaf, plain data out.
     // `comp` is the special mode component, which knows the actor at +8. Pass
     // `fromActor` when the actor is already in hand, which is how the mod
     // comes back from a load: the component is not on the player and only the
     // heap sweep ever finds it, but the player himself is in the pools.
+    // `riderOut`, when given, is the copy a rider's world position came from,
+    // 1 for a rider no copy agrees for, and 0 for anyone not riding.
     bool Walk(uintptr_t comp, float* out, float* world, uintptr_t* actorOut, uintptr_t* tfOut,
-              uint32_t* parentOut, bool fromActor = false)
+              uint32_t* parentOut, bool fromActor = false, uintptr_t* riderOut = nullptr)
     {
         __try
         {
@@ -93,6 +149,13 @@ namespace
                 }
             }
             if (!std::isfinite(v[0]) || !std::isfinite(v[1]) || !std::isfinite(v[2])) return false;
+            uintptr_t rider = 0;
+            if (parent != 0xFFFFFFFF && parent != 0 && OnPlaceholder(world) && !OnPlaceholder(v))
+            {
+                rider = RiderCopy(tf, v, world);
+                if (!rider) rider = 1;
+            }
+            if (riderOut) *riderOut = rider;
             out[0] = v[0]; out[1] = v[1]; out[2] = v[2];
             *actorOut = actor;
             *tfOut = tf;
@@ -152,7 +215,51 @@ namespace
 
     // While a world loads every position reads near (0, 1000, 0), and the
     // pinning side refuses anything within a hundred of the origin.
-    bool OnPlaceholder(const float* w) { return std::fabs(w[0]) + std::fabs(w[2]) < 100.0f; }
+    // OnPlaceholder is defined above RiderCopy, which needs it.
+
+    // Every copy on the transform, for the rider lines. Guarded, plain data out.
+    bool RiderDump(uintptr_t tf, float* seat, float* copies)
+    {
+        __try
+        {
+            memcpy(seat, reinterpret_cast<const void*>(tf + kOff_Tf_Pos), 12);
+            for (int i = 0; i < 3; ++i)
+                memcpy(copies + i * 3, reinterpret_cast<const void*>(tf + kTf_RiderCopies[i]), 12);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // Said when the player gets on something or gets off. `skipped` is how
+    // many changes came inside half a second of the last line and were not
+    // written.
+    void SayRider(uintptr_t now, uint32_t parent, uintptr_t tf, const float* v, const float* w, int skipped)
+    {
+        if (skipped > 0)
+            GS_LOG("[player] %d rider change(s) came too close together to write", skipped);
+        float seat[3]{}, c[9]{};
+        const bool dumped = RiderDump(tf, seat, c);
+        if (now > 1)
+            GS_LOG_OK("[player] the player is riding something (parent %08X). His transform holds the seat "
+                      "offset, so his world position comes from the copy at +0x%03llX, (%.1f, %.1f, %.1f), "
+                      "which sits whole kilometres from local plus the mount's position (%.1f, %.1f, %.1f)",
+                      parent, static_cast<unsigned long long>(now), w[0], w[1], w[2], v[0], v[1], v[2]);
+        else if (now == 1)
+            GS_LOG("[player] the player is riding something (parent %08X) and no copy on his transform sits "
+                   "whole kilometres from local plus the mount's position (%.1f, %.1f, %.1f), so the camera "
+                   "decides if it can", parent, v[0], v[1], v[2]);
+        else
+            GS_LOG("[player] the player is not riding any more; world (%.1f, %.1f, %.1f) comes from +0x29C again",
+                   w[0], w[1], w[2]);
+        if (now != 0 && dumped)
+            GS_LOG("[player]   seat +0xB4 (%.1f, %.1f, %.1f), +0x324 (%.1f, %.1f, %.1f), +0x3D0 (%.1f, %.1f, %.1f), "
+                   "+0x51C (%.1f, %.1f, %.1f)%s",
+                   seat[0], seat[1], seat[2], c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8],
+                   std::isfinite(c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6] + c[7] + c[8]) ? "" : " (a copy reads non-finite)");
+    }
 
     // These two run on every entity in the pools, and B0 is every world
     // object, so the handler is the guard and there is no VirtualQuery.
@@ -446,8 +553,9 @@ namespace
             {
                 g_disagreeSaid = true;
                 GS_LOG("[player] the camera puts the played body at (%.1f, %.1f, %.1f), and neither the player "
-                       "actor at (%.1f, %.1f, %.1f) nor any second body agrees; the flash's tail %08X decides",
-                       cam[0], cam[1], cam[2], aw[0], aw[1], aw[2], t1);
+                       "actor at (%.1f, %.1f, %.1f), local (%.1f, %.1f, %.1f), nor any second body agrees; the "
+                       "flash's tail %08X decides",
+                       cam[0], cam[1], cam[2], aw[0], aw[1], aw[2], av[0], av[1], av[2], t1);
             }
         }
         if (pick < 0)
@@ -618,7 +726,8 @@ namespace gs::player
         float v[3]{}, w[7]{};
         uintptr_t actor = 0, tf = 0;
         uint32_t parent = 0;
-        if (!Walk(comp, v, w, &actor, &tf, &parent, fromActor))
+        uintptr_t rider = 0;
+        if (!Walk(comp, v, w, &actor, &tf, &parent, fromActor, &rider))
         {
             if (g_describeLeft > 0)
             {
@@ -656,6 +765,31 @@ namespace gs::player
         const bool worldOk = std::isfinite(w[0]) && std::isfinite(w[1]) && std::isfinite(w[2]) &&
                              std::fabs(w[0]) + std::fabs(w[1]) + std::fabs(w[2]) < 1.0e6f;
         if (!worldOk) return p;
+        {
+            // Getting on, getting off, and a mount no copy agrees for. A
+            // change of copy alone says nothing, and a flip back and forth
+            // inside half a second is counted rather than written.
+            static std::atomic<int> s_riderSaid{0};
+            static std::atomic<uint32_t> s_riderSaidMs{0};
+            static std::atomic<int> s_riderSkipped{0};
+            static std::atomic<int> s_riderSeen{0};
+            const int kind = rider > 1 ? 2 : static_cast<int>(rider);
+            const bool changed = s_riderSeen.exchange(kind) != kind;
+            if (s_riderSaid.load() != kind)
+            {
+                const uint32_t nowMs = GetTickCount();
+                if (nowMs - s_riderSaidMs.load() < 500)
+                {
+                    if (changed) ++s_riderSkipped;
+                }
+                else
+                {
+                    s_riderSaid.store(kind);
+                    s_riderSaidMs.store(nowMs ? nowMs : 1);
+                    SayRider(rider, parent, tf, v, w, s_riderSkipped.exchange(0));
+                }
+            }
+        }
         // The actor, a second character's body, or the actor's local
         // position in the origin the camera names; Choose says which.
         // Everything below except the position stays on the actor.
