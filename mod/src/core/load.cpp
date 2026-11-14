@@ -33,7 +33,7 @@ namespace
         "the tick's quarter second pulse", "  its save events", "  putting pins back", "  queued pins",
         "  dropped pins", "  the automatic marker", "  taking done pins off",
         "    its view ray", "    its bearing over the entity set", "    its bearing over the glint table",
-        "    asking the game's detect system", "placing a pin",
+        "    asking the game's detect system", "placing a pin", "  the game's own icon call",
         "a press answered on the tick", "the world map update", "the icon create spy", "the icon remove spy",
         "the pick up hook",
         "the entity set", "  walking the pools", "finding the player again", "the pad and the chord",

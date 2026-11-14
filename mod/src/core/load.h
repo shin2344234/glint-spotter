@@ -24,6 +24,7 @@ namespace gs::load
         kAutoTable,     //     its bearing over the glint table
         kAutoAim,       //     asking the game's detect system
         kPlacePin,      // one pin placed, wherever it was asked for
+        kGameIcon,      //   the game's own icon maker inside it, which the mod cannot speed up
         kTickMark,      // a key or chord press answered in the minimap tick
         kWorldMap,      // the world map's update while the map is open
         kIconCreate,    // the icon create spy, both surfaces

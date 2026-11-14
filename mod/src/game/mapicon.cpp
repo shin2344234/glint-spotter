@@ -501,11 +501,19 @@ namespace gs::mapicon
                static_cast<unsigned long long>(n), gs::sig::kSlotCreateIcon, worldRoot, static_cast<long long>(key.id),
                static_cast<unsigned>(key.kind), x, y, z, label,
                GetCurrentThreadId());
-        void* r = g_orig[0](worldRoot, &type, &key, &dword4, &float5, pos, label, name,
-                            reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
-                            reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
-                            nullptr, nullptr, nullptr);
-        GS_LOG_OK("[pin #%llu] returned 0x%p", static_cast<unsigned long long>(n), r);
+        // Timed on its own. On 6 November one pin took 16.6 ms and 13 of it
+        // was between the two lines around this call, against 1 ms or less
+        // for every other pin that session. That part is the game's.
+        void* r = nullptr;
+        {
+            gs::load::Timer timed(gs::load::kGameIcon);
+            r = g_orig[0](worldRoot, &type, &key, &dword4, &float5, pos, label, name,
+                          reinterpret_cast<void*>(static_cast<uintptr_t>(0)), struct10,
+                          reinterpret_cast<void*>(static_cast<uintptr_t>(1)),
+                          nullptr, nullptr, nullptr);
+        }
+        GS_LOG_OK("[pin #%llu] returned 0x%p after %.2f ms in the game's own call",
+                  static_cast<unsigned long long>(n), r, gs::load::LastMs(gs::load::kGameIcon));
 
         // Only ever tested for null. On 3392 the dispatcher returns its type
         // row lookup on success where 2976 returned the last call it made, and

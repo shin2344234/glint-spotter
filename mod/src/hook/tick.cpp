@@ -900,6 +900,7 @@ namespace
     int g_pinModelLogsLeft = 6;
     int g_losLogsLeft = 20;
     uint32_t g_losLastMs = 0;
+    bool g_losSkipSaid = false;
     uint32_t g_dupLastMs = 0;
     uint32_t g_quietLastMs = 0;
     int g_lastGlintN = -1;
@@ -1551,6 +1552,21 @@ namespace
             // usually much nearer than the thing itself and so usually inside
             // that box. Sixteen samples is about twenty milliseconds and it
             // happens once per pin, not once per pass.
+            //
+            // Verbose only since 13 November. Nothing acts on the answer, and
+            // it runs on the game's thread: in the 6 November 1.1.40-test1 log
+            // it was 3 ms before an ordinary pin and 12 ms before the one pass
+            // that took 30.9 ms.
+            if (!gs::Settings::Get().verbose)
+            {
+                if (!g_losSkipSaid)
+                {
+                    g_losSkipSaid = true;
+                    GS_LOG("[auto] the ground check before a pin is skipped, since it only ever went in the "
+                           "log and cost the game's thread up to 12 ms; Verbose=1 runs it again");
+                }
+            }
+            else
             {
                 const float eye[3] = {v.ox, v.oy, v.oz};
                 const float tgt[3] = {chosen.x, chosen.y, chosen.z};
@@ -1795,7 +1811,7 @@ extern "C" void gs_OnMinimapTick(void* self)
         { gs::load::Timer t(gs::load::kPulseRetires); DrainRetires(); }
         {
             using namespace gs::load;
-            for (Site s : {kAutoRay, kAutoSet, kAutoTable, kAutoAim, kPlacePin}) ClearLast(s);
+            for (Site s : {kAutoRay, kAutoSet, kAutoTable, kAutoAim, kPlacePin, kGameIcon}) ClearLast(s);
             { Timer t(kPulseAuto); AutoMark(GetTickCount()); }
             // A slow one says which part. The 23 September 12:48 report had
             // one pass at 74.5 ms while its timed parts were all under 3.
@@ -1806,9 +1822,10 @@ extern "C" void gs_OnMinimapTick(void* self)
                 const double parts = LastMs(kAutoRay) + LastMs(kAutoSet) + LastMs(kAutoTable) + LastMs(kAutoAim) +
                                      LastMs(kPlacePin);
                 GS_LOG_ERR("[load] the automatic marker took %.1f ms: view ray %.2f, entity set %.2f, glint table "
-                           "%.2f, detect system %.2f, placing a pin %.2f, and %.1f in the rest of it",
+                           "%.2f, detect system %.2f, placing a pin %.2f (%.2f of that in the game's own icon "
+                           "call), and %.1f in the rest of it",
                            total, LastMs(kAutoRay), LastMs(kAutoSet), LastMs(kAutoTable), LastMs(kAutoAim),
-                           LastMs(kPlacePin), total - parts);
+                           LastMs(kPlacePin), LastMs(kGameIcon), total - parts);
             }
             g_slowAuto.Summary(nowMs);
         }
