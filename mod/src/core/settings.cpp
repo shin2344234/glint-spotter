@@ -263,6 +263,12 @@ namespace
         fputs("; thousand log lines a minute and it stutters the frame. For bug reports.\n", f);
         fputs("Verbose=0\n", f);
         fputs("\n", f);
+        fputs("; How many GlintSpotter.log files to keep, this run's included, 1 to 99.\n", f);
+        fputs("; 1 keeps one log and overwrites it at every launch. 2 also keeps the run\n", f);
+        fputs("; before as GlintSpotter.01.log, which is usually the one to send after a\n", f);
+        fputs("; restart. Older files past the count are deleted at launch.\n", f);
+        fputs("Logs=2\n", f);
+        fputs("\n", f);
         fputs("; Off, all of them. Each is a route that was tried and did not work.\n", f);
         fputs("; MiniPin copies pins to the minimap and crashed the game one frame later.\n", f);
         fputs("; RayFallback lets a press guess a spot from terrain past where the game has\n", f);
@@ -448,6 +454,12 @@ namespace gs::Settings
                 else GS_LOG_ERR("settings: Hold=%s is out of range, keeping %lu", val,
                                 static_cast<unsigned long>(g_values.holdMs));
             }
+            else if (_stricmp(key, "Logs") == 0)
+            {
+                const long n = atol(val);
+                if (n >= 1 && n <= 99) g_values.logs = static_cast<int>(n);
+                else GS_LOG_ERR("settings: Logs=%s is out of range, keeping %d", val, g_values.logs);
+            }
             else
             {
                 GS_LOG("settings: unknown key '%s' ignored", key);
@@ -480,6 +492,7 @@ namespace gs::Settings
         GS_LOG("settings: PressKinds=%d, Rumble=%d, PadGuard=%d, Sound=%d%s%s", g_values.pressKinds ? 1 : 0,
                g_values.rumble ? 1 : 0, g_values.padGuard ? 1 : 0, g_values.sound ? 1 : 0,
                g_values.soundFile[0] ? ", SoundFile=" : "", g_values.soundFile);
+        GS_LOG("settings: Logs=%d", g_values.logs);
         return g_values;
     }
 

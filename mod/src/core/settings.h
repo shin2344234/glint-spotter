@@ -204,7 +204,14 @@ namespace gs::Settings
         // What stays on is what explains a decision: which placement was taken
         // and why, the sight line band by band on a press, and every pin.
         bool verbose = false;
-        int watch = 0;         // Watch=1: the flash flag; Watch=2: the save list counts. A diagnostic
+        // How many GlintSpotter.log files are kept, this run's included: 1 is
+        // just this run, overwritten at every launch, and 2 adds the run
+        // before as .01. Diggyp586 asked for a single log, GitHub #7. The log
+        // reads this key itself before Load runs, because it rotates before
+        // anything is written, so the default and the 1 to 99 range are also
+        // in log.cpp. This copy is only for the settings line and the gates.
+        int logs = 2;
+        int watch = 0;        // Watch=1: the flash flag; Watch=2: the save list counts. A diagnostic
 
         // Whether to walk the heap looking for the player's own component.
         //

@@ -3,9 +3,11 @@
 namespace gs::Log
 {
     // printf-style, one line per call. Opens GlintSpotter.log next to the plugin
-    // on the first write and keeps it open. Start() rotates the previous five
-    // sessions to .01 through .05 so a run can be read against the one before it,
-    // the way Master Looter's logs are.
+    // on the first write and keeps it open. Start() rotates the previous
+    // sessions to .01, .02 and on so a run can be read against the one before
+    // it, the way Master Looter's logs are. Logs= in the ini is how many files
+    // are kept, this run's included, 2 by default; Start() reads it itself,
+    // since the settings are loaded after the log is open.
     void Start(void* selfModule);
     void Write(const char* level, const char* fmt, ...);
     void Shutdown();

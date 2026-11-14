@@ -127,9 +127,12 @@ Read these before you decide whether the build is for you.
 
 ## Reporting a problem
 
-`GlintSpotter.log` appears in `bin64` beside the plugin, and the last five runs
-are kept. Send it with a note about what you were pointing at and how far away
-it was. That log is how nearly every fix in this mod was found, and a description
+`GlintSpotter.log` appears in `bin64` beside the plugin, and the run before it is
+kept as `GlintSpotter.01.log`. That one is usually the log to send if you
+restarted the game after the problem. `Logs` in the ini sets how many files are
+kept, this run's included: `Logs=1` keeps a single log that every launch
+overwrites, and a higher number keeps more of the older runs. Send the log with
+a note about what you were pointing at and how far away it was. That log is how nearly every fix in this mod was found, and a description
 without it usually is not enough.
 
 If a marker lands somewhere wrong, the most useful thing you can say is roughly

@@ -319,6 +319,19 @@
           ],
           "order": 19
         },
+        "Logs": {
+          "label": "Log files kept",
+          "type": "int",
+          "group": "Diagnostics",
+          "default": "2",
+          "min": 1,
+          "max": 99,
+          "help": [
+            "How many GlintSpotter.log files to keep in bin64, this run's included.",
+            "1 keeps one log and overwrites it at every launch. 2 also keeps the run before as GlintSpotter.01.log, which is usually the one to send after a restart. Older files past the count are deleted at launch."
+          ],
+          "order": 32
+        },
         "MiniPin": {
           "label": "Copy pins to the minimap",
           "type": "bool",
