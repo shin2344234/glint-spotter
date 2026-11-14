@@ -617,15 +617,22 @@ namespace
         // the icons and records are gone already and this does nothing, and
         // any other time it is what keeps a second restore from leaving two
         // pins on every place.
+        // As many keys as the map list holds. This copied 256 through 1.1.40
+        // while the list grew to 1024, so with more than 256 pins on the map
+        // a second restore left the rest on, forgot them, and put the save's
+        // pins back over them as a second icon each (#21).
         void* root = gs::mapicon::LastWorldRoot();
-        int64_t old[256];
-        const int oldN = gs::mapicon::LivePinKeys(old, 256);
+        const int oldCap = gs::mapicon::MaxPins();
+        std::vector<int64_t> old(static_cast<size_t>(oldCap));
+        const int oldN = gs::mapicon::LivePinKeys(old.data(), oldCap);
         for (int i = 0; i < oldN; ++i)
         {
             if (old[i] >= gs::realpin::IdBase()) gs::realpin::Retire(old[i]);
             gs::mapicon::RemoveIcon(root, old[i]);
         }
-        if (oldN) GS_LOG("[pins] %d old pin(s) taken off first", oldN);
+        if (oldN)
+            GS_LOG("[pins] %d old pin(s) taken off first, every one the map list held (room for %d)",
+                   oldN, oldCap);
         // Entity ids belong to the world that issued them.
         ForgetMarked();
         NewWorldForClears();
