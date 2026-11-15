@@ -16,7 +16,9 @@ before you install it.
 
 - **Marks a glint automatically.** Hold Blinding Flash with a glint on your
   crosshair and a pin appears where it is, once the crosshair has held it for a
-  second. Distance is not the limit it used to be: a glint six hundred metres
+  second. Since 1.1.42 the second starts again each time the flash comes back up
+  on the same spot, and the three seconds between automatic pins keep counting
+  correctly on a PC that has been up for weeks. Distance is not the limit it used to be: a glint six hundred metres
   out marks as readily as one at twenty. A glint you have already looted is
   left alone, because the mod reads which ones your save has as taken.
 - **Marks teleporters you haven't unlocked yet.** Flash toward an abyss ruin and
@@ -79,7 +81,11 @@ keep them.
 Both binds are yours to change. `Chord` takes controller button names, so
 `Chord=LB+RB+X` or `Chord=RS` work as written. `Key` takes a key name: `F9` by
 default because the game binds nothing to it, and `Insert`, `Home`, `Numpad5`,
-a bare letter and the rest are all accepted. The key is ignored while Ctrl or
+a bare letter and the rest are all accepted, as are `LeftBracket` and
+`RightBracket`. Since 1.1.42 a name the mod does not know gets an error line in
+the log and the default key stays, where it used to be read as hex and could
+turn `Down` into Enter. A hex code works only when it is the whole value, such as
+`Key=7A`, and `Key` takes no Ctrl, Shift or Alt. The key is ignored while Ctrl or
 Alt is held, so another mod's Ctrl+F9 does not drop a pin. Crimson
 Route's auto-move also defaults to F9, so if you run both, change `Key` here or
 rebind it there, or one press does both. The log prints both binds back in
@@ -94,7 +100,8 @@ buzz yet. `DirectPad=0` hands the pad back to Steam Input if you would rather.
 Switch Pro and other pads still need Steam Input.
 
 Everything else is in `GlintSpotter.ini` beside the plugin, and every key has a
-comment saying what it does. The two worth knowing are `Rod`, which is how
+comment saying what it does. Since 1.1.42 a line of up to 2047 characters is read
+whole, so a long `Mark` or `Kinds` list is no longer cut inside a word. The two worth knowing are `Rod`, which is how
 precisely a press has to be aimed, and `Kinds`, which is what Blinding Flash
 is willing to mark. A press marks anything on the sight line, ore veins and
 patches of sea included, and `PressKinds=1` holds it to the `Kinds` list too.
@@ -117,6 +124,10 @@ Read these before you decide whether the build is for you.
   1.1.40 only the first 32 pins of a save came back at launch, and a pin that
   was marked twice was written to the file twice. Since 1.1.41 every pin in the
   file comes back, and a second restore takes every old pin off the map first.
+  Since 1.1.42 the file is written to a `.tmp` copy and moved into place, so a
+  crash or a full disk partway through leaves the old file whole instead of
+  empty. A pin you remove gives its slot back, so a long session of placing and
+  clearing no longer runs out at 1024.
 - **After a game patch, the first load can stall for up to a minute.** The mod
   finds your character through two addresses it keeps a record of, and when a
   patch moves them it searches memory instead. That happens once per launch,
@@ -149,6 +160,12 @@ without it usually is not enough.
 If a marker lands somewhere wrong, the most useful thing you can say is roughly
 how far away the thing you meant was. The log prints the sight line in distance
 bands, so that one number is usually enough to place the mistake.
+
+Since 1.1.42 the log is held in memory and written by a thread of its own ten
+times a second, or at once after an error line, so nothing on the game's thread
+waits on the disk. The one line per 50 icon calls is now one line per ten
+seconds. A log from a crash can lose up to a tenth of a second of its last
+lines.
 
 Set `Verbose=1` before a run if something is badly broken. It writes about a
 thousand lines a minute and stutters the frame, so turn it back off afterwards.
