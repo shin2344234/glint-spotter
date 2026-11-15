@@ -131,8 +131,16 @@ namespace
     void Write()
     {
         if (g_path.empty()) return;
+        // Written beside the real file and moved over it only once every line
+        // is down. Opening the real file for writing empties it first, so a
+        // crash or a full disk part way through used to lose every save's pins.
+        const std::wstring tmp = g_path + L".tmp";
         FILE* f = nullptr;
-        if (_wfopen_s(&f, g_path.c_str(), L"w") != 0 || !f) return;
+        if (_wfopen_s(&f, tmp.c_str(), L"w") != 0 || !f)
+        {
+            GS_LOG_ERR("[pins] could not open %ls to write the pins", tmp.c_str());
+            return;
+        }
         fputs("; Glint Spotter's pins. One per line: x y z label.\n", f);
         fputs("; Each group belongs to one save. The save lines under a header say which\n", f);
         fputs("; slots that is, as account/slot. Delete a group to clear that save's pins,\n", f);
@@ -149,7 +157,18 @@ namespace
             for (const Group::Spot& t : g.taken)
                 fprintf(f, "taken %.3f %.3f %.3f\n", t.x, t.y, t.z);
         }
-        fclose(f);
+        const bool wroteAll = !ferror(f);
+        if (fclose(f) != 0 || !wroteAll)
+        {
+            GS_LOG_ERR("[pins] writing %ls failed; the pins file was left as it was", tmp.c_str());
+            DeleteFileW(tmp.c_str());
+            return;
+        }
+        if (!MoveFileExW(tmp.c_str(), g_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            GS_LOG_ERR("[pins] could not replace the pins file with the new copy, error %lu", GetLastError());
+            DeleteFileW(tmp.c_str());
+        }
     }
 
     size_t Owner(const Slot& want)
