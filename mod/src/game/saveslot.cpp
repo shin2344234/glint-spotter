@@ -46,6 +46,7 @@ namespace
     Open g_open[kOpen];
     int g_openNext = 0;
     std::atomic<int> g_tracked{0};   // read by every ReadFile in the game
+    int g_reused = 0;                // entries whose handle had become another file's
 
     // A handful of lines about anything opened under the save folder that this
     // does not recognise. If the game ever writes through a temp file, or
@@ -217,6 +218,20 @@ namespace
         if (!any) g_tracked.store(0);
     }
 
+    // Whether the handle still names that slot's save. A look closes its
+    // handle, and the close is not watched, so inside the minute an entry
+    // waits the same value can come back on a pak or a texture that is read
+    // in megabytes. Asked once, when an entry has read enough to count. A
+    // handle whose name cannot be had keeps the old answer.
+    bool StillNames(HANDLE h, const gs::saveslot::Id& id)
+    {
+        wchar_t path[1024];
+        const DWORD n = GetFinalPathNameByHandleW(h, path, 1024, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        if (!n || n >= 1024) return true;
+        gs::saveslot::Id now;
+        return Parse(path, &now) && now.account == id.account && now.slot == id.slot;
+    }
+
     void Counted(HANDLE h, DWORD bytes)
     {
         if (!bytes) return;
@@ -226,7 +241,8 @@ namespace
             if (slot.handle != h) continue;
             slot.got += bytes;
             if (slot.got < slot.need) return;
-            PushLocked(slot.id, false, true);
+            if (StillNames(h, slot.id)) PushLocked(slot.id, false, true);
+            else ++g_reused;
             slot.handle = nullptr;   // said its piece
             bool any = false;
             for (const Open& o : g_open) any = any || o.handle != nullptr;
@@ -363,11 +379,13 @@ namespace gs::saveslot
     {
         Expire();
         int got = 0;
-        int dropped = 0;
+        int dropped = 0, reused = 0;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
             dropped = g_dropped;
             g_dropped = 0;
+            reused = g_reused;
+            g_reused = 0;
             for (; got < g_queued && got < n; ++got) out[got] = g_queue[got];
             // What did not fit stays, in order. The first build cleared the
             // queue whatever it had handed over, and the game opening eight
@@ -382,6 +400,9 @@ namespace gs::saveslot
         if (dropped)
             GS_LOG("[save] the queue filled before anything read it, so the oldest %d save open(s) "
                    "were let go and the newest kept", dropped);
+        if (reused)
+            GS_LOG("[save] %d handle(s) a save was looked at through had become another file's by the time "
+                   "it was read in full, so no load was counted for them", reused);
         return got;
     }
 

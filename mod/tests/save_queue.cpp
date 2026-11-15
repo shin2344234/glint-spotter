@@ -114,6 +114,40 @@ int main()
     Drained four = Pump();
     Check("the queue ends empty", four.n == 0 && g_queued == 0);
 
+    // A real save file and a real other file, so the handle names are real.
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    wchar_t dir[MAX_PATH], save[MAX_PATH], other[MAX_PATH];
+    swprintf_s(dir, L"%lsgs_save_queue\\save\\%u\\slot3", tmp, kAccount);
+    swprintf_s(save, L"%ls\\save.save", dir);
+    swprintf_s(other, L"%lsgs_save_queue\\textures.pak", tmp);
+    wchar_t step[MAX_PATH];
+    swprintf_s(step, L"%lsgs_save_queue", tmp); CreateDirectoryW(step, nullptr);
+    swprintf_s(step, L"%lsgs_save_queue\\save", tmp); CreateDirectoryW(step, nullptr);
+    swprintf_s(step, L"%lsgs_save_queue\\save\\%u", tmp, kAccount); CreateDirectoryW(step, nullptr);
+    CreateDirectoryW(dir, nullptr);
+    HANDLE hs = CreateFileW(save, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+    HANDLE ho = CreateFileW(other, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+    Check("the two test files open", hs != INVALID_HANDLE_VALUE && ho != INVALID_HANDLE_VALUE);
+
+    // The slot's own handle, read in full: a load.
+    Track(hs, Slot(3));
+    Counted(hs, 512u * 1024u);
+    Drained five = Pump();
+    Check("a save read in full through its own handle is a load", five.n == 1 && five.ev[0].full && five.ev[0].id.slot == 3);
+
+    // The handle value a look at slot 3 got, now another file's.
+    Track(ho, Slot(3));
+    Counted(ho, 512u * 1024u);
+    Drained six = Pump();
+    Check("a handle that became another file's counts no load", six.n == 0);
+    Check("and the entry is let go", g_tracked.load() == 0);
+
+    CloseHandle(hs);
+    CloseHandle(ho);
+    DeleteFileW(save);
+    DeleteFileW(other);
+
     puts("");
     puts(failures ? "SOMETHING FAILED" : "all cases pass");
     return failures ? 1 : 0;
