@@ -34,6 +34,10 @@ before you install it.
 - **Removes a pin with the map's own button.** Put the cursor on one and the
   prompt changes to Remove Marker, the same as for a marker you placed by hand.
   Press it and the pin goes.
+- **Works on a mount.** Since 1.1.41 a rider on a wyvern or a dragon can mark
+  glints and press-mark things. On a mount the game keeps the seat offset where
+  the mod used to read the player's position, so nothing was pinned. The mod now
+  takes the world position from the copy of it that the mount's rider holds.
 - **Pins a glint behind a hill.** The flash draws glints through terrain, so a
   glint you can see is one you can mark. With `Verbose=1`, and where the game
   has collision loaded, the log says when ground rises across the sight line.
@@ -109,7 +113,10 @@ Read these before you decide whether the build is for you.
   character has its own. Saving into a slot you have never used before takes
   that save's pins along with it. The same file remembers what you've picked up
   that the save can't show, sealed artifacts mostly, but only from the moment
-  the game saves, because reloading before that puts the item back.
+  the game saves, because reloading before that puts the item back. Through
+  1.1.40 only the first 32 pins of a save came back at launch, and a pin that
+  was marked twice was written to the file twice. Since 1.1.41 every pin in the
+  file comes back, and a second restore takes every old pin off the map first.
 - **After a game patch, the first load can stall for up to a minute.** The mod
   finds your character through two addresses it keeps a record of, and when a
   patch moves them it searches memory instead. That happens once per launch,
@@ -130,8 +137,12 @@ Read these before you decide whether the build is for you.
 `GlintSpotter.log` appears in `bin64` beside the plugin, and the run before it is
 kept as `GlintSpotter.01.log`. That one is usually the log to send if you
 restarted the game after the problem. `Logs` in the ini sets how many files are
-kept, this run's included: `Logs=1` keeps a single log that every launch
-overwrites, and a higher number keeps more of the older runs. Send the log with
+kept, this run's included. It is 2 by default, so the current log and one older
+one. `Logs=1` keeps a single log that every launch overwrites, and a higher
+number, up to 99, keeps more of the older runs. Through 1.1.40 the mod always
+kept five older logs, and an existing ini has no `Logs` line, so on upgrading
+you drop to one older log and the first launch deletes `GlintSpotter.02.log`
+to `.05`. Add `Logs=6` to the ini to keep as many as before. Send the log with
 a note about what you were pointing at and how far away it was. That log is how nearly every fix in this mod was found, and a description
 without it usually is not enough.
 
@@ -141,10 +152,16 @@ bands, so that one number is usually enough to place the mistake.
 
 Set `Verbose=1` before a run if something is badly broken. It writes about a
 thousand lines a minute and stutters the frame, so turn it back off afterwards.
+Since 1.1.41 it is also the only setting that runs the ground check behind the
+"behind a hill" note, for both the automatic marker and a press, which used to
+cost up to 23 ms of the game's thread each time.
 
 If the game stutters with the mod in, the `[load]` lines say whether it's the
 mod. Once a minute they give how long it spent on the game's own thread and how
-much CPU its own threads used.
+much CPU its own threads used. Since 1.1.41 the check that takes finished pins
+off the map runs on the mod's own thread, so it no longer holds the game's
+thread for 3 to 6 ms at a time, and the pin lines say how much of a pin's cost
+was the game's own icon call.
 
 ## Source and licence
 
