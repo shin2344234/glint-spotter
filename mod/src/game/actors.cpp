@@ -837,6 +837,15 @@ namespace gs::actors
         const uintptr_t mgr = g_mgr.load();
         if (!mgr) return 0;
 
+        // The generation the pool read belongs to, taken before the read. It
+        // was taken after it, with the set copy below, so a Forget while the
+        // pools were being read moved the count first and the old world's
+        // entities passed the check at the end of the pass.
+        uint32_t gen = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_setMutex);
+            gen = g_setGen;
+        }
         int n = 0;
         {
             gs::load::Timer t(gs::load::kRefreshPools);
@@ -855,12 +864,12 @@ namespace gs::actors
         // On the heap, once, for the same reason as g_set.
         static gs::actors::Entity* const s_work = new gs::actors::Entity[kSetMax];
         int workN = 0;
-        uint32_t gen = 0;
         {
             std::lock_guard<std::mutex> lock(g_setMutex);
+            // Moved since the read, so the read is the old world's.
+            if (gen != g_setGen) return static_cast<uint32_t>(n);
             workN = g_setN;
             for (int i = 0; i < workN; ++i) s_work[i] = g_set[i];
-            gen = g_setGen;
         }
 
         // A world change frees every object in the set at once, and the set
