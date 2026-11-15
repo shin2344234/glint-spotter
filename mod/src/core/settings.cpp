@@ -380,7 +380,10 @@ namespace gs::Settings
             return g_values;
         }
 
-        char line[256];
+        // Longer than any value can be. Mark and Kinds hold 512 bytes, and at
+        // 256 a long Kinds line was cut mid-word with the rest dropped as a
+        // line with no '=', so a fragment like "soc" matched far too much.
+        char line[2048];
         while (fgets(line, sizeof(line), f))
         {
             Trim(line);
