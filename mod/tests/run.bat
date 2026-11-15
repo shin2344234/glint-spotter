@@ -51,7 +51,7 @@ for %%T in (parse_paths pinstore_flow flash_flag pad_reports stale_actors player
     echo.
     echo === %%T ===
     call "%OUT%\%%T.exe"
-    if errorlevel 1 set FAILED=1
+    if !errorlevel! neq 0 set FAILED=1
   )
 )
 
