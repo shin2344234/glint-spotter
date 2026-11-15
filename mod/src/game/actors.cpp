@@ -727,12 +727,15 @@ namespace gs::actors
     void Forget(const char* why)
     {
         std::lock_guard<std::mutex> lock(g_setMutex);
+        // The generation moves even when the set is empty. A pass that began
+        // on an empty set and read the old world's pools would otherwise pass
+        // its generation check and commit them after the change.
+        ++g_setGen;
+        g_lastPlayerValid = false;
         if (!g_setN) return;
         GS_LOG("[actors] %s, so the %d entities held from before it are dropped", why ? why : "the world changed",
                g_setN);
         g_setN = 0;
-        ++g_setGen;
-        g_lastPlayerValid = false;
     }
 
     bool Locate(uint32_t nowMs)
