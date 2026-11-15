@@ -135,10 +135,11 @@ namespace
     int ReadInto(uintptr_t mgr, gs::lgso::Place* out, int cap)
     {
         int n = 0;
-        uint32_t built = 0;
+        uint32_t built = 0, seen = 0;
         __try
         {
             const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
+            seen = count;
             const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Rows);
             if (!count || count > 100000 || rows < 0x10000) return 0;
             if (!gs::rtti::ReadableCached(reinterpret_cast<const void*>(rows),
@@ -197,7 +198,7 @@ namespace
         if (out)
         {
             g_rowsBuilt = built;
-            g_rowsSeen = *reinterpret_cast<const volatile uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
+            g_rowsSeen = seen;   // read under the handler above, not again out here
         }
         return n;
     }
