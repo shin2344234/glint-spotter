@@ -432,7 +432,10 @@ namespace gs::mapicon
         for (int i = 0; i < 2; ++i)
         {
             if (!vt[i]) continue;
-            if (!gs::vtable::Install(vt[i], gs::sig::kSlotCreateIcon, det[i], g_swap[i]))
+            // The detour calls g_orig unchecked, so it is set before the
+            // slot changes (GitHub #25).
+            if (!gs::vtable::Install(vt[i], gs::sig::kSlotCreateIcon, det[i], g_swap[i],
+                                     reinterpret_cast<void* volatile*>(&g_orig[i])))
             {
                 GS_LOG_ERR("spy: could not take slot %d on the %s vtable", gs::sig::kSlotCreateIcon, label[i]);
                 continue;
@@ -671,7 +674,8 @@ namespace gs::mapicon
             if (!vts[i]) continue;
             void* replacement = i == 0 ? reinterpret_cast<void*>(&DetourRemoveWorld)
                                        : reinterpret_cast<void*>(&DetourRemoveMini);
-            if (!gs::vtable::Install(vts[i], gs::sig::kSlotRemoveIcon, replacement, g_rmSwap[i]))
+            if (!gs::vtable::Install(vts[i], gs::sig::kSlotRemoveIcon, replacement, g_rmSwap[i],
+                                     reinterpret_cast<void* volatile*>(&g_rmOrig[i])))
             {
                 GS_LOG_ERR("[rmspy] could not take slot %d on surface %d",
                            gs::sig::kSlotRemoveIcon, i);

@@ -118,7 +118,10 @@ namespace gs::camera
             return false;
         }
 
-        if (!vtable::Install(vtable, sig::kSlotCameraUpdate, reinterpret_cast<void*>(&gs_CameraThunk), g_swap))
+        // The thunk jumps through gs_cameraOriginal unchecked, so it is set
+        // before the slot changes (GitHub #25).
+        if (!vtable::Install(vtable, sig::kSlotCameraUpdate, reinterpret_cast<void*>(&gs_CameraThunk), g_swap,
+                             &gs_cameraOriginal))
         {
             GS_LOG_ERR("[camera] could not take slot %d on the TPS camera vtable", sig::kSlotCameraUpdate);
             return false;

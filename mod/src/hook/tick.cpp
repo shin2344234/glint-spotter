@@ -2325,7 +2325,8 @@ namespace gs::tick
     {
         if (!worldVtable) return false;
         if (!gs::vtable::Install(worldVtable, gs::sig::kSlotUpdate,
-                                 reinterpret_cast<void*>(&WorldMapUpdate), g_worldSwap))
+                                 reinterpret_cast<void*>(&WorldMapUpdate), g_worldSwap,
+                                 reinterpret_cast<void* volatile*>(&g_worldOrig)))
         {
             GS_LOG_ERR("[tick] slot %d on the world map vtable could not be taken",
                        gs::sig::kSlotUpdate);

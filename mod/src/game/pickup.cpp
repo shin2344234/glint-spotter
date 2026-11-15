@@ -110,7 +110,9 @@ namespace gs::pickup
             GS_LOG_OK("[pickup] the pick up message's vtable had moved; RTTI found it at +0x%llX",
                       static_cast<unsigned long long>(vt - base));
         }
-        if (!gs::vtable::Install(vt, kHandlerSlot, reinterpret_cast<void*>(&Handler), g_swap))
+        // The forward pointer is set before the slot changes (GitHub #25).
+        if (!gs::vtable::Install(vt, kHandlerSlot, reinterpret_cast<void*>(&Handler), g_swap,
+                                 reinterpret_cast<void* volatile*>(&g_orig)))
         {
             GS_LOG_ERR("[pickup] slot %d of the pick up message's vtable would not take the hook", kHandlerSlot);
             return false;

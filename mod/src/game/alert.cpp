@@ -122,7 +122,7 @@ namespace gs::alert
     {
         if (!alertVtable || g_swap.installed) return false;
         if (!gs::vtable::Install(alertVtable, gs::sig::kSlotAlertCall,
-                                 reinterpret_cast<void*>(&gs_AlertThunk), g_swap))
+                                 reinterpret_cast<void*>(&gs_AlertThunk), g_swap, &gs_alertOriginal))
         {
             GS_LOG_ERR("[alert] could not take slot %d on the alert root vtable", gs::sig::kSlotAlertCall);
             return false;
