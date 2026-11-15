@@ -72,6 +72,13 @@ namespace gs::load
 {
     void CountQuery() {}
 }
+
+// The game thread's id, which the tests set to their own to play that thread.
+uint32_t g_tickTid = 0;
+namespace gs::tick
+{
+    uint32_t ThreadId() { return g_tickTid; }
+}
 #include "game/rtti.cpp"
 #include "game/player.cpp"
 
@@ -413,6 +420,22 @@ int main()
     p = gs::player::Read();
     Expect("the placeholder stands", p.valid && Near(p.x, 0.0f) && Near(p.y, 1000.0f));
     Expect("and no rider line is written for it", g_riderLines == 1);
+
+    printf("-- the camera agrees with nobody, read from the game's thread --\n");
+    actor.At(-6925.0f, 664.0f, -560.0f, -6000.0f, 0.0f);
+    g_camValid = true;
+    g_cam[0] = 4000.0f; g_cam[1] = 100.0f; g_cam[2] = 4000.0f;
+    g_tail = 0;
+    g_tickTid = GetCurrentThreadId();
+    Sleep(5100);   // the tag search runs every five seconds
+    const int before = g_offered;
+    p = gs::player::Read();
+    Expect("the game's thread reads a position", p.valid);
+    Expect("and does not walk the pools", g_offered == before);
+    g_tickTid = GetCurrentThreadId() + 1;
+    p = gs::player::Read();
+    Expect("another thread does decide, and searches", g_offered > before);
+    g_camValid = false;
 
     printf("\n%s\n", failures ? "FAILURES" : "all pass");
     return failures ? 1 : 0;

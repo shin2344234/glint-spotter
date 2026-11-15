@@ -11,6 +11,7 @@
 #include "game/actors.h"
 #include "game/aim.h"
 #include "game/camera.h"
+#include "hook/tick.h"
 
 namespace
 {
@@ -490,7 +491,13 @@ namespace
         const int was = g_source.load();
         const uint32_t now = GetTickCount();
         std::unique_lock<std::mutex> lock(g_pick, std::defer_lock);
-        const bool decide = now - g_pickMs.load() >= 500 && lock.try_lock();
+        // Never on the game's own thread. A decide can search the pools for
+        // the body, a pool walk of 20 to 60 ms in the 15 November log, and
+        // the tick reads the player every pulse; the key thread and the save
+        // reader decide often enough that the tick only needs the answer.
+        const uint32_t tick = gs::tick::ThreadId();
+        const bool decide = (!tick || GetCurrentThreadId() != tick) &&
+                            now - g_pickMs.load() >= 500 && lock.try_lock();
         if (!decide)
         {
             if (was == kFromBody && ReadHeldBody(v, w)) return;
