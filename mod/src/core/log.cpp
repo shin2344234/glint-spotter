@@ -6,14 +6,67 @@
 #include <cstdlib>
 #include <cstring>
 #include <share.h>
+#include <atomic>
 #include <mutex>
 #include <string>
 
 namespace
 {
-    std::mutex g_mutex;
+    // Lines go into g_buf under g_mutex and nothing else happens on the
+    // caller's thread. The log's own thread writes them out ten times a
+    // second, and at once after an error line. Through 1.1.41 every line was
+    // written and flushed under one lock from whatever thread logged, the
+    // game's included, and on 15 November the game thread's pulse and the
+    // entity set both stood still for about a second at once during a world
+    // load (GitHub #24).
+    std::mutex g_mutex;            // g_buf, g_dropped, g_file being open
+    std::mutex g_fileMutex;        // the writes to g_file, and g_out
     FILE* g_file = nullptr;
     std::wstring g_path;
+    std::string g_buf;
+    std::string g_out;
+    uint64_t g_dropped = 0;
+    HANDLE g_wake = nullptr;
+    HANDLE g_flusher = nullptr;
+    std::atomic<bool> g_stop{false};
+
+    constexpr size_t kBufBytes = 1u << 20;     // a flush is asked for past this
+    constexpr size_t kBufLimit = 64u << 20;    // lines are counted, not kept, past this
+    constexpr DWORD kFlushMs = 100;
+
+    // Everything buffered so far, onto the disk. Only ever one writer, and
+    // the buffer lock is held just long enough to swap.
+    void Drain()
+    {
+        std::lock_guard<std::mutex> file(g_fileMutex);
+        uint64_t dropped = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_out.swap(g_buf);
+            dropped = g_dropped;
+            g_dropped = 0;
+        }
+        if (g_file && !g_out.empty())
+        {
+            fwrite(g_out.data(), 1, g_out.size(), g_file);
+            if (dropped)
+                fprintf(g_file, "[--:--:--.---] error log: the disk fell behind and %llu line(s) "
+                        "past %u MB waiting were not kept\n", static_cast<unsigned long long>(dropped),
+                        static_cast<unsigned>(kBufLimit >> 20));
+            fflush(g_file);
+        }
+        g_out.clear();   // keeps its capacity, which the next swap hands back
+    }
+
+    DWORD WINAPI Flusher(LPVOID)
+    {
+        while (!g_stop.load())
+        {
+            WaitForSingleObject(g_wake, kFlushMs);
+            Drain();
+        }
+        return 0;
+    }
 
     std::wstring LogPathFor(HMODULE self)
     {
@@ -118,7 +171,13 @@ namespace gs::Log
             // while the game was running and the first session had to be played
             // twice. _SH_DENYWR keeps other writers out and lets readers in.
             g_file = _wfsopen(g_path.c_str(), L"w", _SH_DENYWR);
+            if (!g_file) return;
+            g_buf.reserve(kBufBytes + 4096);
+            g_out.reserve(kBufBytes + 4096);
         }
+        g_stop.store(false);
+        g_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (g_wake) g_flusher = CreateThread(nullptr, 0, Flusher, nullptr, 0, nullptr);
 
         if (kept.refused)
             Write("error", "log: Logs in the ini is out of range (1 to %d), keeping %d logs", kLogsMax,
@@ -135,31 +194,72 @@ namespace gs::Log
 
     void Write(const char* level, const char* fmt, ...)
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        if (!g_file) return;
-
+        // Formatted before the lock, on the stack when it fits and on the
+        // heap when it does not, so a long line is never cut.
         SYSTEMTIME st{};
         GetLocalTime(&st);
-        fprintf(g_file, "[%02d:%02d:%02d.%03d] %s ",
-                st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, level);
+        char stack[1024];
+        int head = _snprintf_s(stack, sizeof(stack), _TRUNCATE, "[%02d:%02d:%02d.%03d] %s ",
+                               st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, level);
+        if (head < 0) head = 0;
 
         va_list args;
         va_start(args, fmt);
-        vfprintf(g_file, fmt, args);
+        va_list again;
+        va_copy(again, args);
+        const int body = vsnprintf(nullptr, 0, fmt, args);
         va_end(args);
+        if (body < 0) { va_end(again); return; }
 
-        fputc('\n', g_file);
-        // Flushed every line on purpose. A crash during a probe is exactly when
-        // the last line matters most, and this plugin writes a few lines a
-        // minute rather than a few thousand.
-        fflush(g_file);
+        std::string heap;
+        char* line = stack;
+        const size_t need = static_cast<size_t>(head) + static_cast<size_t>(body) + 2;
+        if (need > sizeof(stack))
+        {
+            heap.assign(stack, static_cast<size_t>(head));
+            heap.resize(need);
+            line = &heap[0];
+        }
+        vsnprintf(line + head, static_cast<size_t>(body) + 1, fmt, again);
+        va_end(again);
+        line[head + body] = '\n';
+        const size_t len = static_cast<size_t>(head + body + 1);
+
+        // An error line goes out straight away, since it is the one a crash
+        // report needs, and a full buffer does too.
+        const bool error = level && strncmp(level, "error", 5) == 0;
+        bool wake = error;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (!g_file) return;
+            if (g_buf.size() + len > kBufLimit) { ++g_dropped; return; }
+            g_buf.append(line, len);
+            if (g_buf.size() >= kBufBytes) wake = true;
+        }
+        if (wake && g_wake) SetEvent(g_wake);
     }
 
     void Shutdown()
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
+        // On process teardown the flusher is already gone, and a lock some
+        // dead thread held stays held, so nothing here waits for anything.
+        g_stop.store(true);
+        if (g_flusher)
+        {
+            if (g_wake) SetEvent(g_wake);
+            WaitForSingleObject(g_flusher, 1000);
+            CloseHandle(g_flusher);
+            g_flusher = nullptr;
+        }
+        if (!g_fileMutex.try_lock()) return;
+        std::unique_lock<std::mutex> file(g_fileMutex, std::adopt_lock);
+        if (!g_mutex.try_lock()) return;
+        std::unique_lock<std::mutex> lock(g_mutex, std::adopt_lock);
         if (!g_file) return;
+        if (!g_buf.empty()) fwrite(g_buf.data(), 1, g_buf.size(), g_file);
+        g_buf.clear();
         fclose(g_file);
         g_file = nullptr;
+        if (g_wake) { CloseHandle(g_wake); g_wake = nullptr; }
     }
 }

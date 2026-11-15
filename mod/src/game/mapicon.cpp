@@ -88,7 +88,7 @@ namespace
     // How many calls per surface get a full dump. The map creates dozens of icons
     // on open, and the first few say everything the replay needs.
     constexpr uint64_t kFullDumps = 12;
-    constexpr uint64_t kSummaryEvery = 50;
+    constexpr uint32_t kSummaryMs = 10000;
 
     void CopyString(char* dst, size_t cap, const char* src)
     {
@@ -290,10 +290,20 @@ namespace
                        q[48],q[49],q[50],q[51],q[52],q[53],q[54],q[55],q[56],q[57],q[58],q[59],q[60],q[61],q[62],q[63]);
             }
         }
-        else if (n % kSummaryEvery == 0)
+        else
         {
-            GS_LOG("[spy %s] %llu calls so far, last type=0x%04X name=\"%s\"",
-                   label, static_cast<unsigned long long>(n), c.type, c.name8);
+            // Once every ten seconds per surface. One line per 50 calls was
+            // 1,300 lines in the minute the map rebuilt its icons on 15
+            // November, every one written from the game's thread (GitHub #24).
+            static std::atomic<uint32_t> lastMs[2];
+            const uint32_t now = GetTickCount();
+            const uint32_t was = lastMs[surface].load(std::memory_order_relaxed);
+            if (!was || now - was >= kSummaryMs)
+            {
+                lastMs[surface].store(now ? now : 1, std::memory_order_relaxed);
+                GS_LOG("[spy %s] %llu calls so far, last type=0x%04X name=\"%s\"",
+                       label, static_cast<unsigned long long>(n), c.type, c.name8);
+            }
         }
     }
 
