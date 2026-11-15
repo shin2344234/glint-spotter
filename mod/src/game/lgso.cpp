@@ -545,7 +545,10 @@ namespace gs::lgso
         // counts is short enough to read and is what a real Kinds default has
         // to be written against.
         struct Rec { char name[56]; int count; };
+        // Static for its size, so it is cleared each time: it runs again after
+        // every world change, and the counts used to add up across them.
         static Rec recs[512];
+        memset(recs, 0, sizeof(recs));
         int rn = 0;
         for (int i = 0; i < g_n; ++i)
         {
