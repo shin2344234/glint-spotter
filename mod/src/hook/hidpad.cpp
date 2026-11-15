@@ -158,7 +158,11 @@ namespace
         OVERLAPPED ov{};
         ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         if (!ov.hEvent) return 0;
-        uint32_t nextLookMs = 0;
+        // Due now, measured from the clock rather than from zero. Starting at
+        // zero, the signed test below reads negative once Windows has been up
+        // 2^31 ms, about 25 days, and the pad was never looked for again
+        // until the counter wrapped at 49.7 days.
+        uint32_t nextLookMs = GetTickCount();
         bool saidNone = false;
 
         while (!g_stop.load())
