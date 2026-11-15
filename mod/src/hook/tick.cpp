@@ -948,6 +948,11 @@ namespace
         if (!flash)
         {
             g_flashWas = false;
+            // The hold starts over with each flash. Kept from the last one, a
+            // crosshair that crossed the same spot on the next flash's first
+            // pulse read as held for a second already and pinned at once.
+            g_heldSinceMs = 0;
+            g_heldEid = 0;
             if (g_huntN)
             {
                 if (!g_huntOffMs) g_huntOffMs = now;
