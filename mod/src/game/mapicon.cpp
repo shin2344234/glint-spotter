@@ -638,7 +638,23 @@ namespace gs::mapicon
 
     void Remember(float x, float y, float z, const char* label, int64_t keyId)
     {
-        const int i = g_placedN.load();
+        // A pin taken off leaves its slot marked gone, and only a load emptied
+        // the table, so a long session of pins placed and cleared ran out at
+        // 1024 with far fewer on the map. A gone slot is reused first. Its
+        // fields are written before gone is cleared, so a reader on another
+        // thread skips it until it is whole.
+        const int n = g_placedN.load();
+        for (int j = 0; j < n && j < kMaxPins; ++j)
+        {
+            if (!g_placed[j].gone) continue;
+            g_placed[j].x = x; g_placed[j].y = y; g_placed[j].z = z;
+            g_placed[j].id = keyId;
+            CopyString(g_placed[j].label, sizeof(g_placed[j].label), label ? label : "Marker");
+            std::atomic_thread_fence(std::memory_order_release);
+            g_placed[j].gone = false;
+            return;
+        }
+        const int i = n;
         if (i >= kMaxPins)
         {
             GS_LOG_ERR("[pins] %d pins placed since the last load is as many as the mod tracks; the "
