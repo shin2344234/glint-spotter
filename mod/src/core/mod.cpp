@@ -1072,13 +1072,10 @@ namespace
                 gs::lgso::Load(gs::player::Read().valid);
             }
             ReadModeTable();
-            // Once, as soon as the world is up.
-            static bool warmed = false;
-            if (!warmed && gs::player::Read().valid)
-            {
-                warmed = true;
-                gs::physics::Warm();
-            }
+            // As soon as the world is up. Asked every pass, because only this
+            // thread runs the search now and the module range can be unknown
+            // the first time; once it has run, Warm returns at once.
+            if (gs::player::Read().valid) gs::physics::Warm();
             const bool settled = gs::lgso::Settled();
             if (settled && !wasSettled && gs::Settings::Get().verbose)
             {

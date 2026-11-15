@@ -175,7 +175,9 @@ namespace gs::physics
     bool Ready(const char** why)
     {
         if (!Base()) { *why = "module range unknown"; return false; }
-        Locate();
+        // Warm() on the table thread does the search. Ready is asked from the
+        // game thread, where the search's 70 ms code scan was a hitch on the
+        // first pin of a session when it got there first.
         if (g_located.load() != 2) { *why = "the ray cast wrapper is still being looked for"; return false; }
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(g_wrapper), sizeof(kPrologue)) ||
             memcmp(reinterpret_cast<const void*>(g_wrapper), kPrologue, sizeof(kPrologue)) != 0)
