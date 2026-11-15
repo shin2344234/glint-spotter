@@ -164,7 +164,7 @@ namespace
             DeleteFileW(tmp.c_str());
             return;
         }
-        if (!MoveFileExW(tmp.c_str(), g_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        if (!MoveFileExW(tmp.c_str(), g_path.c_str(), MOVEFILE_REPLACE_EXISTING))
         {
             GS_LOG_ERR("[pins] could not replace the pins file with the new copy, error %lu", GetLastError());
             DeleteFileW(tmp.c_str());
