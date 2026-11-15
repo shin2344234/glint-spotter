@@ -916,7 +916,12 @@ namespace
     uint32_t g_heldEid = 0;
     uint32_t g_heldSinceMs = 0;
     float g_heldX = 0, g_heldZ = 0;
-    uint32_t g_cooldownUntil = 0;
+    // When the last automatic pin landed, 0 for none. Held as a start and
+    // compared by elapsed time: "now >= now + 3000" stopped every automatic
+    // pin for days if one landed in the three seconds before the tick count
+    // wrapped.
+    uint32_t g_cooldownFromMs = 0;
+    bool CooledDown(uint32_t now) { return !g_cooldownFromMs || now - g_cooldownFromMs >= 3000; }
     int g_autoLogsLeft = 120;
     uint32_t g_autoLastLogMs = 0;
     uintptr_t g_huntEnts[4] = {0, 0, 0, 0};
@@ -1530,7 +1535,7 @@ namespace
         // broken feature: aim at a glint you pinned ten minutes ago, hold it,
         // and the mod does nothing and says nothing.
         const bool matured = chosen.valid && g_heldSinceMs && now - g_heldSinceMs >= 1000;
-        if (matured && now >= g_cooldownUntil && gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart) &&
+        if (matured && CooledDown(now) && gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart) &&
             g_dupLogsLeft > 0 && now - g_dupLastMs > 3000)
         {
             --g_dupLogsLeft;
@@ -1549,7 +1554,7 @@ namespace
             GS_LOG("[auto] everything on the line was marked by this flash already. Press the "
                    "flash again, or the button, for another pin on the same thing.");
         }
-        if (matured && now >= g_cooldownUntil &&
+        if (matured && CooledDown(now) &&
             !gs::mapicon::PinNear(chosen.x, chosen.z, kPinApart))
         {
             // The ground, asked once, at the moment a pin is about to land.
@@ -1600,7 +1605,7 @@ namespace
                 }
             }
 
-            g_cooldownUntil = now + 3000;
+            g_cooldownFromMs = now ? now : 1;
             const float dx = chosen.x - pp.x, dz = chosen.z - pp.z;
             GS_LOG("[auto] the crosshair held \"%s\" eid %08X for a second, %.1f degrees off, %.1f metres away; pinning it where it stands",
                    chosen.name, chosen.eid, chosen.angleDeg, std::sqrt(dx * dx + dz * dz));
