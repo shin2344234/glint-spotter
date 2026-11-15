@@ -1,5 +1,5 @@
 @echo off
-rem Glint Spotter tests. Nine of them, all compiling real source files rather
+rem Glint Spotter tests. Ten of them, all compiling real source files rather
 rem than copies, with the log and the settings stubbed out where they are not
 rem the thing under test.
 rem
@@ -21,6 +21,8 @@ rem   clear_timing    the check that takes done pins off, at 45,604 placements
 rem                   and 256 pins, against the loop it replaced
 rem   log_count       Logs= in the ini, how many log files are kept at launch,
 rem                   from Diggyp586's request for a single log
+rem   key_names       Key= in the ini, every name the inimeta offers, and the
+rem                   names GitHub #29 found read as part of a hex code
 rem
 rem Run it by full quoted path from PowerShell; the space in the repo path
 rem breaks a bare "cmd /c run.bat". Anything it builds lands in build\.
@@ -38,7 +40,7 @@ if not exist "%OUT%" mkdir "%OUT%"
 pushd "%OUT%"
 
 set FAILED=0
-for %%T in (parse_paths pinstore_flow flash_flag pad_reports stale_actors player_body save_queue clear_timing log_count) do (
+for %%T in (parse_paths pinstore_flow flash_flag pad_reports stale_actors player_body save_queue clear_timing log_count key_names) do (
   rem The last build's exe is deleted first. Left in place, a test that no
   rem longer compiled ran its old self and the run printed all of them passing.
   if exist "%OUT%\%%T.exe" del "%OUT%\%%T.exe"
@@ -62,5 +64,5 @@ if "!FAILED!"=="1" (
   exit /b 1
 )
 echo.
-echo all nine pass
+echo all ten pass
 endlocal

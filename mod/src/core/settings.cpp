@@ -50,6 +50,7 @@ namespace
             {"BACKSLASH", 0xDC}, {"TILDE", 0xC0},     {"GRAVE", 0xC0},
             {"MINUS", 0xBD},     {"EQUALS", 0xBB},
             {"LBRACKET", 0xDB},  {"RBRACKET", 0xDD},
+            {"LEFTBRACKET", 0xDB}, {"RIGHTBRACKET", 0xDD},   // what INI Master writes
             {"SEMICOLON", 0xBA}, {"QUOTE", 0xDE},
             {"COMMA", 0xBC},     {"PERIOD", 0xBE},    {"SLASH", 0xBF},
         };
@@ -77,6 +78,20 @@ namespace
         if (n >= 7 && strncmp(w, "NUMPAD", 6) == 0 && w[6] >= '0' && w[6] <= '9' && n == 7)
             return 0x60 + static_cast<uint32_t>(w[6] - '0');
         return 0;
+    }
+
+    // A Key value: a name, or a bare hex code, which is what every ini
+    // written before names went in holds. The code has to be the whole value.
+    // strtoul alone stopped at the first letter that is not hex, so Down read
+    // as 0x0D, Enter, and Ctrl+F11 as 0x0C, with nothing in the log.
+    uint32_t KeyFromText(const char* s)
+    {
+        if (const uint32_t vk = KeyFromName(s)) return vk;
+        if (!s || !*s) return 0;
+        char* end = nullptr;
+        const unsigned long v = strtoul(s, &end, 16);
+        if (!end || *end || v == 0 || v > 255) return 0;
+        return static_cast<uint32_t>(v);
     }
 
     // The chord back in words, so the log can be read as a binding rather than
@@ -384,16 +399,11 @@ namespace gs::Settings
                 // A name first, since that is what the ini asks for. A bare
                 // hex code still works, because that is what every ini written
                 // before this build holds.
-                uint32_t vk = KeyFromName(val);
-                if (!vk)
-                {
-                    const unsigned long v = strtoul(val, nullptr, 16);
-                    if (v > 0 && v < 256) vk = static_cast<uint32_t>(v);
-                }
+                const uint32_t vk = KeyFromText(val);
                 if (vk) g_values.key = vk;
                 else GS_LOG_ERR("settings: Key=%s is not a key I know. Try a name like F9, or a "
-                                "letter, or a two digit hex code. Keeping %s.", val,
-                                KeyName(g_values.key));
+                                "letter, or a two digit hex code, with no Ctrl, Shift or Alt. "
+                                "Keeping %s.", val, KeyName(g_values.key));
             }
             else if (_stricmp(key, "Mark") == 0)
             {
