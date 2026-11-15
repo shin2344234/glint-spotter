@@ -58,6 +58,14 @@ namespace
         return gs::rtti::VtableIs(vt, gs::sig::kWorldMapClass);
     }
 
+    bool MiniLooksRight(void* root)
+    {
+        if (!root) return false;
+        if (!gs::rtti::Readable(root, 8)) return false;
+        const void* vt = *reinterpret_cast<void* const*>(root);
+        return gs::rtti::VtableIs(vt, gs::sig::kMiniMapClass);
+    }
+
     bool IsName(const gs::mapicon::Capture& c, const char* name)
     {
         return strcmp(c.name8, name) == 0;
@@ -697,7 +705,16 @@ namespace gs::mapicon
         g_rmOrig[0](worldRoot, reinterpret_cast<void*>(static_cast<uintptr_t>(0x0001)), &key,
                     reinterpret_cast<void*>(static_cast<uintptr_t>(0)), nullptr, nullptr, nullptr,
                     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+        // The minimap root is held from the last create the spy saw on it,
+        // and a save load can rebuild the HUD before the next one arrives.
+        // The restore after a load takes every old pin off through here, so
+        // the root is checked the same way the world map's is.
         void* mini = g_lastMiniRoot.load();
+        if (mini && !MiniLooksRight(mini))
+        {
+            g_lastMiniRoot.compare_exchange_strong(mini, nullptr);
+            mini = nullptr;
+        }
         if (mini && g_rmOrig[1])
             g_rmOrig[1](mini, reinterpret_cast<void*>(static_cast<uintptr_t>(0x0001)), &key,
                         reinterpret_cast<void*>(static_cast<uintptr_t>(0)), nullptr, nullptr,
