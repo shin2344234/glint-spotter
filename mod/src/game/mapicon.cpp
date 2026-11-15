@@ -85,11 +85,12 @@ namespace
     {
         for (size_t i = 0; i < g_nameCount; ++i)
             if (strcmp(g_names[i], name) == 0) return false;
-        if (g_nameCount < kMaxNames)
-        {
-            CopyString(g_names[g_nameCount], sizeof(g_names[0]), name);
-            ++g_nameCount;
-        }
+        // A full table cannot tell new from seen, so it says seen. Saying new
+        // put every call with an unlisted name through the full dump, on the
+        // game's thread, once the map had shown 96 names.
+        if (g_nameCount >= kMaxNames) return false;
+        CopyString(g_names[g_nameCount], sizeof(g_names[0]), name);
+        ++g_nameCount;
         return true;
     }
 
