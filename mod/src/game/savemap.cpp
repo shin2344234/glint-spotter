@@ -152,14 +152,11 @@ namespace
     std::vector<gs::lgso::Place> g_places;
     std::vector<uintptr_t> g_fields;          // FieldSaveData objects
     std::unordered_map<uintptr_t, uint32_t> g_lastState;   // record address -> state last seen
-    int g_linesLeft = 2000;
-
-    bool Say()
-    {
-        if (g_linesLeft <= 0) return false;
-        --g_linesLeft;
-        return true;
-    }
+    // Every savemap line goes out. This was a 2,000 line budget for the whole
+    // session, shared by the surveys and the error lines, so after a few save
+    // loads the "out of reach" error for a later save was never written. The
+    // per-topic counters below still keep the hot lines quiet.
+    bool Say() { return true; }
 
     // The handler is the guard, with no VirtualQuery first. A query per
     // record read every second was most of the 3,600 a second the 23
