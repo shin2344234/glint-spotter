@@ -286,10 +286,21 @@ namespace gs::pad
         }
         const bool viaXInput = g_setState && g_pad >= 0;
         const bool viaDirect = !viaXInput && gs::hidpad::CanRumble();
-        if (!viaXInput && !viaDirect) return;
+        const uint32_t start = g_buzzStart.load();
+        if (!viaXInput && !viaDirect)
+        {
+            // A buzz asked for with no pad to play it on is spent here, as if
+            // played. Left waiting, it played the moment a pad connected,
+            // minutes after the pin it was for.
+            if (start && start != g_playing)
+            {
+                g_playing = start;
+                g_playFrom = now;
+            }
+            return;
+        }
         bool want = false;
         bool fresh = false;
-        const uint32_t start = g_buzzStart.load();
         if (start && start != g_playing)
         {
             g_playing = start;
