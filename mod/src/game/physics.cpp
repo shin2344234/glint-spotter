@@ -197,7 +197,10 @@ namespace gs::physics
         const char* why = nullptr;
         if (!Ready(&why))
         {
-            if (!g_saidWhy) { g_saidWhy = true; GS_LOG_ERR("[physics] not ready: %s", why); }
+            // Said once, and only for a lasting reason. A cast before the
+            // table thread's search has run is ordinary at startup, and
+            // latching on that one hid a real refusal found afterwards.
+            if (!g_saidWhy && g_located.load() == 2) { g_saidWhy = true; GS_LOG_ERR("[physics] not ready: %s", why); }
             return h;
         }
         float s[4] = {start[0], start[1], start[2], 0};
