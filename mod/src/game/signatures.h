@@ -60,13 +60,13 @@
 
 namespace gs::sig
 {
-    constexpr const char* kExeVersion = "1.0.0.3663";
+    constexpr const char* kExeVersion = "1.0.0.3732";
 
     // The two root UI controls that own every map icon. Slot 36 is the per frame
     // update, slot 174 creates an icon (35 and 170 through 2976). The vtables are also found by RTTI at
     // runtime when these are stale.
-    constexpr uintptr_t kWorldMapVtable = 0x05A87C10;
-    constexpr uintptr_t kMiniMapVtable  = 0x05A8CA10;
+    constexpr uintptr_t kWorldMapVtable = 0x05A8CCA0;
+    constexpr uintptr_t kMiniMapVtable  = 0x05A91AA0;
 
     constexpr const char* kWorldMapClass = ".?AVUIGamePlayControlRootWorldMap@uiCommonScript@pa@@";
     constexpr const char* kMiniMapClass  = ".?AVUIGamePlayControlRootMiniMap@uiCommonScript@pa@@";
@@ -104,7 +104,7 @@ namespace gs::sig
     // stub, which is why rebase.py finds the remover by that prologue rather
     // than by its index.
     constexpr int kSlotRemoveIcon = 175;
-    constexpr uintptr_t kRemoveIconBody = 0x00F96100;
+    constexpr uintptr_t kRemoveIconBody = 0x00F96880;
 
     // Who asked for a removal. Two functions call the same slot and only
     // one of them is the player pressing delete: the icon builder removes
@@ -139,7 +139,7 @@ namespace gs::sig
     // 3392 grew the vtable to 172 slots and the function moved to slot 146,
     // 0x01162560, 984 bytes, still naming the same three strings. 144 is the
     // ret 0 stub.
-    constexpr uintptr_t kAlertRootVtable = 0x05ADF280;
+    constexpr uintptr_t kAlertRootVtable = 0x05AE45E0;
     constexpr const char* kAlertRootClass = ".?AVUIGamePlayControlRootAlertSystem@uiCommonScript@pa@@";
     constexpr int kSlotAlertCall = 146;   // of 172
 
@@ -174,7 +174,7 @@ namespace gs::sig
     //            struct { const void* records; int32 count; }*)
     //
     // Find or insert by id, so calling it twice with one id is an update.
-    constexpr uintptr_t kPinUpsert = 0x00569D30;   // (submodule, &err, kind, &{records, count})
+    constexpr uintptr_t kPinUpsert = 0x0056A070;   // (submodule, &err, kind, &{records, count})
     constexpr uint8_t   kPinUpsertPrologue[12] = {
         0x44, 0x88, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8b   the kind
         0x48, 0x89, 0x54, 0x24, 0x10,   // mov [rsp+0x10], rdx   the error out
@@ -193,7 +193,7 @@ namespace gs::sig
     // same arguments after the same actor gates and the same list walk in
     // 24-byte steps. These fifteen bytes are not unique in the image (149
     // hits), so they are only ever compared at this address.
-    constexpr uintptr_t kPinRemove = 0x0056A000;   // (submodule, &err, &id, kind)
+    constexpr uintptr_t kPinRemove = 0x0056A340;   // (submodule, &err, &id, kind)
     constexpr uint8_t   kPinRemovePrologue2[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x08,   // mov [rsp+0x08], rbx
         0x48, 0x89, 0x74, 0x24, 0x10,   // mov [rsp+0x10], rsi
@@ -242,8 +242,8 @@ namespace gs::sig
     // 2976 found them the same way: the create and the server remove moved by
     // 0x70, the upsert and the erase did not move, and the acknowledgements
     // still reach the submodule through +0x68 and +0x168.
-    constexpr uintptr_t kPinCreate       = 0x02B89700;
-    constexpr uintptr_t kPinServerRemove = 0x02B89BD0;
+    constexpr uintptr_t kPinCreate       = 0x02B8BE50;
+    constexpr uintptr_t kPinServerRemove = 0x02B8C320;
     constexpr uint8_t   kPinCreatePrologue[15] = {
         0x4C, 0x89, 0x4C, 0x24, 0x20,   // mov [rsp+0x20], r9
         0x4C, 0x89, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8
@@ -256,7 +256,7 @@ namespace gs::sig
     // Clear and the create keeps fifteen markers, set and it keeps five
     // hundred. Read only, and only so the log can say which cap applies. It is
     // the one cmp byte ptr [rip+...] inside the create.
-    constexpr uintptr_t kPinOnlineFlag   = 0x071B7C48;
+    constexpr uintptr_t kPinOnlineFlag   = 0x071BDD88;
     constexpr uintptr_t kOff_Pin_Owner   = 0x08;   // submodule + 8, the notify target
 
     // And the map's end of it: what the world map does when it is told a
@@ -301,10 +301,10 @@ namespace gs::sig
     // update starts by reading the fade weight at this+0x338 and that read is
     // unique in the image. 3392 moved the weight to +0x358; the vtable is
     // still sixteen slots and the update still 290 bytes.
-    constexpr uintptr_t kCameraTPSVtable   = 0x05B1E838;
+    constexpr uintptr_t kCameraTPSVtable   = 0x05B23C48;
     constexpr const char* kCameraTPSClass  = ".?AVPlayerCameraTPSMode@gameClientScript@pa@@";
     constexpr int       kSlotCameraUpdate  = 2;
-    constexpr uintptr_t kCameraTPSUpdate   = 0x013DFE40;
+    constexpr uintptr_t kCameraTPSUpdate   = 0x013E19C0;
     constexpr uint8_t   kCameraUpdatePrologue[22] = {
         0x48, 0x8B, 0xC4,                         // mov rax, rsp
         0x48, 0x89, 0x58, 0x08,                   // mov [rax+8], rbx
@@ -359,7 +359,7 @@ namespace gs::sig
 // on 3527 and 3549 to 0x071C3F10, on 3576 to 0x071C6130, on 3663 to
 // 0x0724AD78. Since 3663 the plugin reads that store itself at startup
 // (game/locate.cpp) and uses this value only when RTTI cannot name the class.
-constexpr uintptr_t kLgsoManagerGlobal = 0x0724AD78;
+constexpr uintptr_t kLgsoManagerGlobal = 0x07250EF8;
 
 // The special mode table's manager, SpecialModeStaticInfo. Its setter is
 // RVA 0x0184C820, mov qword ptr [rip + 0x05521BC1], rcx ; ret, which writes
@@ -379,7 +379,7 @@ constexpr uintptr_t kLgsoManagerGlobal = 0x0724AD78;
 // row count moved to +0x28 with the container change described at
 // kOff_Lgso_Count, and the plugin finds the global through the setter at
 // startup the same way as the level gimmick one.
-constexpr uintptr_t kSpecialModeManagerGlobal = 0x0724AD30;
+constexpr uintptr_t kSpecialModeManagerGlobal = 0x07250F10;
 constexpr uint32_t kSpecialModeRows = 33;
 
 // Globals that hold the ClientActorManager. The startup scan for them reads the
@@ -434,8 +434,16 @@ constexpr uint32_t kSpecialModeRows = 33;
 // 0x00A2E933, 0x00A2E93F, 0x04BFC7B3, 0x053CC248) point at 0x071C09A8,
 // +0x2210. Not yet seen in play.
 // 3663's is the same match run from 3576: five references point at
-// 0x07245CA0, +0x852F8. Not yet seen in play.
-constexpr uintptr_t kActorManagerGlobals[] = {0x07245CA0};
+// 0x07245CA0, +0x852F8. Seth's 15 November sessions found the manager
+// there with no scan.
+// 3732's is 0x0724BE30. With no 3663 exe to match from, the match ran from
+// 3576, and every one of the seven rip-relative references to 3576's
+// 0x071C09A8 has its twin on 3732 pointing at 0x0724BE30: the static
+// initializer that builds the manager (0x0544F827, 0x0544F838, 0x0544F851),
+// its atexit thunk (0x04C7D393), and the two callers at 0x003AAB28 and
+// 0x00A5F793. It is +0x6190 from 3663's, next to the +0x6180 the level
+// gimmick global moved. Not yet seen in play.
+constexpr uintptr_t kActorManagerGlobals[] = {0x0724BE30};
 // 3663 changed the container every static table sits in, this one and the
 // special mode table alike. +0x08 now holds the table's name, the row count
 // is the u32 at +0x28, and the rows are 0x18-byte entries in an array whose
@@ -494,7 +502,7 @@ constexpr uintptr_t kOff_LgsoData_Stride   = 0xC0;
 constexpr uintptr_t kOff_LgsoData_Transform = 0x54;
 constexpr uintptr_t kOff_Transform_Pos      = 0x10;   // after the quaternion
 
-constexpr uintptr_t kGimmickVtable         = 0x059C3768;
+constexpr uintptr_t kGimmickVtable         = 0x059C8840;
     constexpr const char* kGimmickClass        = ".?AVClientGimmickActorComponent@pa@@";
     constexpr uintptr_t kOff_Comps_Gimmick     = 0x30;
     constexpr uintptr_t kOff_Gimmick_DetectTgt = 0x47B;
@@ -533,9 +541,17 @@ constexpr uintptr_t kGimmickVtable         = 0x059C3768;
     // +0x400 and below kept its offset and everything from +0x430 up moved by
     // eight, so the sub-object pointer is at +0x458 and the glint byte at
     // +0x47B. rebase.py finds both from the code. +0x270 and +0x3F2 did not move.
+    //
+    // 3732 took eight bytes out of the detect component above +0x110. The
+    // toggle, the function that installs the DetectEffect delegate (vtable
+    // 0x059CDEA0, taken at 0x00AAF33F), compares and stores +0x1D2 (0x00AAF228, 0x00AAF285) where
+    // 3576's compared and stored +0x1DA (0x00A793E9, 0x00A79446). The code
+    // that makes the FindDetectTargetTask stores it at +0x1C8 (0x0966247D),
+    // +0x1D0 on 3576 (0x097D1726), and clears +0x1D0 and +0x1D4 where 3576
+    // cleared +0x1D8 and +0x1DC.
     constexpr const char* kDetectClass          = ".?AVClientDetectActorComponent@pa@@";
     constexpr uintptr_t kOff_Comps_Detect       = 0x50;
-    constexpr uintptr_t kOff_Detect_Lit         = 0x1DA;
+    constexpr uintptr_t kOff_Detect_Lit         = 0x1D2;
     constexpr uintptr_t kOff_Gimmick_Sub        = 0x458;
     constexpr uintptr_t kOff_GimmickSub_Active  = 0x1C0;
 
@@ -576,8 +592,8 @@ constexpr uintptr_t kGimmickVtable         = 0x059C3768;
     // and normal out) and what it uses. Found at runtime by byte pattern, with
     // the facade and the frame offset decoded from its own RIP-relative
     // operands; these are the fallback and the record.
-    constexpr uintptr_t kRayCastWrapper   = 0x03D71120;
-    constexpr uintptr_t kPhysicsFacade    = 0x06F14290;
-    constexpr uintptr_t kPhysicsFrameOff  = 0x07231330;
+    constexpr uintptr_t kRayCastWrapper   = 0x03D75670;
+    constexpr uintptr_t kPhysicsFacade    = 0x06F1A290;
+    constexpr uintptr_t kPhysicsFrameOff  = 0x07237470;
     constexpr int       kSlotCastRay      = 61;   // still 61 on 3392: the wrapper calls [rax+0x1E8]
 }

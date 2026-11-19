@@ -112,11 +112,11 @@ namespace
     // has moved it, which every patch so far has.
     struct Cls { uintptr_t rva; const char* name; uintptr_t va; };
     Cls g_cls[] = {
-        {0x05CD8D70, ".?AVFieldGimmickSaveData@pa@@", 0},
-        {0x05CD6DF0, ".?AVFieldSaveData@pa@@", 0},
-        {0x05F69100, ".?AVServerActorManager@pa@@", 0},
-        {0x05F68B10, ".?AVServerUserActor@pa@@", 0},
-        {0x05F600B8, ".?AVServerContentsMiscActorComponent@pa@@", 0},
+        {0x05CDE120, ".?AVFieldGimmickSaveData@pa@@", 0},
+        {0x05CDC440, ".?AVFieldSaveData@pa@@", 0},
+        {0x05F6E070, ".?AVServerActorManager@pa@@", 0},
+        {0x05F6DE90, ".?AVServerUserActor@pa@@", 0},
+        {0x05F65430, ".?AVServerContentsMiscActorComponent@pa@@", 0},
     };
     enum { kRecord, kField, kServerManager, kServerUser, kContentsMisc, kClassCount };
     uintptr_t Vt(int i) { return g_cls[i].va; }
@@ -484,7 +484,12 @@ namespace
     // same match from 3479 (0x05068523 and 0x054A47C7 agree), not yet seen
     // in play. 3549 kept it. 0x071FE6E8 on 3576 by the same match from 3527
     // (0x0506FAB3, 0x054AC6C7 and 0x054AC6D8 agree), not yet seen in play.
-    constexpr uintptr_t kServerManagerGlobal = 0x07283378;
+    // 0x07283378 on 3663, held with no search in Seth's 15 November sessions.
+    // 0x072895E8 on 3732: each of the five references to 3576's 0x071FE6E8
+    // has its twin on 3732 pointing there, the static initializer
+    // (0x0552D497, 0x0552D4A8, 0x0552D4C1), its atexit thunk at 0x050EF833
+    // and the getter at 0x02A13001. Not yet seen in play.
+    constexpr uintptr_t kServerManagerGlobal = 0x072895E8;
     constexpr int kUsersMax = 64;   // list entries asked for the component
     constexpr uintptr_t kOff_Mgr_User = 0xB8, kOff_Actor_Comps = 0x68, kOff_Comps_ContentsMisc = 0x368;
     // The DLC build moved the map to +0x330 (the insert is 0x02B4D250 on 3424,

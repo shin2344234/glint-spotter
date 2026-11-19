@@ -452,9 +452,9 @@ namespace gs::aim
         // 0x86322B60 at the flag that is supposed to be zero or 0xFF. They are
         // printed from inside the object's real bounds only.
         if (log)
-            GS_LOG("[target] detect +1D0 task 0x%p, +1DA %u, +208 %.3f, +240 %.3f",
-                   reinterpret_cast<void*>(DetectTask()), DwordAt(detect, 0x1D8) >> 16,
-                   ScalarAt(detect, 0x208), ScalarAt(detect, 0x240));
+            GS_LOG("[target] detect +1C8 task 0x%p, +1D2 %u, +200 %.3f, +238 %.3f",
+                   reinterpret_cast<void*>(DetectTask()), DwordAt(detect, 0x1D0) >> 16,
+                   ScalarAt(detect, 0x200), ScalarAt(detect, 0x238));
         int n = Walk("detect", detect, player, 1, kBytes_Detect, eye, log, &best);
         n += Walk("special", special, player, 1, kBytes_Special, eye, log, &best);
         if (!n && log) GS_LOG("[target] no actor pointer on either component or the task right now");
@@ -488,8 +488,9 @@ namespace gs::aim
     {
         const uintptr_t detect = g_detect.load();
         if (!detect) return 0;
-        // Session sixteen: the task sits at +0x1D0. Verified by name before use.
-        const uintptr_t p = Deref(detect + 0x1D0);
+        // Session sixteen: the task sat at +0x1D0. 3732 moved it to +0x1C8,
+        // see kOff_Detect_Lit. Verified by name before use.
+        const uintptr_t p = Deref(detect + 0x1C8);
         const char* n = p ? NameOf(p) : nullptr;
         return (n && strstr(n, "FindDetectTargetTask")) ? p : 0;
     }
