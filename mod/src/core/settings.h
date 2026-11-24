@@ -303,6 +303,14 @@ namespace gs::Settings
         bool sound = false;
         char soundFile[240] = "";
 
+        // A line of text over the game when a pin lands, "Glint marked" for
+        // two seconds. Off by default, for the same reason as the sound.
+        // GalaxyGamerLIVE asked for an on-screen notice beside the sound on 4
+        // November. The game's own popup is still not reachable, so this is a
+        // small window of the mod's own over the game window, which never
+        // takes focus and lets clicks through. See hook/notice.h.
+        bool notice = false;
+
         // Whether a DualSense or DualShock 4 is read straight off HID. On by
         // default, because the alternative is Steam Input, and Steam Input
         // makes the game draw Xbox glyphs on a PlayStation pad. The switch is

@@ -32,7 +32,8 @@ before you install it.
   which is most things worth walking to.
 - **Buzzes the controller when a pin lands**, because the map is not open at that
   moment and there is nothing else to tell you. `Sound=1` in the ini plays a
-  sound as well, the Windows Asterisk sound or any .wav named in `SoundFile`.
+  sound as well, the Windows Asterisk sound or any .wav named in `SoundFile`,
+  and `Notice=1` puts "Glint marked" near the top of the screen for two seconds.
 - **Removes a pin with the map's own button.** Put the cursor on one and the
   prompt changes to Remove Marker, the same as for a marker you placed by hand.
   Press it and the pin goes.
@@ -140,8 +141,10 @@ Read these before you decide whether the build is for you.
   table that your sight line passes near, and if what you are pointing at is not
   in that table, something behind it might be. The log names what it took and
   what else was close.
-- **No on-screen message.** The buzz, and the sound when `Sound=1`, are the only
-  feedback. The game's own popup system has not been found yet.
+- **The on-screen notice is the mod's own, not the game's.** `Notice=1` draws a
+  small box over the game window, because the game's own popup system has not
+  been found yet. It shows in borderless and windowed play. In exclusive
+  fullscreen the game may draw over it.
 
 ## Reporting a problem
 

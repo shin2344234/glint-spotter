@@ -15,6 +15,7 @@
 #include "game/signatures.h"
 #include "hook/pad.h"
 #include "hook/chime.h"
+#include "hook/notice.h"
 #include "hook/vtable.h"
 
 namespace
@@ -563,6 +564,9 @@ namespace gs::mapicon
         // The sound, for a keyboard player or anyone who wants both. Only a
         // flag here; the key thread plays it.
         if (gs::Settings::Get().sound) gs::chime::Ring();
+        // And a line on screen, when the ini asks. Also only a flag; the
+        // notice has a thread and a window of its own.
+        if (gs::Settings::Get().notice) gs::notice::Show();
 
         // The same icon on the minimap, only when the ini asks.
         //

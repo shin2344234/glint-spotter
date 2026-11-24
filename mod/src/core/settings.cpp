@@ -191,6 +191,11 @@ namespace
         fputs("Sound=0\n", f);
         fputs("SoundFile=\n", f);
         fputs("\n", f);
+        fputs("; 1 shows \"Glint marked\" near the top of the screen for two seconds when a\n", f);
+        fputs("; pin lands. It is drawn over the game window, so it shows in borderless and\n", f);
+        fputs("; windowed play but may not in exclusive fullscreen.\n", f);
+        fputs("Notice=0\n", f);
+        fputs("\n", f);
         fputs("; 1 reads a DualSense or DualShock 4 directly, so the chord and the buzz work\n", f);
         fputs("; without Steam Input, and the game keeps its PlayStation button pictures.\n", f);
         fputs("; 0 leaves those pads to Steam Input or DS4Windows. Xbox pads are unaffected.\n", f);
@@ -325,6 +330,7 @@ namespace
         {"MiniPin", &Values::miniPin},
         {"PressKinds", &Values::pressKinds},
         {"Sound", &Values::sound},
+        {"Notice", &Values::notice},
     };
     struct Number { const char* key; float Values::* member; float lo, hi; bool zeroIsOff; const char* kept; };
     const Number kNumbers[] = {
@@ -502,9 +508,10 @@ namespace gs::Settings
         GS_LOG("settings: Mark=%s", g_values.mark);
         GS_LOG("settings: ClearTaken=%d, ClearNear=%.0f metres%s, Teleporters=%d", g_values.clearTaken ? 1 : 0,
                g_values.clearNear, g_values.clearNear > 0.0f ? "" : " (off)", g_values.teleporters ? 1 : 0);
-        GS_LOG("settings: PressKinds=%d, Rumble=%d, PadGuard=%d, Sound=%d%s%s", g_values.pressKinds ? 1 : 0,
-               g_values.rumble ? 1 : 0, g_values.padGuard ? 1 : 0, g_values.sound ? 1 : 0,
-               g_values.soundFile[0] ? ", SoundFile=" : "", g_values.soundFile);
+        GS_LOG("settings: PressKinds=%d, Rumble=%d, PadGuard=%d, Sound=%d%s%s, Notice=%d",
+               g_values.pressKinds ? 1 : 0, g_values.rumble ? 1 : 0, g_values.padGuard ? 1 : 0,
+               g_values.sound ? 1 : 0, g_values.soundFile[0] ? ", SoundFile=" : "", g_values.soundFile,
+               g_values.notice ? 1 : 0);
         GS_LOG("settings: Logs=%d", g_values.logs);
         return g_values;
     }

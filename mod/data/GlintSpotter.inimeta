@@ -100,6 +100,19 @@
           ],
           "order": 30
         },
+        "Notice": {
+          "label": "Show a notice on a pin",
+          "type": "bool",
+          "true": "1",
+          "false": "0",
+          "group": "Marking",
+          "default": "0",
+          "help": [
+            "Shows Glint marked near the top of the screen for two seconds when a pin lands.",
+            "It is drawn over the game window, so it shows in borderless and windowed play but may not in exclusive fullscreen."
+          ],
+          "order": 33
+        },
         "DirectPad": {
           "label": "Read PlayStation pads directly",
           "type": "bool",

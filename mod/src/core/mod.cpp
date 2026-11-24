@@ -28,6 +28,7 @@
 #include "game/physics.h"
 #include "hook/pad.h"
 #include "hook/chime.h"
+#include "hook/notice.h"
 #include "hook/hidpad.h"
 #include "hook/tick.h"
 #include "hook/watch.h"
@@ -1140,6 +1141,7 @@ namespace
                 if (gs::pad::ChordHeld(g_chord, g_chordHold, 0)) OnTrigger("the pad chord");
                 gs::pad::Pump();
                 gs::chime::Pump();
+                gs::notice::Pump();
             }
             // The entity set, off the game's thread. Twice a second is plenty:
             // an entity stays in the set twelve seconds after it was last seen.
@@ -1803,6 +1805,7 @@ namespace gs::Mod
         // Before tick::Remove, so a swap cannot land after the slots go back.
         if (!processTerminating && g_slotThread) WaitForSingleObject(g_slotThread, 1000);
         if (g_slotThread) { CloseHandle(g_slotThread); g_slotThread = nullptr; }
+        gs::notice::Stop(processTerminating);
         gs::hidpad::Stop(processTerminating);
         gs::pad::Stop(processTerminating);
         gs::savemap::Stop(processTerminating);

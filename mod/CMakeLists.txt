@@ -51,6 +51,7 @@ add_library(GlintSpotter SHARED
     src/hook/thunk.asm
     src/hook/pad.cpp
     src/hook/chime.cpp
+    src/hook/notice.cpp
     src/hook/hidpad.cpp
     src/hook/hidpad_parse.cpp
     src/core/settings.cpp
