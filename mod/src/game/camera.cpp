@@ -93,8 +93,34 @@ namespace gs::camera
         size_t size = 0;
         gs::typescan::ModuleRange(base, size);
         const auto* slots = reinterpret_cast<void* const*>(vtable);
-        if (!gs::rtti::Readable(slots, (sig::kSlotCameraUpdate + 1) * sizeof(void*))) return false;
-        const uintptr_t held = reinterpret_cast<uintptr_t>(slots[sig::kSlotCameraUpdate]);
+        if (!gs::rtti::Readable(slots, sig::kSlotCameraScan * sizeof(void*))) return false;
+
+        // 3840 inserted a virtual at slot 2 and the update moved to slot 3, so
+        // the slot is found by what it starts with: the first of the leading
+        // slots that holds the update's prologue. When none does, another
+        // mod's hook may be sitting in the update's slot, and the slot the
+        // build is known to use is taken so this stacks on it as before.
+        auto startsLikeUpdate = [&](uintptr_t fn)
+        {
+            if (fn < base || fn >= base + size) return false;
+            if (!gs::rtti::Readable(reinterpret_cast<const void*>(fn), sizeof(sig::kCameraUpdatePrologue))) return false;
+            for (size_t i = 0; i < sizeof(sig::kCameraUpdatePrologue); ++i)
+            {
+                if (i >= sig::kCameraUpdateFieldAt && i < sig::kCameraUpdateFieldAt + 3) continue;
+                if (reinterpret_cast<const uint8_t*>(fn)[i] != sig::kCameraUpdatePrologue[i]) return false;
+            }
+            return true;
+        };
+        int slot = gs::sig::NewLayout() ? sig::kSlotCameraUpdate : sig::kSlotCameraUpdate3732;
+        for (int s = 0; s < sig::kSlotCameraScan; ++s)
+        {
+            if (startsLikeUpdate(reinterpret_cast<uintptr_t>(slots[s])))
+            {
+                slot = s;
+                break;
+            }
+        }
+        const uintptr_t held = reinterpret_cast<uintptr_t>(slots[slot]);
         const uintptr_t expect = base + sig::kCameraTPSUpdate;
         const bool inImage = held >= base && held < base + size;
         // The update is known by its first bytes, which read the fade weight
@@ -104,31 +130,26 @@ namespace gs::camera
         // September patch moved it from +0x338 to +0x340 and nothing else in
         // those bytes, and the vtable has already been named by RTTI, so the
         // shape is the check and the offset is not.
-        bool looksLikeUpdate = inImage &&
-            gs::rtti::Readable(reinterpret_cast<const void*>(held), sizeof(sig::kCameraUpdatePrologue));
-        for (size_t i = 0; looksLikeUpdate && i < sizeof(sig::kCameraUpdatePrologue); ++i)
-        {
-            if (i >= sig::kCameraUpdateFieldAt && i < sig::kCameraUpdateFieldAt + 3) continue;
-            if (reinterpret_cast<const uint8_t*>(held)[i] != sig::kCameraUpdatePrologue[i]) looksLikeUpdate = false;
-        }
+        const bool looksLikeUpdate = startsLikeUpdate(held);
         if (inImage && !looksLikeUpdate)
         {
-            GS_LOG_ERR("[camera] slot %d holds 0x%p and it does not start like the update (recorded at 0x%p); not hooking",
-                       sig::kSlotCameraUpdate, reinterpret_cast<void*>(held), reinterpret_cast<void*>(expect));
+            GS_LOG_ERR("[camera] slot %d holds 0x%p and it does not start like the update (recorded at 0x%p), "
+                       "and none of the first %d slots does; not hooking",
+                       slot, reinterpret_cast<void*>(held), reinterpret_cast<void*>(expect), sig::kSlotCameraScan);
             return false;
         }
 
         // The thunk jumps through gs_cameraOriginal unchecked, so it is set
         // before the slot changes (GitHub #25).
-        if (!vtable::Install(vtable, sig::kSlotCameraUpdate, reinterpret_cast<void*>(&gs_CameraThunk), g_swap,
+        if (!vtable::Install(vtable, slot, reinterpret_cast<void*>(&gs_CameraThunk), g_swap,
                              &gs_cameraOriginal))
         {
-            GS_LOG_ERR("[camera] could not take slot %d on the TPS camera vtable", sig::kSlotCameraUpdate);
+            GS_LOG_ERR("[camera] could not take slot %d on the TPS camera vtable", slot);
             return false;
         }
         gs_cameraOriginal = g_swap.original;
         GS_LOG_OK("[camera] slot %d on vtable 0x%p was 0x%p (%s), now the capture thunk",
-                  sig::kSlotCameraUpdate, reinterpret_cast<void*>(vtable), g_swap.original,
+                  slot, reinterpret_cast<void*>(vtable), g_swap.original,
                   looksLikeUpdate ? (held == expect ? "the update, at the recorded address" : "the update, moved since the record")
                                   : "someone else's hook, stacked on");
         return true;

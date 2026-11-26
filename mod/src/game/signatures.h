@@ -60,13 +60,25 @@
 
 namespace gs::sig
 {
-    constexpr const char* kExeVersion = "1.0.0.3732";
+    constexpr const char* kExeVersion = "1.0.0.3840";
+
+    // 3840, the 26 November patch, changed layouts the mod reads and left the
+    // older builds' alone, so a few values come in two generations. The
+    // fourth part of the exe's version goes in through SelectBuild once at
+    // startup, before any of them is read (LogGameBuild in core/mod.cpp). A
+    // build that cannot be read gets the newest generation. The kOff3732_
+    // names keep the older values; the plain kOff_ names are 3840's, which is
+    // what rebase.py checks against.
+    constexpr unsigned kBuildNewLayout = 3840;
+    inline unsigned g_build = 0;
+    inline void SelectBuild(unsigned build) { g_build = build; }
+    inline bool NewLayout() { return g_build == 0 || g_build >= kBuildNewLayout; }
 
     // The two root UI controls that own every map icon. Slot 36 is the per frame
     // update, slot 174 creates an icon (35 and 170 through 2976). The vtables are also found by RTTI at
     // runtime when these are stale.
-    constexpr uintptr_t kWorldMapVtable = 0x05A8CCA0;
-    constexpr uintptr_t kMiniMapVtable  = 0x05A91AA0;
+    constexpr uintptr_t kWorldMapVtable = 0x05C19A30;   // 3840; 0x05A8CCA0 on 3732
+    constexpr uintptr_t kMiniMapVtable  = 0x05C1F688;   // 3840; 0x05A91AA0 on 3732
 
     constexpr const char* kWorldMapClass = ".?AVUIGamePlayControlRootWorldMap@uiCommonScript@pa@@";
     constexpr const char* kMiniMapClass  = ".?AVUIGamePlayControlRootMiniMap@uiCommonScript@pa@@";
@@ -104,7 +116,7 @@ namespace gs::sig
     // stub, which is why rebase.py finds the remover by that prologue rather
     // than by its index.
     constexpr int kSlotRemoveIcon = 175;
-    constexpr uintptr_t kRemoveIconBody = 0x00F96880;
+    constexpr uintptr_t kRemoveIconBody = 0x00FFE410;   // 3840; 0x00F96880 on 3732
 
     // Who asked for a removal. Two functions call the same slot and only
     // one of them is the player pressing delete: the icon builder removes
@@ -139,7 +151,7 @@ namespace gs::sig
     // 3392 grew the vtable to 172 slots and the function moved to slot 146,
     // 0x01162560, 984 bytes, still naming the same three strings. 144 is the
     // ret 0 stub.
-    constexpr uintptr_t kAlertRootVtable = 0x05AE45E0;
+    constexpr uintptr_t kAlertRootVtable = 0x05C73220;   // 3840; 0x05AE45E0 on 3732
     constexpr const char* kAlertRootClass = ".?AVUIGamePlayControlRootAlertSystem@uiCommonScript@pa@@";
     constexpr int kSlotAlertCall = 146;   // of 172
 
@@ -174,7 +186,7 @@ namespace gs::sig
     //            struct { const void* records; int32 count; }*)
     //
     // Find or insert by id, so calling it twice with one id is an update.
-    constexpr uintptr_t kPinUpsert = 0x0056A070;   // (submodule, &err, kind, &{records, count})
+    constexpr uintptr_t kPinUpsert = 0x0059ABC0;   // 3840; 0x0056A070 on 3732. (submodule, &err, kind, &{records, count})
     constexpr uint8_t   kPinUpsertPrologue[12] = {
         0x44, 0x88, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8b   the kind
         0x48, 0x89, 0x54, 0x24, 0x10,   // mov [rsp+0x10], rdx   the error out
@@ -193,7 +205,7 @@ namespace gs::sig
     // same arguments after the same actor gates and the same list walk in
     // 24-byte steps. These fifteen bytes are not unique in the image (149
     // hits), so they are only ever compared at this address.
-    constexpr uintptr_t kPinRemove = 0x0056A340;   // (submodule, &err, &id, kind)
+    constexpr uintptr_t kPinRemove = 0x0059AE90;   // 3840; 0x0056A340 on 3732. (submodule, &err, &id, kind)
     constexpr uint8_t   kPinRemovePrologue2[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x08,   // mov [rsp+0x08], rbx
         0x48, 0x89, 0x74, 0x24, 0x10,   // mov [rsp+0x10], rsi
@@ -242,8 +254,8 @@ namespace gs::sig
     // 2976 found them the same way: the create and the server remove moved by
     // 0x70, the upsert and the erase did not move, and the acknowledgements
     // still reach the submodule through +0x68 and +0x168.
-    constexpr uintptr_t kPinCreate       = 0x02B8BE50;
-    constexpr uintptr_t kPinServerRemove = 0x02B8C320;
+    constexpr uintptr_t kPinCreate       = 0x02CBB810;   // 3840; 0x02B8BE50 on 3732
+    constexpr uintptr_t kPinServerRemove = 0x02CBBCE0;   // 3840; 0x02B8C320 on 3732
     constexpr uint8_t   kPinCreatePrologue[15] = {
         0x4C, 0x89, 0x4C, 0x24, 0x20,   // mov [rsp+0x20], r9
         0x4C, 0x89, 0x44, 0x24, 0x18,   // mov [rsp+0x18], r8
@@ -256,7 +268,7 @@ namespace gs::sig
     // Clear and the create keeps fifteen markers, set and it keeps five
     // hundred. Read only, and only so the log can say which cap applies. It is
     // the one cmp byte ptr [rip+...] inside the create.
-    constexpr uintptr_t kPinOnlineFlag   = 0x071BDD88;
+    constexpr uintptr_t kPinOnlineFlag   = 0x073629D8;   // 3840; 0x071BDD88 on 3732
     constexpr uintptr_t kOff_Pin_Owner   = 0x08;   // submodule + 8, the notify target
 
     // And the map's end of it: what the world map does when it is told a
@@ -301,10 +313,18 @@ namespace gs::sig
     // update starts by reading the fade weight at this+0x338 and that read is
     // unique in the image. 3392 moved the weight to +0x358; the vtable is
     // still sixteen slots and the update still 290 bytes.
-    constexpr uintptr_t kCameraTPSVtable   = 0x05B23C48;
+    constexpr uintptr_t kCameraTPSVtable   = 0x05CB3248;   // 3840; 0x05B23C48 on 3732
     constexpr const char* kCameraTPSClass  = ".?AVPlayerCameraTPSMode@gameClientScript@pa@@";
-    constexpr int       kSlotCameraUpdate  = 2;
-    constexpr uintptr_t kCameraTPSUpdate   = 0x013E19C0;
+    // 3840 put a new virtual in at slot 2 (456 bytes, reads +0x18C and the
+    // frame global first) and the update went to slot 3 with the same 290
+    // bytes. Through 3732 it is slot 2. camera.cpp looks through the first
+    // kSlotCameraScan slots for the one that starts with the prologue below
+    // and falls back to kSlotCameraUpdate, or kSlotCameraUpdate3732 on an
+    // older build, when another mod's hook is in the slot.
+    constexpr int       kSlotCameraUpdate  = 3;
+    constexpr int       kSlotCameraUpdate3732 = 2;
+    constexpr int       kSlotCameraScan    = 8;
+    constexpr uintptr_t kCameraTPSUpdate   = 0x01468270;   // 3840; 0x013E19C0 on 3732
     constexpr uint8_t   kCameraUpdatePrologue[22] = {
         0x48, 0x8B, 0xC4,                         // mov rax, rsp
         0x48, 0x89, 0x58, 0x08,                   // mov [rax+8], rbx
@@ -359,7 +379,7 @@ namespace gs::sig
 // on 3527 and 3549 to 0x071C3F10, on 3576 to 0x071C6130, on 3663 to
 // 0x0724AD78. Since 3663 the plugin reads that store itself at startup
 // (game/locate.cpp) and uses this value only when RTTI cannot name the class.
-constexpr uintptr_t kLgsoManagerGlobal = 0x07250EF8;
+constexpr uintptr_t kLgsoManagerGlobal = 0x073F6430;   // 3840; 0x07250EF8 on 3732
 
 // The special mode table's manager, SpecialModeStaticInfo. Its setter is
 // RVA 0x0184C820, mov qword ptr [rip + 0x05521BC1], rcx ; ret, which writes
@@ -379,7 +399,7 @@ constexpr uintptr_t kLgsoManagerGlobal = 0x07250EF8;
 // row count moved to +0x28 with the container change described at
 // kOff_Lgso_Count, and the plugin finds the global through the setter at
 // startup the same way as the level gimmick one.
-constexpr uintptr_t kSpecialModeManagerGlobal = 0x07250F10;
+constexpr uintptr_t kSpecialModeManagerGlobal = 0x073F6450;   // 3840; 0x07250F10 on 3732
 constexpr uint32_t kSpecialModeRows = 33;
 
 // Globals that hold the ClientActorManager. The startup scan for them reads the
@@ -443,7 +463,14 @@ constexpr uint32_t kSpecialModeRows = 33;
 // its atexit thunk (0x04C7D393), and the two callers at 0x003AAB28 and
 // 0x00A5F793. It is +0x6190 from 3663's, next to the +0x6180 the level
 // gimmick global moved. Not yet seen in play.
-constexpr uintptr_t kActorManagerGlobals[] = {0x0724BE30};
+// 3840's is 0x073F1830, matched from 3732's 0x0724BE30 by the same seven
+// references: the static initializer (0x055D99C7, 0x055D99D8, 0x055D99F1),
+// its atexit thunk (0x04DEC183) and the callers at 0x003B6148, 0x00A9F3D3 and
+// 0x00A9F3DF all point there. The 23 static initializers of this shape come in
+// the same order in both builds and this one is the first in each. The shift
+// from 3732 is +0x1A5A00, where the level gimmick global moved +0x1A5538.
+// Not yet seen in play.
+constexpr uintptr_t kActorManagerGlobals[] = {0x073F1830};
 // 3663 changed the container every static table sits in, this one and the
 // special mode table alike. +0x08 now holds the table's name, the row count
 // is the u32 at +0x28, and the rows are 0x18-byte entries in an array whose
@@ -460,10 +487,32 @@ constexpr uintptr_t kActorManagerGlobals[] = {0x0724BE30};
 // A zero record means the game has not built that row yet, not that it is
 // gone, so the read skips it and the count of rows it took goes in the log.
 // Master Looter, Stamina Master and Flight Freedom read the same layout.
-constexpr uintptr_t kOff_Lgso_Count    = 0x28;
-constexpr uintptr_t kOff_Lgso_Rows     = 0x20;
-constexpr uintptr_t kOff_Table_RowStride = 0x18;
-constexpr uintptr_t kOff_Table_RowRecord = 0x08;
+//
+// 3840 changed the container again. The lookup is now a function (0x005B1FF0
+// for the level gimmick table, 0x005B2530 for the special mode table, the
+// same code instantiated twice) that reads the row count from +0x20 and the
+// entries from +0x18, steps 0x30 bytes a row with lea r, [r+r*2]; shl r, 4,
+// and returns the record pointer at row +0x20. Row +0x28 is set to the tick
+// count plus 30000 each time a row is looked up. A row whose record is zero
+// is loaded through 0x005B37F0 on first use, so the "not built yet" rule
+// still holds. Whether a record is released again when that time runs out
+// is not shown anywhere in those functions.
+constexpr uintptr_t kOff_Lgso_Count    = 0x20;
+constexpr uintptr_t kOff_Lgso_Rows     = 0x18;
+constexpr uintptr_t kOff_Table_RowStride = 0x30;
+constexpr uintptr_t kOff_Table_RowRecord = 0x20;
+constexpr uintptr_t kOff3732_Lgso_Count    = 0x28;
+constexpr uintptr_t kOff3732_Lgso_Rows     = 0x20;
+constexpr uintptr_t kOff3732_Table_RowStride = 0x18;
+constexpr uintptr_t kOff3732_Table_RowRecord = 0x08;
+
+struct TableLayout { uintptr_t count, rows, stride, record; };
+// The layout of a static table's container for the running build.
+inline TableLayout Table()
+{
+    if (NewLayout()) return {kOff_Lgso_Count, kOff_Lgso_Rows, kOff_Table_RowStride, kOff_Table_RowRecord};
+    return {kOff3732_Lgso_Count, kOff3732_Lgso_Rows, kOff3732_Table_RowStride, kOff3732_Table_RowRecord};
+}
 
 // A record's lists hold the placements. Session sixty-four's raw dump of
 // record 0's list at +0x20 gives the layout outright:
@@ -502,10 +551,15 @@ constexpr uintptr_t kOff_LgsoData_Stride   = 0xC0;
 constexpr uintptr_t kOff_LgsoData_Transform = 0x54;
 constexpr uintptr_t kOff_Transform_Pos      = 0x10;   // after the quaternion
 
-constexpr uintptr_t kGimmickVtable         = 0x059C8840;
+constexpr uintptr_t kGimmickVtable         = 0x05B57190;   // 3840; 0x059C8840 on 3732
     constexpr const char* kGimmickClass        = ".?AVClientGimmickActorComponent@pa@@";
     constexpr uintptr_t kOff_Comps_Gimmick     = 0x30;
-    constexpr uintptr_t kOff_Gimmick_DetectTgt = 0x47B;
+    // 3840 grew the gimmick component by 0x28 above +0x430 and by smaller
+    // steps between +0x270 and +0x430, see kOff_Gimmick_Sub. The glint byte
+    // moved from +0x47B to +0x4A3.
+    constexpr uintptr_t kOff_Gimmick_DetectTgt = 0x4A3;
+    constexpr uintptr_t kOff3732_Gimmick_DetectTgt = 0x47B;
+    inline uintptr_t GimmickDetectTgt() { return NewLayout() ? kOff_Gimmick_DetectTgt : kOff3732_Gimmick_DetectTgt; }
 
     // The reveal itself. ClientDetectActorComponent (block slot +0x50, on
     // characters and on anything else the flash can reveal) keeps a byte at
@@ -552,7 +606,15 @@ constexpr uintptr_t kGimmickVtable         = 0x059C8840;
     constexpr const char* kDetectClass          = ".?AVClientDetectActorComponent@pa@@";
     constexpr uintptr_t kOff_Comps_Detect       = 0x50;
     constexpr uintptr_t kOff_Detect_Lit         = 0x1D2;
-    constexpr uintptr_t kOff_Gimmick_Sub        = 0x458;
+    // 3840: slot 125 of the gimmick component sets +0x173 on the sub-object it
+    // reads at +0x480, and slot 126 writes +0x4A3 from r15b where 3732's slot
+    // 124 and 125 used +0x458 and +0x47B. Everything from +0x430 up moved by
+    // 0x28, +0x2D4 to +0x40C by 0x10 and +0x270 to +0x28E by 8, from pairing
+    // 92 of the 128 slot functions of the two builds instruction by
+    // instruction. The sub-object's own +0x1C0 count has no anchor.
+    constexpr uintptr_t kOff_Gimmick_Sub        = 0x480;
+    constexpr uintptr_t kOff3732_Gimmick_Sub    = 0x458;
+    inline uintptr_t GimmickSub() { return NewLayout() ? kOff_Gimmick_Sub : kOff3732_Gimmick_Sub; }
     constexpr uintptr_t kOff_GimmickSub_Active  = 0x1C0;
 
     // What makes a gimmick a thing the player can pick up, from Master
@@ -568,7 +630,11 @@ constexpr uintptr_t kGimmickVtable         = 0x059C8840;
     // byte directly. It only decides whether the log says "locked".
     // On 3392 its neighbours at +0x3E8, +0x3F0 and +0x3F4 moved by eight in
     // slot 11, so it is taken to be +0x3F2. Unproved, and still log only.
-    constexpr uintptr_t kOff_Gimmick_Locked     = 0x3F2;
+    // 3840: slot 11 reads +0x400, +0x408, +0x40C and +0x412 where 3732's read
+    // +0x3F0, +0x3F8, +0x3FC and +0x402, so it is taken to be +0x402. Unproved.
+    constexpr uintptr_t kOff_Gimmick_Locked     = 0x402;
+    constexpr uintptr_t kOff3732_Gimmick_Locked = 0x3F2;
+    inline uintptr_t GimmickLocked() { return NewLayout() ? kOff_Gimmick_Locked : kOff3732_Gimmick_Locked; }
 
     // Knowledge. The reveal effect the flash plays is named for it
     // (fx_detectmode_knowledge_gimmick), and the audit traced
@@ -592,8 +658,8 @@ constexpr uintptr_t kGimmickVtable         = 0x059C8840;
     // and normal out) and what it uses. Found at runtime by byte pattern, with
     // the facade and the frame offset decoded from its own RIP-relative
     // operands; these are the fallback and the record.
-    constexpr uintptr_t kRayCastWrapper   = 0x03D75670;
-    constexpr uintptr_t kPhysicsFacade    = 0x06F1A290;
-    constexpr uintptr_t kPhysicsFrameOff  = 0x07237470;
+    constexpr uintptr_t kRayCastWrapper   = 0x03ED58E0;   // 3840; 0x03D75670 on 3732
+    constexpr uintptr_t kPhysicsFacade    = 0x070BE188;   // 3840; 0x06F1A290 on 3732
+    constexpr uintptr_t kPhysicsFrameOff  = 0x073DCAF0;   // 3840; 0x07237470 on 3732
     constexpr int       kSlotCastRay      = 61;   // still 61 on 3392: the wrapper calls [rax+0x1E8]
 }

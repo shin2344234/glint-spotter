@@ -451,7 +451,7 @@ namespace
             }
             if (gimmickComp)
             {
-                const uintptr_t sub = *reinterpret_cast<const uintptr_t*>(gimmickComp + gs::sig::kOff_Gimmick_Sub);
+                const uintptr_t sub = *reinterpret_cast<const uintptr_t*>(gimmickComp + gs::sig::GimmickSub());
                 if (!PtrLike(sub)) return false;
                 *out = *reinterpret_cast<const uint32_t*>(sub + gs::sig::kOff_GimmickSub_Active) != 0;
                 return true;
@@ -591,7 +591,7 @@ namespace
             // its data pointers hold.
             if (havePath && !byPath) return false;
             if (!byData && !byPath) return false;
-            *locked = *reinterpret_cast<const uint8_t*>(comp + gs::sig::kOff_Gimmick_Locked) != 0;
+            *locked = *reinterpret_cast<const uint8_t*>(comp + gs::sig::GimmickLocked()) != 0;
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -639,7 +639,7 @@ namespace
         if (!StillTheSame(comp, vt)) return false;
         __try
         {
-            *out = *reinterpret_cast<const uint8_t*>(comp + gs::sig::kOff_Gimmick_DetectTgt) != 0;
+            *out = *reinterpret_cast<const uint8_t*>(comp + gs::sig::GimmickDetectTgt()) != 0;
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -1272,7 +1272,7 @@ namespace gs::actors
         {
             const Entity& e = g_set[i];
             if (!e.gimmickComp) continue;
-            if (Deref(e.gimmickComp + gs::sig::kOff_Gimmick_Sub) != p) continue;
+            if (Deref(e.gimmickComp + gs::sig::GimmickSub()) != p) continue;
             *out = e;
             *role = "the gimmick's lighting sub-object";
             return true;

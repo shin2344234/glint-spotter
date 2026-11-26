@@ -22,6 +22,7 @@
 #include "game/pickup.h"
 #include "game/player.h"
 #include "game/rtti.h"
+#include "game/signatures.h"
 #include "game/typescan.h"
 
 namespace
@@ -112,11 +113,11 @@ namespace
     // has moved it, which every patch so far has.
     struct Cls { uintptr_t rva; const char* name; uintptr_t va; };
     Cls g_cls[] = {
-        {0x05CDE120, ".?AVFieldGimmickSaveData@pa@@", 0},
-        {0x05CDC440, ".?AVFieldSaveData@pa@@", 0},
-        {0x05F6E070, ".?AVServerActorManager@pa@@", 0},
-        {0x05F6DE90, ".?AVServerUserActor@pa@@", 0},
-        {0x05F65430, ".?AVServerContentsMiscActorComponent@pa@@", 0},
+        {0x05E6B0B0, ".?AVFieldGimmickSaveData@pa@@", 0},
+        {0x05E6A630, ".?AVFieldSaveData@pa@@", 0},
+        {0x060FA988, ".?AVServerActorManager@pa@@", 0},
+        {0x060FA7A8, ".?AVServerUserActor@pa@@", 0},
+        {0x060F1F10, ".?AVServerContentsMiscActorComponent@pa@@", 0},
     };
     enum { kRecord, kField, kServerManager, kServerUser, kContentsMisc, kClassCount };
     uintptr_t Vt(int i) { return g_cls[i].va; }
@@ -489,7 +490,14 @@ namespace
     // has its twin on 3732 pointing there, the static initializer
     // (0x0552D497, 0x0552D4A8, 0x0552D4C1), its atexit thunk at 0x050EF833
     // and the getter at 0x02A13001. Not yet seen in play.
-    constexpr uintptr_t kServerManagerGlobal = 0x072895E8;
+    // 0x0742F0E8 on 3840. The same 23 static initializers (sub rsp, 0x28;
+    // lea rcx, [global]; call the constructor; zero the 0x19 bytes) exist in
+    // both builds in the same order, and the thirteenth is 0x0552D490 on 3732
+    // and 0x056B9600 on 3840. Its global has the same six references: the
+    // initializer's three (0x056B9607, 0x056B9618, 0x056B9631), the atexit
+    // thunk at 0x052731D3 and the getter at 0x02B39F21, which ends in the
+    // same lea rax, [global]. Not yet seen in play.
+    constexpr uintptr_t kServerManagerGlobal = 0x0742F0E8;
     constexpr int kUsersMax = 64;   // list entries asked for the component
     constexpr uintptr_t kOff_Mgr_User = 0xB8, kOff_Actor_Comps = 0x68, kOff_Comps_ContentsMisc = 0x368;
     // The DLC build moved the map to +0x330 (the insert is 0x02B4D250 on 3424,
@@ -498,7 +506,12 @@ namespace
     // so, and taken glints went unfiltered until 30 October. rebase.py checked
     // only that "+ 0x2c0]" appeared in the routine, which a stack slot kept
     // true; it now finds the map through the insert's 0xB8-byte allocation.
-    constexpr uintptr_t kOff_FieldMap = 0x330, kOff_Map_Count = 0x04, kOff_Map_Entries = 0x18;
+    // 3840 moved it to +0x350 (reached with lea rcx, [r15+0x350] in the load
+    // routine, slot 10, where the count at +0x354 and the entries at +0x368
+    // are read by slots 4, 22 and 34 as +0x334 and +0x348 were).
+    constexpr uintptr_t kOff_FieldMap = 0x350, kOff_Map_Count = 0x04, kOff_Map_Entries = 0x18;
+    constexpr uintptr_t kOff3732_FieldMap = 0x330;
+    uintptr_t FieldMapOff() { return gs::sig::NewLayout() ? kOff_FieldMap : kOff3732_FieldMap; }
     constexpr uintptr_t kOff_Node_Field = 0x08;
 
     const char* g_why = "";
@@ -607,7 +620,7 @@ namespace
     bool FieldsOf(uintptr_t comp, std::vector<uintptr_t>& out)
     {
         out.clear();
-        const uintptr_t map = comp + kOff_FieldMap;
+        const uintptr_t map = comp + FieldMapOff();
         uint32_t n = 0;
         if (!CopyOut(map + kOff_Map_Count, &n, 4) || n > 100000) { g_why = "the field map does not read"; return false; }
         const uintptr_t entries = Deref(map + kOff_Map_Entries);
@@ -655,7 +668,13 @@ namespace
     // of 164, and the operator on the finished Challenge_Standstone_Adventure_0015
     // read Complete there on four passes, 1 to 16 metres from the player.
     // +0x27C held the same value on most of them and is not used.
-    constexpr uintptr_t kOff_LiveState = 0x270;
+    // 3840 moved it to +0x278. Slot 57, the check that compares the current
+    // state with the one a state record names, reads mov ebx, [rbx+0x270] at
+    // 0x00A2B4F8 on 3732 and mov ebx, [rbx+0x278] at 0x00A6A798 on 3840, in
+    // 168 bytes that are otherwise the same.
+    constexpr uintptr_t kOff_LiveState = 0x278;
+    constexpr uintptr_t kOff3732_LiveState = 0x270;
+    uintptr_t LiveStateOff() { return gs::sig::NewLayout() ? kOff_LiveState : kOff3732_LiveState; }
 
     // Placements a loaded gimmick says are done, joined the same way records
     // are. Only ever added to the taken set, never taken out of it.
@@ -676,7 +695,7 @@ namespace
             if (!e.gimmick || !e.gimmickComp) continue;
             if (Deref(e.gimmickComp) != e.gimmickVt) continue;   // freed since it was found
             uint32_t st = 0;
-            if (!CopyOut(e.gimmickComp + kOff_LiveState, &st, 4)) continue;
+            if (!CopyOut(e.gimmickComp + LiveStateOff(), &st, 4)) continue;
             // What the player carries is a gimmick too, standing wherever he
             // does. On 23 September his sword, always GimmickOn, stood 2.4
             // metres from a locked teleporter and made it read switched on.
@@ -818,7 +837,7 @@ namespace
             if (!abyss && d > 30.0f) continue;
             if (Deref(e.gimmickComp) != e.gimmickVt) continue;
             uint32_t st = 0;
-            if (!CopyOut(e.gimmickComp + kOff_LiveState, &st, 4)) continue;
+            if (!CopyOut(e.gimmickComp + LiveStateOff(), &st, 4)) continue;
             const float p[3] = {e.x, e.y, e.z};
             float pd = 0;
             const int place = Nearest(p, &pd);

@@ -549,6 +549,56 @@ def table_container(glob):
     return best(counts), best(rowsat)
 
 
+def table_container_v2(glob):
+    """3840's container. The resolver is a call: mov rcx, [global]; call F, and F
+    compares the key with a dword at [rcx + count], steps the entries with
+    lea r, [x+x*2]; shl r, n, adds the entries pointer [this + rows] and tests
+    the record at [row + record]. (count, rows, stride, record), None where
+    not seen. The commonest answer across the global's call sites wins."""
+    votes = [{}, {}, {}, {}]
+    seen = set()
+    for p in xrefs(glob):
+        f = func_of(p)
+        if not f:
+            continue
+        body = dis(f[0], f[1] - f[0])
+        at = next((j for j, i in enumerate(body) if i.address - IB <= p < i.address - IB + i.size), None)
+        if at is None or body[at].mnemonic != "mov" or not body[at].op_str.startswith("rcx, qword ptr [rip"):
+            continue
+        callee = None
+        for i in body[at + 1:at + 4]:
+            if i.mnemonic == "call" and i.op_str.startswith("0x"):
+                callee = int(i.op_str, 16) - IB
+                break
+        if callee is None or callee in seen:
+            continue
+        seen.add(callee)
+        fn = dis(callee, 0xE0)
+        cnt = rows = stride = rec_ = None
+        for k, i in enumerate(fn):
+            m = re.match(r"(\w+), dword ptr \[rcx \+ (0x[0-9a-f]+)\]$", i.op_str)
+            if i.mnemonic == "cmp" and m and cnt is None:
+                cnt = int(m.group(2), 16)
+            m = re.match(r"(\w+), \[(\w+)\*2\]$", i.op_str)
+            if i.mnemonic == "lea" and m and stride is None:
+                reg = m.group(1)
+                shl = next((int(x.op_str.split(", ")[1], 0) for x in fn[k + 1:k + 4]
+                            if x.mnemonic == "shl" and x.op_str.startswith(reg + ", ")), None)
+                if shl is not None:
+                    stride = 3 << shl
+            m = re.match(r"\w+, qword ptr \[\w+ \+ (0x[0-9a-f]+)\]$", i.op_str)
+            if i.mnemonic == "add" and m and stride is not None and rows is None:
+                rows = int(m.group(1), 16)
+            m = re.match(r"qword ptr \[(\w+) \+ (0x[0-9a-f]+)\], 0$", i.op_str)
+            if i.mnemonic == "cmp" and m and rec_ is None and rows is not None:
+                rec_ = int(m.group(2), 16)
+        for n, v in enumerate((cnt, rows, stride, rec_)):
+            if v is not None:
+                votes[n][v] = votes[n].get(v, 0) + 1
+    best = lambda d: max(d, key=d.get) if d else None
+    return tuple(best(v) for v in votes)
+
+
 def main():
     print("exe %s, %d bytes" % (version(), len(d)))
     old_ver = re.search(r'kExeVersion\s*=\s*"([^"]+)"', SIG).group(1)
@@ -588,12 +638,24 @@ def main():
     print("\nfunctions")
     report("kRemoveIconBody", slot(wm, r) if wm and r is not None else None, rec("kRemoveIconBody"),
            "slot %s of the world map" % r)
-    upd = slot(cam, rec("kSlotCameraUpdate")) if cam else None
     pro, at = rec_bytes("kCameraUpdatePrologue"), rec("kCameraUpdateFieldAt")
+    # 3840 put a new virtual in at slot 2 and the update is slot 3, so the slot
+    # is the first of the leading ones that starts with the recorded prologue.
+    upd = None
+    cam_slot = None
+    for s in range(rec("kSlotCameraScan") or 8) if cam else []:
+        a = slot(cam, s)
+        g = raw(a, len(pro)) if a else b""
+        if g[:at] == pro[:at] and g[at + 4:] == pro[at + 4:]:
+            upd, cam_slot = a, s
+            break
+    report("kSlotCameraUpdate", cam_slot, rec("kSlotCameraUpdate"),
+           "the first of the camera's leading slots that starts like the update", 0)
     got = raw(upd, len(pro)) if upd else b""
     ok = got[:at] == pro[:at] and got[at + 4:] == pro[at + 4:]
     report("kCameraTPSUpdate", upd if ok else None, rec("kCameraTPSUpdate"),
-           "slot 2 of the camera, prologue matches" if ok else "slot 2's prologue no longer matches")
+           "slot %s of the camera, prologue matches" % cam_slot if ok else
+           "no leading slot of the camera starts with the prologue")
     if ok:
         # The recorded array stops partway into the displacement, which the
         # plugin skips when it compares, so the field is read off the exe.
@@ -706,10 +768,22 @@ def main():
         if not glob:
             continue
         cnt, rows = table_container(glob)
+        if cnt is not None and rows is not None:
+            # 3732 and older: the resolver is inlined, 0x18-byte rows.
+            report("kOff3732_Lgso_Count", cnt, rec("kOff3732_Lgso_Count"),
+                   "the %s resolver's cmp of the key against [table+...]" % what, 3)
+            report("kOff3732_Lgso_Rows", rows, rec("kOff3732_Lgso_Rows"),
+                   "the %s resolver's load of the 0x18-byte entries" % what, 3)
+            continue
+        cnt, rows, stride, rcd = table_container_v2(glob)
         report("kOff_Lgso_Count", cnt, rec("kOff_Lgso_Count"),
-               "the %s resolver's cmp of the key against [table+...]" % what, 3)
+               "the %s lookup's cmp of the key against [table+...]" % what, 3)
         report("kOff_Lgso_Rows", rows, rec("kOff_Lgso_Rows"),
-               "the %s resolver's load of the 0x18-byte entries" % what, 3)
+               "the %s lookup's add of the entries pointer" % what, 3)
+        report("kOff_Table_RowStride", stride, rec("kOff_Table_RowStride"),
+               "the %s lookup's lea [x+x*2]; shl, which is 3 << n" % what, 3)
+        report("kOff_Table_RowRecord", rcd, rec("kOff_Table_RowRecord"),
+               "the %s lookup's cmp qword ptr [row+...], 0" % what, 3)
     if lgso:
         stride, votes, trips = lgso_layout(lgso)
         report("kOff_LgsoData_Stride", stride, rec("kOff_LgsoData_Stride"),

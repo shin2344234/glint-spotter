@@ -210,8 +210,8 @@ namespace gs::dump
             // The sub-object's offset comes from signatures.h: 2944 moved it
             // from +0x438 to +0x440, and a copy here would have stayed behind.
             if (comp < 0x10000 ||
-                !gs::rtti::Readable(reinterpret_cast<const void*>(comp), gs::sig::kOff_Gimmick_Sub + 8)) return;
-            sub = *reinterpret_cast<const uintptr_t*>(comp + gs::sig::kOff_Gimmick_Sub);
+                !gs::rtti::Readable(reinterpret_cast<const void*>(comp), gs::sig::GimmickSub() + 8)) return;
+            sub = *reinterpret_cast<const uintptr_t*>(comp + gs::sig::GimmickSub());
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {

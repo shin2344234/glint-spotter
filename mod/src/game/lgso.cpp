@@ -50,11 +50,12 @@ namespace
     int g_tally = -1;                    // the nameless count the table was last read at
 
     // Row i's record, or 0 for a row the game has not built yet. 3663's
-    // container: 0x18-byte entries at [manager + 0x20], record at +0x08.
+    // container: 0x18-byte entries at [manager + 0x20], record at +0x08;
+    // 3840's is 0x30-byte entries at [manager + 0x18], record at +0x20.
     uintptr_t RowRecord(uintptr_t rows, uint32_t i)
     {
         return *reinterpret_cast<const uintptr_t*>(
-            rows + static_cast<uintptr_t>(i) * gs::sig::kOff_Table_RowStride + gs::sig::kOff_Table_RowRecord);
+            rows + static_cast<uintptr_t>(i) * gs::sig::Table().stride + gs::sig::Table().record);
     }
 
     // The manager, straight from the global its own vtable maintains.
@@ -138,12 +139,13 @@ namespace
         uint32_t built = 0, seen = 0;
         __try
         {
-            const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
+            const gs::sig::TableLayout tl = gs::sig::Table();
+            const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + tl.count);
             seen = count;
-            const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Rows);
+            const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + tl.rows);
             if (!count || count > 100000 || rows < 0x10000) return 0;
             if (!gs::rtti::ReadableCached(reinterpret_cast<const void*>(rows),
-                                          static_cast<size_t>(count) * gs::sig::kOff_Table_RowStride)) return 0;
+                                          static_cast<size_t>(count) * tl.stride)) return 0;
             for (uint32_t i = 0; i < count && n < cap; ++i)
             {
                 const uintptr_t rec = RowRecord(rows, i);
@@ -461,11 +463,12 @@ namespace gs::lgso
         if (!mgr) { GS_LOG("[cat] no manager"); return; }
         __try
         {
-            const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
-            const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Rows);
+            const gs::sig::TableLayout tl = gs::sig::Table();
+            const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + tl.count);
+            const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + tl.rows);
             if (!count || count > 100000 || rows < 0x10000) return;
             if (!gs::rtti::Readable(reinterpret_cast<const void*>(rows),
-                                    static_cast<size_t>(count) * gs::sig::kOff_Table_RowStride)) return;
+                                    static_cast<size_t>(count) * tl.stride)) return;
             int shownRecords = 0;
             for (uint32_t i = 0; i < count && shownRecords < maxRecords; ++i)
             {

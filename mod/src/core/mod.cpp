@@ -213,20 +213,21 @@ namespace
         }
         const char* cls = gs::rtti::VtableClassName(
             reinterpret_cast<const void*>(*reinterpret_cast<const uintptr_t*>(mgr)));
-        const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
-        const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + gs::sig::kOff_Lgso_Rows);
+        const gs::sig::TableLayout tl = gs::sig::Table();
+        const uint32_t count = *reinterpret_cast<const uint32_t*>(mgr + tl.count);
+        const uintptr_t rows = *reinterpret_cast<const uintptr_t*>(mgr + tl.rows);
         GS_LOG_OK("[lgso] manager 0x%p (%s) via the global, %u record(s), rows at 0x%p",
                   reinterpret_cast<void*>(mgr), cls ? ShortName(cls) : "?", count,
                   reinterpret_cast<void*>(rows));
         if (!count || count > 100000 || rows < 0x10000) return;
         if (!gs::rtti::Readable(reinterpret_cast<const void*>(rows),
-                                static_cast<size_t>(count) * gs::sig::kOff_Table_RowStride)) return;
+                                static_cast<size_t>(count) * tl.stride)) return;
 
         const gs::player::Pos pp = gs::player::Read();
-        auto rowRecord = [rows](uint32_t i)
+        auto rowRecord = [rows, tl](uint32_t i)
         {
             return *reinterpret_cast<const uintptr_t*>(
-                rows + static_cast<uintptr_t>(i) * gs::sig::kOff_Table_RowStride + gs::sig::kOff_Table_RowRecord);
+                rows + static_cast<uintptr_t>(i) * tl.stride + tl.record);
         };
 
         // The whole table, then the handful nearest the player.
@@ -525,7 +526,7 @@ namespace
                 GS_LOG_OK("ClientGimmickActorComponent vtable at +0x%08llX (%s); glint byte at +0x%llX",
                           static_cast<unsigned long long>(gvt - base),
                           asRecorded ? "as recorded" : "by RTTI, the record is stale",
-                          static_cast<unsigned long long>(gs::sig::kOff_Gimmick_DetectTgt));
+                          static_cast<unsigned long long>(gs::sig::GimmickDetectTgt()));
             }
             else
             {
@@ -964,6 +965,7 @@ namespace
         // build. Absent on a stripped or repacked exe, which is itself worth
         // seeing in a log.
         char ver[64] = "no version resource";
+        unsigned build = 0;
         DWORD ignored = 0;
         const DWORD infoBytes = GetFileVersionInfoSizeW(path, &ignored);
         if (infoBytes)
@@ -980,8 +982,14 @@ namespace
                           static_cast<unsigned>(LOWORD(ffi->dwFileVersionMS)),
                           static_cast<unsigned>(HIWORD(ffi->dwFileVersionLS)),
                           static_cast<unsigned>(LOWORD(ffi->dwFileVersionLS)));
+                build = LOWORD(ffi->dwFileVersionLS);
             }
         }
+        // Layouts that differ between builds are chosen here, before anything
+        // reads them. No version resource gets the newest layout.
+        gs::sig::SelectBuild(build);
+        GS_LOG("layout: %s (build %u, the newer layout starts at %u)",
+               gs::sig::NewLayout() ? "3840 and later" : "3732 and earlier", build, gs::sig::kBuildNewLayout);
 
         WIN32_FILE_ATTRIBUTE_DATA fad{};
         if (GetFileAttributesExW(path, GetFileExInfoStandard, &fad))
@@ -1046,11 +1054,11 @@ namespace
         const auto* at = reinterpret_cast<const void*>(base + rva);
         if (!gs::rtti::Readable(at, 8)) return;
         mgr = *reinterpret_cast<const uintptr_t*>(at);
-        // The row count, at +0x28 since 3663's container change; +0x08 holds
-        // the table's name now.
+        // The row count, at +0x28 from 3663 to 3732 and +0x20 on 3840; +0x08 held
+        // the table's name on 3663 to 3732.
         if (mgr < 0x10000 ||
-            !gs::rtti::Readable(reinterpret_cast<const void*>(mgr + gs::sig::kOff_Lgso_Count), 4)) return;
-        rows = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::kOff_Lgso_Count);
+            !gs::rtti::Readable(reinterpret_cast<const void*>(mgr + gs::sig::Table().count), 4)) return;
+        rows = *reinterpret_cast<const uint32_t*>(mgr + gs::sig::Table().count);
         if (!rows) return;   // not loaded yet
         said = true;
         gs::aim::SetModeTableRows(rows);
