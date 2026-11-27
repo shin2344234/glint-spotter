@@ -9,7 +9,7 @@ all and press a button, and it pins that instead. The pin lands on the world
 map where the thing stands, so you can walk away and come back to it, and the
 map's own Remove Marker takes it off again when you are done.
 
-An ASI plugin for Crimson Desert, game version 2.05.01, exe 1.0.0.3732, the 18 November update. Read the limitations
+An ASI plugin for Crimson Desert, game version 2.06.00, exe 1.0.0.3840, the 26 November update. Read the limitations
 before you install it.
 
 ## What it does
@@ -203,8 +203,18 @@ behind a paid tier.
 
 ## Compatibility
 
-Built against Crimson Desert executable 1.0.0.3732, game version 2.05.01, the 18 November update. A
-game patch moves the addresses it reads, and the mod checks each one against the
+Built against Crimson Desert executable 1.0.0.3840, game version 2.06.00, the 26 November update. On
+game version 2.05.01, exe 1.0.0.3732, use 1.1.43, which is the last build made for it.
+
+New in 1.1.44. The 26 November patch moved every address the mod reads and
+changed five layouts, so 1.1.44 is the port to 3840, and it ran in my
+game on 26 November with no error lines in the log. It is not tested in play,
+though. Nothing in that log shows a pin landing, so the new `Notice=1` setting has
+never been seen working. Please report anything that looks wrong. `Notice=1`
+puts "Glint marked" on screen for two seconds when a pin lands, and it is the
+only other change.
+
+A game patch moves the addresses it reads, and the mod checks each one against the
 running game before touching it, so a patched game gets a mod that does nothing
 rather than a crash. Since 1.1.40 it also finds the level gimmick table, the
 flash check and the game's marker calls again at startup when a patch has moved
